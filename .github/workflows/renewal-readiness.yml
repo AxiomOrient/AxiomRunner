@@ -1,0 +1,60 @@
+name: Renewal Readiness
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  renewal-readiness:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo build outputs
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run core purity check
+        run: bash scripts/check_core_purity.sh
+
+      - name: Run renewal readiness gate
+        env:
+          BENCH_PROFILE: "release"
+          BENCH_RECORDS: "10000"
+          BENCH_ITERATIONS: "25"
+          BENCH_WARMUP: "3"
+          BENCH_REQUIRED_CONSECUTIVE_PASSES: "3"
+          BENCH_MAX_PASSES: "3"
+          BENCH_REDUCE_P95_MAX_MS: "0.2"
+          BENCH_MEMORY_P95_MAX_MS: "30"
+          BENCH_GATEWAY_P95_MAX_MS: "10"
+        run: bash scripts/run_renewal_readiness.sh
+
+      - name: Run capability floor gate
+        env:
+          PARITY_REQUIRED_SCORE: ${{ vars.PARITY_REQUIRED_SCORE || '52' }}
+          PARITY_MIN_CLI_SURFACE: ${{ vars.PARITY_MIN_CLI_SURFACE || '100' }}
+          PARITY_MIN_RUNTIME_EXECUTABILITY: ${{ vars.PARITY_MIN_RUNTIME_EXECUTABILITY || '85' }}
+          PARITY_MIN_ADAPTER_BREADTH: ${{ vars.PARITY_MIN_ADAPTER_BREADTH || '62' }}
+          PARITY_MIN_MEMORY_LIFECYCLE: ${{ vars.PARITY_MIN_MEMORY_LIFECYCLE || '72' }}
+          PARITY_MIN_OPS_LIFECYCLE: ${{ vars.PARITY_MIN_OPS_LIFECYCLE || '36' }}
+          PARITY_MIN_OBSERVABILITY_PERF: ${{ vars.PARITY_MIN_OBSERVABILITY_PERF || '74' }}
+        run: bash scripts/check_capability_floor.sh
+
+      - name: Upload renewal readiness artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: renewal-readiness-${{ github.run_id }}
+          path: |
+            target/release-readiness/
+            target/transition-gates/
+            target/capability-floor/
+            benchmarks/
+          if-no-files-found: warn

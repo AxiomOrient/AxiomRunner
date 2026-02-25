@@ -1,0 +1,40 @@
+# Generated LLM fixtures (keep local by default; commit only curated sets explicitly)
+tests/fixtures/llm/
+
+# Rust
+target/
+packages/apps/axiom/src-tauri/binaries/axiom-cli*
+!packages/apps/axiom/src-tauri/binaries/README.md
+
+# Node
+node_modules/
+dist/
+.test-dist/
+.workspace-test-dist/
+
+# Local config/secrets
+.env
+.axiom/
+
+# Editor/OS noise
+.DS_Store
+
+# Local logs
+logs/
+
+# Project runtime system outputs (generated)
+project/system/logbook.jsonl
+project/system/logbook.md
+project/system/snapshot.json*
+project/system/ledger/
+project/system/runs/
+project/system/recovery/
+project/system/specpacks/
+
+# Local process outputs (generated reports, sign-offs, etc.)
+var/
+
+# Tool-specific local state
+.claude/
+.serena/
+.axiom-sessions/

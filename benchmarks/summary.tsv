@@ -1,0 +1,4 @@
+pass	target	records	iterations	warmup	p50_ms_per_operation	p95_ms_per_operation	threshold_p95_ms_per_operation	target_gate	pass_gate	consecutive_passes	report_file
+1	core_reduce_path	100	1	0	0.000597	0.000597	0.2	pass	pass	1	/Users/axient/repository/axiomAi/benchmarks/raw/perf_suite_pass1.json
+1	memory_recall_path	100	1	0	0.000140	0.000140	30	pass	pass	1	/Users/axient/repository/axiomAi/benchmarks/raw/perf_suite_pass1.json
+1	gateway_validation_request_path	100	1	0	0.025531	0.025531	10	pass	pass	1	/Users/axient/repository/axiomAi/benchmarks/raw/perf_suite_pass1.json

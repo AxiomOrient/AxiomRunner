@@ -1,0 +1,316 @@
+use std::collections::{BTreeMap, BTreeSet};
+use std::fs;
+use std::io::ErrorKind;
+use std::path::{Path, PathBuf};
+
+use crate::error::{AdapterError, AdapterResult, RetryClass};
+use crate::memory::{
+    MemoryError, MemoryRecord, MemoryResult, create_parent_dir, hex_decode, hex_encode, now_millis,
+    record_terms, sort_records, tokenize_terms,
+};
+
+#[derive(Debug, Clone)]
+pub struct MarkdownMemoryAdapter {
+    file_path: PathBuf,
+    records: BTreeMap<String, MemoryRecord>,
+    index: MarkdownIndexState,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct MarkdownIndexState {
+    term_to_keys: BTreeMap<String, BTreeSet<String>>,
+    key_to_terms: BTreeMap<String, Vec<String>>,
+}
+
+impl MarkdownIndexState {
+    fn from_records(records: &BTreeMap<String, MemoryRecord>) -> Self {
+        let mut state = Self::default();
+        for record in records.values() {
+            state.upsert_record(record);
+        }
+        state
+    }
+
+    fn upsert_record(&mut self, record: &MemoryRecord) {
+        self.remove_key(&record.key);
+
+        let terms = record_terms(&record.key, &record.value);
+        for term in &terms {
+            self.term_to_keys
+                .entry(term.clone())
+                .or_default()
+                .insert(record.key.clone());
+        }
+
+        self.key_to_terms.insert(record.key.clone(), terms);
+    }
+
+    fn remove_key(&mut self, key: &str) {
+        let Some(terms) = self.key_to_terms.remove(key) else {
+            return;
+        };
+
+        for term in terms {
+            let should_remove = match self.term_to_keys.get_mut(&term) {
+                Some(keys) => {
+                    keys.remove(key);
+                    keys.is_empty()
+                }
+                None => false,
+            };
+
+            if should_remove {
+                self.term_to_keys.remove(&term);
+            }
+        }
+    }
+
+    fn matched_keys(&self, query: &str) -> Vec<String> {
+        let terms = tokenize_terms(query);
+        if terms.is_empty() {
+            return Vec::new();
+        }
+
+        let mut candidates: Option<BTreeSet<String>> = None;
+        for term in terms {
+            let Some(keys) = self.term_to_keys.get(&term) else {
+                return Vec::new();
+            };
+
+            candidates = Some(match candidates {
+                Some(existing) => existing.intersection(keys).cloned().collect(),
+                None => keys.clone(),
+            });
+
+            if candidates.as_ref().is_some_and(BTreeSet::is_empty) {
+                return Vec::new();
+            }
+        }
+
+        candidates
+            .unwrap_or_default()
+            .into_iter()
+            .collect::<Vec<String>>()
+    }
+}
+
+impl MarkdownMemoryAdapter {
+    pub fn new(path: impl Into<PathBuf>) -> AdapterResult<Self> {
+        let file_path = path.into();
+        create_parent_dir(&file_path)
+            .map_err(|e| map_memory_error("memory.markdown.new", e))?;
+
+        let records = if file_path.exists() {
+            load_markdown_records(&file_path)
+                .map_err(|e| map_memory_error("memory.markdown.new", e))?
+        } else {
+            BTreeMap::new()
+        };
+
+        let adapter = Self {
+            file_path,
+            index: MarkdownIndexState::from_records(&records),
+            records,
+        };
+        adapter.persist()
+            .map_err(|e| map_memory_error("memory.markdown.new", e))?;
+        Ok(adapter)
+    }
+
+    fn persist(&self) -> MemoryResult<()> {
+        let mut content = String::from(
+            "# ZeroClaw Markdown Memory\n\n<!-- format: zeroclaw-memory-markdown-v1 -->\n",
+        );
+
+        for record in self.records.values() {
+            let line = format!(
+                "- key_hex={};updated_at={};value_hex={}\n",
+                hex_encode(record.key.as_bytes()),
+                record.updated_at,
+                hex_encode(record.value.as_bytes())
+            );
+            content.push_str(&line);
+        }
+
+        let temp_path = self.file_path.with_extension("tmp");
+        fs::write(&temp_path, &content)?;
+        match fs::rename(&temp_path, &self.file_path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == ErrorKind::AlreadyExists => {
+                fs::remove_file(&self.file_path)?;
+                fs::rename(&temp_path, &self.file_path)?;
+            }
+            Err(error) => {
+                let _ = fs::remove_file(&temp_path);
+                return Err(error.into());
+            }
+        }
+        Ok(())
+    }
+}
+
+impl crate::contracts::MemoryAdapter for MarkdownMemoryAdapter {
+    fn id(&self) -> &str {
+        "memory.markdown"
+    }
+
+    fn health(&self) -> crate::contracts::AdapterHealth {
+        let write_check = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&self.file_path)
+            .map(|_| true)
+            .unwrap_or(false);
+        if write_check {
+            crate::contracts::AdapterHealth::Healthy
+        } else {
+            crate::contracts::AdapterHealth::Degraded
+        }
+    }
+
+    fn store(&mut self, key: &str, value: &str) -> AdapterResult<()> {
+        let record = MemoryRecord {
+            key: key.to_string(),
+            value: value.to_string(),
+            updated_at: now_millis(),
+        };
+        self.records.insert(key.to_string(), record.clone());
+        self.index.upsert_record(&record);
+        self.persist().map_err(|e| map_memory_error("memory.markdown.store", e))
+    }
+
+    fn recall(&self, query: &str, limit: usize) -> AdapterResult<Vec<crate::contracts::MemoryEntry>> {
+        let mut records = if query.trim().is_empty() {
+            self.records.values().cloned().collect::<Vec<MemoryRecord>>()
+        } else {
+            self.index
+                .matched_keys(query)
+                .into_iter()
+                .filter_map(|key| self.records.get(&key).cloned())
+                .collect::<Vec<MemoryRecord>>()
+        };
+        sort_records(&mut records);
+        if limit > 0 {
+            records.truncate(limit);
+        }
+        Ok(records.into_iter().map(record_to_entry).collect())
+    }
+
+    fn get(&self, key: &str) -> AdapterResult<Option<crate::contracts::MemoryEntry>> {
+        Ok(self.records.get(key).cloned().map(record_to_entry))
+    }
+
+    fn list(&self) -> AdapterResult<Vec<crate::contracts::MemoryEntry>> {
+        let mut records: Vec<MemoryRecord> = self.records.values().cloned().collect();
+        sort_records(&mut records);
+        Ok(records.into_iter().map(record_to_entry).collect())
+    }
+
+    fn delete(&mut self, key: &str) -> AdapterResult<bool> {
+        let existed = self.records.remove(key).is_some();
+        if existed {
+            self.index.remove_key(key);
+            self.persist().map_err(|e| map_memory_error("memory.markdown.delete", e))?;
+        }
+        Ok(existed)
+    }
+
+    fn count(&self) -> AdapterResult<usize> {
+        Ok(self.records.len())
+    }
+}
+
+fn record_to_entry(record: MemoryRecord) -> crate::contracts::MemoryEntry {
+    crate::contracts::MemoryEntry {
+        key: record.key,
+        value: record.value,
+        updated_at: record.updated_at,
+    }
+}
+
+fn load_markdown_records(path: &Path) -> MemoryResult<BTreeMap<String, MemoryRecord>> {
+    let content = fs::read_to_string(path)?;
+    let mut records = BTreeMap::new();
+
+    for line in content.lines() {
+        let line = line.trim();
+        if !line.starts_with("- key_hex=") {
+            continue;
+        }
+
+        let payload = &line[2..];
+        let mut key_hex = None;
+        let mut value_hex = None;
+        let mut updated_at = None;
+
+        for pair in payload.split(';') {
+            let mut split = pair.splitn(2, '=');
+            let field = split.next().unwrap_or_default().trim();
+            let value = split.next().unwrap_or_default().trim();
+
+            match field {
+                "key_hex" => key_hex = Some(value.to_string()),
+                "value_hex" => value_hex = Some(value.to_string()),
+                "updated_at" => {
+                    let parsed = value.parse::<u64>().map_err(|error| {
+                        MemoryError::InvalidData(format!(
+                            "invalid markdown updated_at `{value}`: {error}"
+                        ))
+                    })?;
+                    updated_at = Some(parsed);
+                }
+                _ => {}
+            }
+        }
+
+        let key_hex = key_hex.ok_or_else(|| {
+            MemoryError::InvalidData(format!("missing key_hex in markdown line `{line}`"))
+        })?;
+        let value_hex = value_hex.ok_or_else(|| {
+            MemoryError::InvalidData(format!("missing value_hex in markdown line `{line}`"))
+        })?;
+        let updated_at = updated_at.ok_or_else(|| {
+            MemoryError::InvalidData(format!("missing updated_at in markdown line `{line}`"))
+        })?;
+
+        let key_bytes = hex_decode(&key_hex).ok_or_else(|| {
+            MemoryError::InvalidData(format!("invalid hex key in markdown line `{line}`"))
+        })?;
+        let key = String::from_utf8(key_bytes).map_err(|error| {
+            MemoryError::InvalidData(format!("invalid utf8 key in markdown line `{line}`: {error}"))
+        })?;
+        let value_bytes = hex_decode(&value_hex).ok_or_else(|| {
+            MemoryError::InvalidData(format!("invalid hex value in markdown line `{line}`"))
+        })?;
+        let value = String::from_utf8(value_bytes).map_err(|error| {
+            MemoryError::InvalidData(format!(
+                "invalid utf8 value in markdown line `{line}`: {error}"
+            ))
+        })?;
+
+        records.insert(
+            key.clone(),
+            MemoryRecord {
+                key,
+                value,
+                updated_at,
+            },
+        );
+    }
+
+    Ok(records)
+}
+
+fn map_memory_error(operation: &'static str, error: MemoryError) -> AdapterError {
+    match error {
+        MemoryError::Io(inner) => {
+            AdapterError::failed(operation, inner.to_string(), RetryClass::Retryable)
+        }
+        MemoryError::Backend(reason) => {
+            AdapterError::failed(operation, reason, RetryClass::Retryable)
+        }
+        MemoryError::InvalidData(reason) => {
+            AdapterError::failed(operation, reason, RetryClass::NonRetryable)
+        }
+    }
+}

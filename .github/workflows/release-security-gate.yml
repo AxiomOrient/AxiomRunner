@@ -1,0 +1,27 @@
+name: G-2 Release Security Gate
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  release-security-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo build outputs
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run release security gate test target (debug contract)
+        run: cargo test -q -p axiom_apps --test release_security_gate
+
+      - name: Run release security gate test target (release profile gate)
+        run: cargo test -q --release -p axiom_apps --test release_security_gate
