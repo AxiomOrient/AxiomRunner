@@ -28,6 +28,8 @@
 | `AXIOM_CHANNEL_DISCORD_WEBHOOK` | — | Discord Webhook URL (Discord 채널 사용 시 필요) |
 | `AXIOM_CHANNEL_SLACK_WEBHOOK` | — | Slack Incoming Webhook URL (Slack 채널 사용 시 필요) |
 | `AXIOM_GATEWAY_REQUESTS` | — | 게이트웨이 요청 설정 경로 |
+| `COMPOSIO_API_KEY` | — | Composio platform API 키 (`integrations info composio` 참조) |
+| `H2_ALLOWED_DIFF` | `0` | h2_verify 바이너리의 허용 헤더 차이 임계값 |
 
 > **주의**: `anthropic` 프로바이더는 직접 지원하지 않습니다. Anthropic 모델을 사용하려면 `openrouter` 프로바이더와 함께 Anthropic 모델 ID를 지정하세요.
 

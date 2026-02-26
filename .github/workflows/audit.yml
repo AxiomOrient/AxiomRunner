@@ -19,3 +19,12 @@ jobs:
         run: cargo install cargo-audit --locked
       - name: Security audit
         run: cargo audit --deny warnings
+
+  test:
+    name: Run all tests with features
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Run all tests with features
+        run: cargo test --workspace --all-features

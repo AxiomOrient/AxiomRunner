@@ -108,7 +108,7 @@ fn build_install_instructions(entry: &IntegrationEntry) -> Vec<String> {
     }
 }
 
-const INTEGRATION_CATALOG: [IntegrationEntry; 22] = [
+const INTEGRATION_CATALOG: [IntegrationEntry; 23] = [
     IntegrationEntry {
         name: "telegram",
         category: IntegrationCategory::Chat,
@@ -255,6 +255,13 @@ const INTEGRATION_CATALOG: [IntegrationEntry; 22] = [
         status: IntegrationStatus::Available,
         transport: "headless_browser",
         summary: "browser automation tool integration",
+    },
+    IntegrationEntry {
+        name: "composio",
+        category: IntegrationCategory::Platform,
+        status: IntegrationStatus::Available,
+        transport: "composio_rest_api",
+        summary: "composio tool execution and integration platform",
     },
     IntegrationEntry {
         name: "cron",

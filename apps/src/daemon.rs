@@ -24,6 +24,7 @@ const ENV_DAEMON_WORK_ITEMS: &str = "AXIOM_DAEMON_WORK_ITEMS";
 const ENV_DAEMON_HEALTH_PATH: &str = "AXIOM_DAEMON_HEALTH_PATH";
 const ENV_DAEMON_HEALTH_STATE_PATH: &str = "AXIOM_DAEMON_HEALTH_STATE_PATH";
 const ENV_DAEMON_MAX_TICKS: &str = "AXIOM_DAEMON_MAX_TICKS";
+const ENV_DAEMON_IDLE_SECS: &str = "AXIOM_DAEMON_IDLE_SECS";
 const ENV_DAEMON_CHANNEL: &str = "AXIOM_RUNTIME_CHANNEL";
 const DEFAULT_DAEMON_WORK_ITEM: &str = "startup-check";
 const DEFAULT_DAEMON_MAX_TICKS: u64 = 32;
@@ -158,8 +159,18 @@ pub fn execute_daemon_run(input: DaemonRunInput) -> io::Result<DaemonRunSummary>
         loop_ref.tick_count() >= max_ticks
     })?;
 
-    // Shut down channel thread gracefully.
-    estop.halt();
+    // If AXIOM_DAEMON_IDLE_SECS is set, keep the process alive (and metrics server
+    // reachable) for that many seconds before exiting.
+    if let Ok(raw) = env::var(ENV_DAEMON_IDLE_SECS)
+        && let Ok(secs) = raw.trim().parse::<u64>()
+        && secs > 0
+    {
+        println!("daemon idle sleep={secs}s");
+        std::thread::sleep(Duration::from_secs(secs));
+    }
+
+    // Join channel thread first so the channel runs for its full lifetime,
+    // then signal estop for any remaining cleanup.
     if let Some(handle) = channel_thread {
         match handle.join() {
             Ok(Ok(processed)) => {
@@ -169,6 +180,7 @@ pub fn execute_daemon_run(input: DaemonRunInput) -> io::Result<DaemonRunSummary>
             Err(_) => eprintln!("daemon channel thread panicked"),
         }
     }
+    estop.halt();
 
     Ok(DaemonRunSummary {
         report,
