@@ -1,5 +1,5 @@
 use crate::contracts::{AdapterHealth, ChannelAdapter, ChannelMessage, ChannelSendReceipt};
-use crate::error::{AdapterError, AdapterResult, RetryClass};
+use crate::error::{classify_reqwest_error, AdapterError, AdapterResult, RetryClass};
 use std::collections::VecDeque;
 
 const MAX_WHATSAPP_BODY_BYTES: usize = 4096;
@@ -9,21 +9,6 @@ const MAX_ERROR_BODY_PREVIEW: usize = 200;
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-/// Classify a reqwest error without exposing the URL or sensitive headers.
-/// The api_token is part of the Authorization header and must never appear
-/// in error messages that propagate to callers.
-fn classify_reqwest_error(e: &reqwest::Error) -> &'static str {
-    if e.is_timeout() {
-        "timeout"
-    } else if e.is_connect() {
-        "connection failed"
-    } else if e.is_status() {
-        "unexpected status"
-    } else {
-        "request failed"
-    }
-}
 
 // ---------------------------------------------------------------------------
 // Config

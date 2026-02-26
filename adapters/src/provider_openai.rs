@@ -1,20 +1,5 @@
 use crate::contracts::{AdapterHealth, ProviderAdapter, ProviderRequest, ProviderResponse};
-use crate::error::{AdapterError, AdapterResult, RetryClass};
-
-/// Classify a reqwest transport error without exposing the base URL or
-/// Authorization header contents (Bearer token) that reqwest may embed in
-/// its error Display output.
-fn classify_reqwest_error(e: &reqwest::Error) -> &'static str {
-    if e.is_timeout() {
-        "timeout"
-    } else if e.is_connect() {
-        "connection failed"
-    } else if e.is_status() {
-        "unexpected status"
-    } else {
-        "request failed"
-    }
-}
+use crate::error::{classify_reqwest_error, AdapterError, AdapterResult, RetryClass};
 
 pub struct OpenAiCompatProvider {
     id_str: &'static str,

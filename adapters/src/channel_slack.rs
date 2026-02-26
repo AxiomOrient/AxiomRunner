@@ -1,24 +1,10 @@
 use crate::contracts::{AdapterHealth, ChannelAdapter, ChannelMessage, ChannelSendReceipt};
-use crate::error::{AdapterError, AdapterResult, RetryClass};
+use crate::error::{classify_reqwest_error, AdapterError, AdapterResult, RetryClass};
 use std::collections::VecDeque;
 
 const MAX_SLACK_BODY_BYTES: usize = 4000;
 /// Maximum bytes of an API error response body included in error messages.
 const MAX_ERROR_BODY_PREVIEW: usize = 200;
-
-/// Classify a reqwest error without exposing the URL or any sensitive headers.
-/// The webhook URL is a secret; it must never appear in error messages.
-fn classify_reqwest_error(e: &reqwest::Error) -> &'static str {
-    if e.is_timeout() {
-        "timeout"
-    } else if e.is_connect() {
-        "connection failed"
-    } else if e.is_status() {
-        "unexpected status"
-    } else {
-        "request failed"
-    }
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SlackConfig {

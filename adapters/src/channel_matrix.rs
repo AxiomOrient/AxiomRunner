@@ -1,5 +1,5 @@
 use crate::contracts::{AdapterHealth, ChannelAdapter, ChannelMessage, ChannelSendReceipt};
-use crate::error::{AdapterError, AdapterResult, RetryClass};
+use crate::error::{classify_reqwest_error, AdapterError, AdapterResult, RetryClass};
 use std::collections::VecDeque;
 
 const MAX_MATRIX_BODY_BYTES: usize = 4000;
@@ -24,21 +24,6 @@ fn sanitize_room_id_for_filename(room_id: &str) -> String {
         .chars()
         .map(|c| if c.is_alphanumeric() { c } else { '_' })
         .collect()
-}
-
-/// Classify a reqwest error without exposing the URL or sensitive headers.
-/// The access_token is part of the Authorization header and must never appear
-/// in error messages that propagate to callers.
-fn classify_reqwest_error(e: &reqwest::Error) -> &'static str {
-    if e.is_timeout() {
-        "timeout"
-    } else if e.is_connect() {
-        "connection failed"
-    } else if e.is_status() {
-        "unexpected status"
-    } else {
-        "request failed"
-    }
 }
 
 // ---------------------------------------------------------------------------

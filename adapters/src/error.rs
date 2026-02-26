@@ -155,3 +155,18 @@ impl fmt::Display for AdapterError {
 impl std::error::Error for AdapterError {}
 
 pub type AdapterResult<T> = Result<T, AdapterError>;
+
+/// Classify a reqwest error into a `&'static str` label suitable for
+/// AdapterError messages. Using `&'static str` ensures that no URL
+/// or token information from the `reqwest::Error` can leak into logs.
+pub(crate) fn classify_reqwest_error(e: &reqwest::Error) -> &'static str {
+    if e.is_timeout() {
+        "timeout"
+    } else if e.is_connect() {
+        "connection failed"
+    } else if e.is_status() {
+        "unexpected status"
+    } else {
+        "request failed"
+    }
+}
