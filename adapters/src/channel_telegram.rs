@@ -195,14 +195,25 @@ impl ChannelAdapter for TelegramChannelAdapter {
                 })
             }
             TelegramTransport::Live { http, .. } => {
-                let chat_id = self
-                    .config
-                    .allowed_users
-                    .first()
-                    .ok_or_else(|| {
-                        AdapterError::invalid_input("telegram.chat_id", "no allowed users configured")
-                    })?
-                    .clone();
+                // Use topic as chat_id (set by drain() from message.chat.id).
+                // Fall back to allowed_users[0] only when topic is absent or non-numeric.
+                let chat_id = {
+                    let topic = message.topic.trim();
+                    if !topic.is_empty() && topic.parse::<i64>().is_ok() {
+                        topic.to_string()
+                    } else {
+                        self.config
+                            .allowed_users
+                            .first()
+                            .ok_or_else(|| {
+                                AdapterError::invalid_input(
+                                    "telegram.chat_id",
+                                    "no allowed users configured",
+                                )
+                            })?
+                            .clone()
+                    }
+                };
 
                 // SECURITY: URL contains bot_token. Never include this URL in error messages.
                 let url = format!(
@@ -335,7 +346,13 @@ impl ChannelAdapter for TelegramChannelAdapter {
                                 continue;
                             }
 
-                            messages.push(ChannelMessage::new("telegram", text));
+                            // Extract chat_id from message.chat.id; skip if absent.
+                            let chat_id = match update["message"]["chat"]["id"].as_i64() {
+                                Some(id) => id.to_string(),
+                                None => continue,
+                            };
+
+                            messages.push(ChannelMessage::new(chat_id, text));
                         }
                     }
                 }
