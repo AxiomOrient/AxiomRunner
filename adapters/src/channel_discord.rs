@@ -181,9 +181,13 @@ impl ChannelAdapter for DiscordChannelAdapter {
                 if !status.is_success() {
                     let raw = resp.text().unwrap_or_default();
                     let preview = if raw.len() > MAX_ERROR_BODY_PREVIEW {
-                        &raw[..MAX_ERROR_BODY_PREVIEW]
+                        let end = (0..=MAX_ERROR_BODY_PREVIEW)
+                            .rev()
+                            .find(|&i| raw.is_char_boundary(i))
+                            .unwrap_or(0);
+                        &raw[..end]
                     } else {
-                        &raw
+                        raw.as_str()
                     };
                     return Err(AdapterError::failed(
                         "discord_webhook.send",

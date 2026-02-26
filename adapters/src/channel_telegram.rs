@@ -1,26 +1,11 @@
 use crate::contracts::{AdapterHealth, ChannelAdapter, ChannelMessage, ChannelSendReceipt};
-use crate::error::{AdapterError, AdapterResult};
+use crate::error::{classify_reqwest_error, AdapterError, AdapterResult};
 use std::collections::VecDeque;
 
 const MAX_TELEGRAM_BODY_BYTES: usize = 4096;
 /// Maximum bytes of an API error response body included in error messages.
 /// Caps exposure of any sensitive data that the remote may echo back.
 const MAX_ERROR_BODY_PREVIEW: usize = 200;
-
-/// Classify a reqwest error without exposing the URL or any sensitive headers.
-/// The URL built for Telegram contains the bot token, so it must never appear
-/// in error messages that propagate to callers.
-fn classify_reqwest_error(e: &reqwest::Error) -> &'static str {
-    if e.is_timeout() {
-        "timeout"
-    } else if e.is_connect() {
-        "connection failed"
-    } else if e.is_status() {
-        "unexpected status"
-    } else {
-        "request failed"
-    }
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TelegramConfig {
@@ -240,9 +225,13 @@ impl ChannelAdapter for TelegramChannelAdapter {
                 if !status.is_success() {
                     let raw = resp.text().unwrap_or_default();
                     let preview = if raw.len() > MAX_ERROR_BODY_PREVIEW {
-                        &raw[..MAX_ERROR_BODY_PREVIEW]
+                        let end = (0..=MAX_ERROR_BODY_PREVIEW)
+                            .rev()
+                            .find(|&i| raw.is_char_boundary(i))
+                            .unwrap_or(0);
+                        &raw[..end]
                     } else {
-                        &raw
+                        raw.as_str()
                     };
                     return Err(AdapterError::failed(
                         "telegram.send",
@@ -304,9 +293,13 @@ impl ChannelAdapter for TelegramChannelAdapter {
                 if !drain_status.is_success() {
                     let raw = resp.text().unwrap_or_default();
                     let preview = if raw.len() > MAX_ERROR_BODY_PREVIEW {
-                        &raw[..MAX_ERROR_BODY_PREVIEW]
+                        let end = (0..=MAX_ERROR_BODY_PREVIEW)
+                            .rev()
+                            .find(|&i| raw.is_char_boundary(i))
+                            .unwrap_or(0);
+                        &raw[..end]
                     } else {
-                        &raw
+                        raw.as_str()
                     };
                     return Err(AdapterError::failed(
                         "telegram.drain",
@@ -326,7 +319,9 @@ impl ChannelAdapter for TelegramChannelAdapter {
                 let mut messages = Vec::new();
                 if let Some(updates) = body["result"].as_array() {
                     for update in updates {
-                        let update_id = update["update_id"].as_i64().unwrap_or(0);
+                        let Some(update_id) = update["update_id"].as_i64() else {
+                            continue;
+                        };
                         *next_offset = update_id + 1;
 
                         // Persist offset to file; ignore write failures to avoid

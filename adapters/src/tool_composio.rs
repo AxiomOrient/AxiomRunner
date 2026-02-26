@@ -1,22 +1,9 @@
 use crate::contracts::{AdapterHealth, ToolAdapter, ToolCall, ToolOutput};
-use crate::error::{AdapterError, AdapterResult, RetryClass};
+use crate::error::{classify_reqwest_error, AdapterError, AdapterResult, RetryClass};
 
 /// Maximum bytes of a Composio error response body included in error messages.
 /// Limits exposure in case the server echoes back request headers containing the API key.
 const MAX_ERROR_BODY_PREVIEW: usize = 200;
-
-/// Classify a reqwest transport error without exposing the URL or request headers.
-fn classify_reqwest_error(e: &reqwest::Error) -> &'static str {
-    if e.is_timeout() {
-        "timeout"
-    } else if e.is_connect() {
-        "connection failed"
-    } else if e.is_status() {
-        "unexpected status"
-    } else {
-        "request failed"
-    }
-}
 
 /// Composio tool adapter — executes named actions via the Composio API.
 /// Reads COMPOSIO_API_KEY from the environment at construction time.
