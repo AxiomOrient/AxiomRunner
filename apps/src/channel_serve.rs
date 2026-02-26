@@ -7,6 +7,11 @@ use crate::estop::EStop;
 ///
 /// estop이 활성화되거나 max_polls 횟수가 소진되면 종료.
 /// 반환값: 성공적으로 처리된 메시지 수.
+///
+/// # 보안 참고 사항
+/// OTP(TOTP) 게이팅은 CLI 진입점(`execute_agent()`)에만 적용됩니다.
+/// 채널 데몬 경로는 채널 플랫폼의 인증(Telegram `allowed_users` 화이트리스트,
+/// Discord webhook secret 등)으로 보호됩니다.
 pub fn run_channel_serve_loop(
     channel: &mut dyn ChannelAdapter,
     agent: &dyn AgentAdapter,
@@ -50,7 +55,7 @@ pub fn run_channel_serve_loop(
                         Ok(result) => {
                             let reply = extract_reply(&result.kind);
                             if !reply.is_empty() {
-                                let reply_msg = ChannelMessage::new(channel.id().to_owned(), reply);
+                                let reply_msg = ChannelMessage::new(msg.topic.clone(), reply);
                                 if let Err(e) = channel.send(reply_msg) {
                                     eprintln!("channel send error: {e}");
                                 }
@@ -170,7 +175,9 @@ mod tests {
         assert_eq!(processed, 2);
         assert_eq!(channel.outbox.len(), 2);
         assert!(channel.outbox[0].body.contains("echo:hello"));
+        assert_eq!(channel.outbox[0].topic, "mock-channel");
         assert!(channel.outbox[1].body.contains("echo:world"));
+        assert_eq!(channel.outbox[1].topic, "mock-channel");
     }
 
     #[test]
