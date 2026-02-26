@@ -182,7 +182,27 @@ fn execute_channel_serve(poll_interval_secs: u64) -> Result<ChannelResult, Strin
     );
 
     let estop = EStop::new();
-    let processed = run_channel_serve_loop(&mut channel, agent.as_ref(), Some(&estop), interval, None)?;
+    let rag_context: Option<Box<dyn axiom_adapters::contracts::ContextAdapter>> =
+        std::env::var("AXIOM_CONTEXT_ROOT")
+            .ok()
+            .filter(|s| !s.trim().is_empty())
+            .and_then(|root| {
+                axiom_adapters::AxiommeContextAdapter::new(std::path::Path::new(root.trim()))
+                    .map(|a| Box::new(a) as Box<dyn axiom_adapters::contracts::ContextAdapter>)
+                    .map_err(|e| {
+                        eprintln!("channel serve context adapter init failed (RAG disabled): {e}");
+                        e
+                    })
+                    .ok()
+            });
+    let processed = run_channel_serve_loop(
+        &mut channel,
+        agent.as_ref(),
+        Some(&estop),
+        interval,
+        None,
+        rag_context.as_deref(),
+    )?;
     estop.halt();
 
     Ok(ChannelResult::Served {

@@ -11,6 +11,8 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use axiom_adapters::AxiommeContextAdapter;
+use axiom_adapters::contracts::ContextAdapter;
 use crate::estop::EStop;
 
 #[path = "daemon_supervisor.rs"]
@@ -115,6 +117,21 @@ pub fn execute_daemon_run(input: DaemonRunInput) -> io::Result<DaemonRunSummary>
             Ok(mut channel) => match axiom_adapters::build_contract_agent("") {
                 Ok(agent) => {
                     let estop_clone = Arc::clone(&estop);
+                    let rag_context: Option<Box<dyn ContextAdapter>> =
+                        std::env::var("AXIOM_CONTEXT_ROOT")
+                            .ok()
+                            .filter(|s| !s.trim().is_empty())
+                            .and_then(|root| {
+                                AxiommeContextAdapter::new(std::path::Path::new(root.trim()))
+                                    .map(|a| Box::new(a) as Box<dyn ContextAdapter>)
+                                    .map_err(|e| {
+                                        eprintln!(
+                                            "daemon channel context adapter init failed (RAG disabled): {e}"
+                                        );
+                                        e
+                                    })
+                                    .ok()
+                            });
                     Some(std::thread::spawn(move || {
                         crate::channel_serve::run_channel_serve_loop(
                             channel.as_mut(),
@@ -122,6 +139,7 @@ pub fn execute_daemon_run(input: DaemonRunInput) -> io::Result<DaemonRunSummary>
                             Some(estop_clone.as_ref()),
                             Duration::from_secs(2),
                             None,
+                            rag_context.as_deref(),
                         )
                     }))
                 }

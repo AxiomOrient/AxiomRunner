@@ -1,4 +1,4 @@
-use axiom_adapters::contracts::{AgentAdapter, ChannelAdapter, ChannelMessage};
+use axiom_adapters::contracts::{AgentAdapter, ChannelAdapter, ChannelMessage, ContextAdapter};
 
 use crate::agent_loop::{AgentAction, AgentExecutionContext, AgentResultKind, execute_agent_action};
 use crate::estop::EStop;
@@ -18,6 +18,7 @@ pub fn run_channel_serve_loop(
     estop: Option<&EStop>,
     poll_interval: std::time::Duration,
     max_polls: Option<u64>,
+    context: Option<&dyn ContextAdapter>,
 ) -> Result<u64, String> {
     let mut processed = 0u64;
     let mut poll_count = 0u64;
@@ -48,7 +49,7 @@ pub fn run_channel_serve_loop(
                     let ctx = AgentExecutionContext {
                         agent,
                         estop,
-                        context: None,
+                        context,
                     };
 
                     match execute_agent_action(action, ctx) {
@@ -169,8 +170,15 @@ mod tests {
         let agent = EchoAgent;
 
         let processed =
-            run_channel_serve_loop(&mut channel, &agent, None, Duration::from_millis(0), Some(1))
-                .expect("loop should succeed");
+            run_channel_serve_loop(
+                &mut channel,
+                &agent,
+                None,
+                Duration::from_millis(0),
+                Some(1),
+                None,
+            )
+            .expect("loop should succeed");
 
         assert_eq!(processed, 2);
         assert_eq!(channel.outbox.len(), 2);
@@ -189,8 +197,15 @@ mod tests {
         let agent = EchoAgent;
 
         let processed =
-            run_channel_serve_loop(&mut channel, &agent, None, Duration::from_millis(0), Some(1))
-                .expect("loop should succeed");
+            run_channel_serve_loop(
+                &mut channel,
+                &agent,
+                None,
+                Duration::from_millis(0),
+                Some(1),
+                None,
+            )
+            .expect("loop should succeed");
 
         assert_eq!(processed, 1);
         assert_eq!(channel.outbox.len(), 1);
@@ -209,6 +224,7 @@ mod tests {
             Some(&estop),
             Duration::from_millis(0),
             None,
+            None,
         )
         .expect("loop should succeed with estop");
 
@@ -222,8 +238,15 @@ mod tests {
         let agent = EchoAgent;
 
         let processed =
-            run_channel_serve_loop(&mut channel, &agent, None, Duration::from_millis(0), Some(0))
-                .expect("loop should succeed with max_polls=0");
+            run_channel_serve_loop(
+                &mut channel,
+                &agent,
+                None,
+                Duration::from_millis(0),
+                Some(0),
+                None,
+            )
+            .expect("loop should succeed with max_polls=0");
 
         assert_eq!(processed, 0);
     }
