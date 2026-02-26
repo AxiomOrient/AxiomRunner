@@ -374,49 +374,17 @@ impl ChannelAdapter for MatrixChannelAdapter {
                     )
                 })?;
 
-                // Update next_batch token.
-                if let Some(token) = json.get("next_batch").and_then(|v| v.as_str()) {
-                    *next_batch = token.to_owned();
+                // Extract m.text events from the target room, applying allowed_users filter.
+                let (new_batch, messages) = extract_sync_messages(
+                    &json,
+                    room_id.as_str(),
+                    &self.config.allowed_users,
+                );
+
+                // Update next_batch token after extraction.
+                if let Some(token) = new_batch {
+                    *next_batch = token;
                     save_batch_token(batch_path.as_deref(), next_batch);
-                }
-
-                // Extract m.text events from the target room.
-                let mut messages = Vec::new();
-                if let Some(joined) = json
-                    .pointer("/rooms/join")
-                    .and_then(|v| v.as_object())
-                {
-                    // Only collect events from the configured room.
-                    if let Some(room_data) = joined.get(room_id.as_str())
-                        && let Some(events) = room_data
-                            .pointer("/timeline/events")
-                            .and_then(|v| v.as_array())
-                    {
-                        for event in events {
-                            let is_msg = event
-                                .get("type")
-                                .and_then(|t| t.as_str())
-                                .map(|t| t == "m.room.message")
-                                .unwrap_or(false);
-
-                            let is_text = event
-                                .pointer("/content/msgtype")
-                                .and_then(|v| v.as_str())
-                                .map(|t| t == "m.text")
-                                .unwrap_or(false);
-
-                            if is_msg && is_text
-                                && let Some(body_text) = event
-                                    .pointer("/content/body")
-                                    .and_then(|v| v.as_str())
-                            {
-                                messages.push(ChannelMessage::new(
-                                    room_id.clone(),
-                                    body_text,
-                                ));
-                            }
-                        }
-                    }
                 }
 
                 Ok(messages)
@@ -428,6 +396,77 @@ impl ChannelAdapter for MatrixChannelAdapter {
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
+
+/// Extract `m.text` messages from a Matrix `/sync` JSON response for a specific room,
+/// applying the `allowed_users` whitelist filter.
+///
+/// Returns `(next_batch_token, messages)`.  If `allowed_users` is empty every sender is
+/// accepted.  Events without a `sender` field are always skipped.
+fn extract_sync_messages(
+    json: &serde_json::Value,
+    room_id: &str,
+    allowed_users: &[String],
+) -> (Option<String>, Vec<ChannelMessage>) {
+    let next_batch = json
+        .get("next_batch")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_owned());
+
+    let mut messages = Vec::new();
+
+    let Some(joined) = json.pointer("/rooms/join").and_then(|v| v.as_object()) else {
+        return (next_batch, messages);
+    };
+
+    let Some(room_data) = joined.get(room_id) else {
+        return (next_batch, messages);
+    };
+
+    let Some(events) = room_data
+        .pointer("/timeline/events")
+        .and_then(|v| v.as_array())
+    else {
+        return (next_batch, messages);
+    };
+
+    for event in events {
+        let is_msg = event
+            .get("type")
+            .and_then(|t| t.as_str())
+            .map(|t| t == "m.room.message")
+            .unwrap_or(false);
+
+        let is_text = event
+            .pointer("/content/msgtype")
+            .and_then(|v| v.as_str())
+            .map(|t| t == "m.text")
+            .unwrap_or(false);
+
+        if !is_msg || !is_text {
+            continue;
+        }
+
+        // Skip events that have no sender field — malformed events.
+        let Some(sender) = event.get("sender").and_then(|v| v.as_str()) else {
+            continue;
+        };
+
+        // Self-reply prevention: configure allowed_users to exclude the bot's own MXID.
+        if !allowed_users.is_empty() && !allowed_users.iter().any(|u| u.as_str() == sender) {
+            continue;
+        }
+
+        if let Some(body_text) = event
+            .pointer("/content/body")
+            .and_then(|v| v.as_str())
+        {
+            // topic stays as room_id so send() routes the reply back to the correct room.
+            messages.push(ChannelMessage::new(room_id.to_owned(), body_text));
+        }
+    }
+
+    (next_batch, messages)
+}
 
 /// Read persisted next_batch token from path; returns empty string if absent or unreadable.
 fn load_batch_token(path: Option<&std::path::Path>) -> String {
@@ -727,5 +766,88 @@ mod tests {
     #[test]
     fn default_homeserver_constant_is_matrix_org() {
         assert_eq!(MATRIX_DEFAULT_HOMESERVER, "https://matrix.org");
+    }
+
+    // -----------------------------------------------------------------------
+    // extract_sync_messages — allowed_users filter tests
+    // -----------------------------------------------------------------------
+
+    fn make_sync_json(events: serde_json::Value) -> serde_json::Value {
+        serde_json::json!({
+            "next_batch": "s123",
+            "rooms": {
+                "join": {
+                    "!room:example.org": {
+                        "timeline": {
+                            "events": events
+                        }
+                    }
+                }
+            }
+        })
+    }
+
+    #[test]
+    fn drain_filters_by_allowed_users() {
+        // allowed_users = ["@alice:example.org"] — bob's message must be dropped.
+        let allowed = vec!["@alice:example.org".to_string()];
+        let json = make_sync_json(serde_json::json!([
+            {
+                "type": "m.room.message",
+                "sender": "@alice:example.org",
+                "content": { "msgtype": "m.text", "body": "hello" }
+            },
+            {
+                "type": "m.room.message",
+                "sender": "@bob:example.org",
+                "content": { "msgtype": "m.text", "body": "world" }
+            }
+        ]));
+
+        let (_, messages) = extract_sync_messages(&json, "!room:example.org", &allowed);
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].body, "hello");
+    }
+
+    #[test]
+    fn drain_accepts_all_when_allowed_users_empty() {
+        // allowed_users = [] — every sender must be accepted.
+        let json = make_sync_json(serde_json::json!([
+            {
+                "type": "m.room.message",
+                "sender": "@alice:example.org",
+                "content": { "msgtype": "m.text", "body": "hello" }
+            },
+            {
+                "type": "m.room.message",
+                "sender": "@bob:example.org",
+                "content": { "msgtype": "m.text", "body": "world" }
+            }
+        ]));
+
+        let (_, messages) = extract_sync_messages(&json, "!room:example.org", &[]);
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0].body, "hello");
+        assert_eq!(messages[1].body, "world");
+    }
+
+    #[test]
+    fn drain_skips_events_without_sender() {
+        // Events lacking a "sender" field must be skipped regardless of allowed_users.
+        let json = make_sync_json(serde_json::json!([
+            {
+                "type": "m.room.message",
+                "content": { "msgtype": "m.text", "body": "no sender" }
+            },
+            {
+                "type": "m.room.message",
+                "sender": "@alice:example.org",
+                "content": { "msgtype": "m.text", "body": "has sender" }
+            }
+        ]));
+
+        let (_, messages) = extract_sync_messages(&json, "!room:example.org", &[]);
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].body, "has sender");
     }
 }
