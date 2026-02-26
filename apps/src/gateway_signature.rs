@@ -21,22 +21,12 @@ pub fn verify_request_signature(body: &[u8], secret: &[u8], provided_hex: &str) 
         None => return false,
     };
 
-    let expected = request_fingerprint(body, secret);
-
-    // Lengths must match before constant-time comparison.
-    if provided_bytes.len() != expected.len() {
-        return false;
-    }
-
-    // XOR all byte pairs — result is 0 only if every byte is equal.
-    // This loop runs in constant time regardless of where a difference occurs.
-    let diff: u8 = provided_bytes
-        .iter()
-        .zip(expected.iter())
-        .map(|(a, b)| a ^ b)
-        .fold(0u8, |acc, x| acc | x);
-
-    diff == 0
+    // Use Mac::verify_slice() which internally uses subtle::ConstantTimeEq
+    // to guarantee certified constant-time comparison and prevent timing attacks.
+    let mut mac = Hmac::<Sha256>::new_from_slice(secret)
+        .expect("HMAC accepts any key length");
+    mac.update(body);
+    mac.verify_slice(&provided_bytes).is_ok()
 }
 
 /// Decodes a lowercase hex string into raw bytes.
