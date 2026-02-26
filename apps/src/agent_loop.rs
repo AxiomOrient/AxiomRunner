@@ -123,7 +123,7 @@ pub fn execute_agent_action(
         }
         None => {
             let script = parse_interactive_script_from_env();
-            execute_interactive(agent, cwd, model, &script, estop)
+            execute_interactive(agent, cwd, model, &script, estop, context)
         }
     }
 }
@@ -134,6 +134,7 @@ fn execute_interactive(
     model: String,
     script: &[String],
     estop: Option<&crate::estop::EStop>,
+    context: Option<&dyn ContextAdapter>,
 ) -> Result<AgentResult, String> {
     if script.is_empty() {
         return Err(String::from(
@@ -157,10 +158,23 @@ fn execute_interactive(
 
         let input = parse_non_empty(raw_input, "agent message")?;
         let stop = is_stop_command(&input);
+        // RAG: enrich each turn with semantic memory hits (graceful degradation)
+        let effective_message = if !stop {
+            if let Some(ctx) = context {
+                match ctx.semantic_search(&input, "axiom://agent/memory", 5) {
+                    Ok(hits) if !hits.is_empty() => enrich_with_context(&input, &hits),
+                    _ => input.clone(),
+                }
+            } else {
+                input.clone()
+            }
+        } else {
+            input.clone()
+        };
         let output = if stop {
             String::from("agent loop stopping")
         } else {
-            call_agent(agent, &cwd, &input).map_err(|e| e.to_string())?
+            call_agent(agent, &cwd, &effective_message).map_err(|e| e.to_string())?
         };
 
         turns.push(AgentTurn {
@@ -328,7 +342,7 @@ mod tests {
             String::from("status"),
             String::from("exit"),
         ];
-        let result = execute_interactive(&agent, String::from("/tmp"), String::from("model"), &script, None)
+        let result = execute_interactive(&agent, String::from("/tmp"), String::from("model"), &script, None, None)
             .expect("interactive path should succeed");
 
         assert_eq!(result.base.reason, AgentStopReason::ExitCommand);
@@ -408,6 +422,7 @@ mod tests {
             String::from("model"),
             &script,
             Some(&estop),
+            None,
         )
         .expect("estop interactive should return Ok");
         assert_eq!(result.base.reason, AgentStopReason::EStopActivated);
