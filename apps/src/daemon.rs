@@ -169,8 +169,9 @@ pub fn execute_daemon_run(input: DaemonRunInput) -> io::Result<DaemonRunSummary>
         std::thread::sleep(Duration::from_secs(secs));
     }
 
-    // Join channel thread first so the channel runs for its full lifetime,
-    // then signal estop for any remaining cleanup.
+    // Signal estop first so the channel polling loop can observe the halt
+    // and exit cleanly, then join the thread.
+    estop.halt();
     if let Some(handle) = channel_thread {
         match handle.join() {
             Ok(Ok(processed)) => {
@@ -180,7 +181,6 @@ pub fn execute_daemon_run(input: DaemonRunInput) -> io::Result<DaemonRunSummary>
             Err(_) => eprintln!("daemon channel thread panicked"),
         }
     }
-    estop.halt();
 
     Ok(DaemonRunSummary {
         report,
