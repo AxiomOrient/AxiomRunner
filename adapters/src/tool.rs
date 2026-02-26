@@ -358,8 +358,8 @@ impl WorkspaceTool {
     }
 }
 
-const ALLOWED_SHELL_PROGRAMS: &[&str] =
-    &["echo", "cat", "ls", "pwd", "date", "env", "printenv", "printf"];
+// removed: env/printenv expose process environment variables including API keys
+const ALLOWED_SHELL_PROGRAMS: &[&str] = &["echo", "cat", "ls", "pwd", "date", "printf"];
 
 fn contains_shell_metachar(s: &str) -> bool {
     s.chars().any(|c| {

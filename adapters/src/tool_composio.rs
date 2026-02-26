@@ -56,6 +56,18 @@ impl ToolAdapter for ComposioToolAdapter {
     }
 
     fn execute(&self, call: ToolCall) -> AdapterResult<ToolOutput> {
+        // Validate tool name: only [A-Za-z0-9_] permitted to prevent path traversal injection.
+        if !call
+            .name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_')
+        {
+            return Err(AdapterError::invalid_input(
+                "tool_name",
+                "must contain only alphanumeric characters and underscores",
+            ));
+        }
+
         let url = format!("{}/{}/execute", Self::BASE_URL, call.name);
 
         // Build body: { "params": { key: value, ... } }
@@ -94,10 +106,15 @@ impl ToolAdapter for ComposioToolAdapter {
         if !status.is_success() {
             // SECURITY: Truncate body to prevent API key reflection from leaking
             // if Composio echoes request headers in error responses.
+            // Use char-boundary-safe slicing to avoid panic on multibyte UTF-8.
             let preview = if text.len() > MAX_ERROR_BODY_PREVIEW {
-                &text[..MAX_ERROR_BODY_PREVIEW]
+                let end = (0..=MAX_ERROR_BODY_PREVIEW)
+                    .rev()
+                    .find(|&i| text.is_char_boundary(i))
+                    .unwrap_or(0);
+                &text[..end]
             } else {
-                &text
+                text.as_str()
             };
             return Err(AdapterError::failed(
                 "composio_execute",
@@ -149,11 +166,46 @@ mod tests {
     fn error_body_preview_caps_at_limit() {
         let long_body = "x".repeat(500);
         let preview = if long_body.len() > MAX_ERROR_BODY_PREVIEW {
-            &long_body[..MAX_ERROR_BODY_PREVIEW]
+            let end = (0..=MAX_ERROR_BODY_PREVIEW)
+                .rev()
+                .find(|&i| long_body.is_char_boundary(i))
+                .unwrap_or(0);
+            &long_body[..end]
         } else {
-            &long_body
+            long_body.as_str()
         };
         assert_eq!(preview.len(), MAX_ERROR_BODY_PREVIEW);
+    }
+
+    #[test]
+    fn error_body_preview_safe_on_multibyte_utf8() {
+        // "é" is 2 bytes (0xC3 0xA9). Construct a string where MAX_ERROR_BODY_PREVIEW
+        // falls inside a multibyte character to verify no panic occurs.
+        let mut body = "a".repeat(MAX_ERROR_BODY_PREVIEW - 1);
+        body.push('é'); // byte offset MAX_ERROR_BODY_PREVIEW is inside this char
+        body.push_str(&"b".repeat(100));
+        let preview = if body.len() > MAX_ERROR_BODY_PREVIEW {
+            let end = (0..=MAX_ERROR_BODY_PREVIEW)
+                .rev()
+                .find(|&i| body.is_char_boundary(i))
+                .unwrap_or(0);
+            &body[..end]
+        } else {
+            body.as_str()
+        };
+        // end must retreat to MAX_ERROR_BODY_PREVIEW - 1 (the char boundary before 'é')
+        assert_eq!(preview.len(), MAX_ERROR_BODY_PREVIEW - 1);
+    }
+
+    #[test]
+    fn execute_rejects_invalid_tool_name() {
+        let adapter = ComposioToolAdapter::with_key("key").unwrap();
+        let call = ToolCall {
+            name: "../secret".to_string(),
+            args: BTreeMap::new(),
+        };
+        let err = adapter.execute(call).unwrap_err();
+        assert_eq!(err.kind(), crate::error::AdapterErrorKind::InvalidInput);
     }
 
     /// Real network call — only run with a valid key and connection.
