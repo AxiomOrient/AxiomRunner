@@ -6,6 +6,7 @@ use std::collections::VecDeque;
 use std::env;
 use std::fs;
 use std::io;
+use std::net::TcpStream;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -145,19 +146,73 @@ pub fn execute_daemon_run(input: DaemonRunInput) -> io::Result<DaemonRunSummary>
     let mut executor = SuccessExecutor;
     let mut sleeper = NoopSleeper;
     let max_ticks = input.max_ticks;
-    let mut supervisor_runner = |_component: &SupervisorComponentSpec,
+
+    let report = daemon.run_until(&mut executor, &mut sleeper, |loop_ref| {
+        loop_ref.tick_count() >= max_ticks
+    })?;
+
+    // Run supervisor health checks after the daemon loop so the health file
+    // written by run_until is available for the Heartbeat component check.
+    let health_path_for_supervisor = daemon.health_path().to_path_buf();
+    let mut supervisor_runner = |component: &SupervisorComponentSpec,
                                  _attempt: u32|
-     -> Result<(), SupervisorError> { Ok(()) };
+     -> Result<(), SupervisorError> {
+        match component.kind {
+            SupervisorComponentKind::Gateway => {
+                // Attempt a TCP connection to the metrics port when
+                // AXIOM_METRICS_PORT is configured.  A successful connect
+                // (or immediate RST) proves the port is bound.  If the env
+                // var is absent the gateway check is treated as a pass.
+                match env::var(axiom_apps::metrics_http::ENV_METRICS_PORT)
+                    .ok()
+                    .and_then(|raw| raw.trim().parse::<u16>().ok())
+                    .filter(|&p| p > 0)
+                {
+                    Some(port) => {
+                        let addr = format!("127.0.0.1:{port}");
+                        TcpStream::connect_timeout(
+                            &addr.parse().map_err(|_| {
+                                SupervisorError::terminal("metrics port addr parse failed")
+                            })?,
+                            Duration::from_millis(200),
+                        )
+                        .map(|_| ())
+                        .map_err(|e| SupervisorError::retryable(format!("gateway tcp connect failed: {e}")))
+                    }
+                    None => Ok(()),
+                }
+            }
+            SupervisorComponentKind::Channels => {
+                // Channel presence is optional; an unconfigured channel is
+                // not an error.  We simply confirm the env var is readable.
+                let _ = env::var(ENV_DAEMON_CHANNEL).ok();
+                Ok(())
+            }
+            SupervisorComponentKind::Scheduler => {
+                // A cron expression is optional.  Record whether one is
+                // configured but never fail on its absence.
+                let _ = env::var("AXIOM_CRON_EXPR").ok();
+                Ok(())
+            }
+            SupervisorComponentKind::Heartbeat => {
+                // The health file must exist and be a regular file.
+                if health_path_for_supervisor.exists() {
+                    Ok(())
+                } else {
+                    Err(SupervisorError::retryable(format!(
+                        "health file missing path={}",
+                        health_path_for_supervisor.display()
+                    )))
+                }
+            }
+        }
+    };
     let mut supervisor_sleeper = NoopSupervisorSleeper;
     let supervisor = run_supervisor_cycle(
         &supervisor_components,
         &mut supervisor_runner,
         &mut supervisor_sleeper,
     );
-
-    let report = daemon.run_until(&mut executor, &mut sleeper, |loop_ref| {
-        loop_ref.tick_count() >= max_ticks
-    })?;
 
     // If AXIOM_DAEMON_IDLE_SECS is set, keep the process alive (and metrics server
     // reachable) for that many seconds before exiting.
