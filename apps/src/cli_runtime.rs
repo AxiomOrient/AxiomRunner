@@ -296,13 +296,17 @@ fn execute_agent(action: AgentActionTemplate, context: Option<&dyn ContextAdapte
 }
 
 fn execute_intent(runtime: &mut CliRuntime, intent: &IntentTemplate) {
-    let read_key = intent.read_key().map(ToOwned::to_owned);
+    // Short-circuit ReadFact: reading is a pure query with no side-effects.
+    // Running it through the full pipeline would emit 4 DomainEvents and
+    // increment `revision` on every read. Answer directly from current state.
+    if let IntentTemplate::Read { key } = intent {
+        print_read_value(&runtime.state, key);
+        return;
+    }
+
     let applied = runtime.apply_template(intent);
     runtime.persist_template_result(intent, &applied);
     print_intent_result(&applied);
-    if let Some(key) = read_key {
-        print_read_value(&runtime.state, &key);
-    }
 }
 
 fn execute_migrate(raw_args: Vec<String>) -> Result<(), String> {
@@ -1042,5 +1046,63 @@ mod tests {
         // "OTP gate config error: …" when the env var contains a bad value.
         let result = crate::otp_gate::OtpGate::new("!!!invalid!!!");
         assert!(result.is_err(), "malformed secret must return Err");
+    }
+
+    #[test]
+    fn read_intent_does_not_increment_revision() {
+        let mut runtime = CliRuntime::new_with_compose(
+            String::from("system"),
+            compose_config(None, None),
+        );
+        let config = AppConfig::default();
+        execute_command(
+            &mut runtime,
+            &config,
+            CliCommand::Run(IntentTemplate::Write {
+                key: String::from("x"),
+                value: String::from("1"),
+            }),
+        )
+        .expect("write should succeed");
+
+        let revision_after_write = runtime.state.revision;
+
+        execute_command(
+            &mut runtime,
+            &config,
+            CliCommand::Run(IntentTemplate::Read {
+                key: String::from("x"),
+            }),
+        )
+        .expect("read should succeed");
+
+        assert_eq!(
+            runtime.state.revision, revision_after_write,
+            "ReadFact must not increment revision"
+        );
+    }
+
+    #[test]
+    fn read_intent_does_not_increment_revision_on_missing_key() {
+        let mut runtime = CliRuntime::new_with_compose(
+            String::from("system"),
+            compose_config(None, None),
+        );
+        let config = AppConfig::default();
+        let baseline = runtime.state.revision;
+
+        execute_command(
+            &mut runtime,
+            &config,
+            CliCommand::Run(IntentTemplate::Read {
+                key: String::from("no_such_key"),
+            }),
+        )
+        .expect("read of missing key should succeed");
+
+        assert_eq!(
+            runtime.state.revision, baseline,
+            "ReadFact on missing key must not increment revision"
+        );
     }
 }

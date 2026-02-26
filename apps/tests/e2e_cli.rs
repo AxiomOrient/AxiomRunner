@@ -227,12 +227,15 @@ fn e2e_cli_batch_pipeline_flow() {
         stdout.contains("intent id=cli-1 kind=write outcome=accepted policy=allowed effects=1")
     );
     assert!(stdout.contains("read key=alpha value=1"));
+    // ReadFact is short-circuited before the pipeline: no intent id is assigned
+    // and revision / audit count are not incremented for reads.
+    // Subsequent intent ids shift down by one; revision drops from 24 → 20.
     assert!(stdout.contains(
-        "intent id=cli-4 kind=write outcome=rejected policy=readonly_mutation effects=0"
+        "intent id=cli-3 kind=write outcome=rejected policy=readonly_mutation effects=0"
     ));
-    assert!(stdout.contains("intent id=cli-6 kind=halt outcome=accepted policy=allowed effects=1"));
+    assert!(stdout.contains("intent id=cli-5 kind=halt outcome=accepted policy=allowed effects=1"));
     assert!(
-        stdout.contains("batch completed count=6 revision=24 mode=halted facts=1 denied=2 audit=6")
+        stdout.contains("batch completed count=6 revision=20 mode=halted facts=1 denied=2 audit=5")
     );
     assert!(stderr.is_empty(), "stderr:\n{stderr}");
 }
