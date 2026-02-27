@@ -299,6 +299,11 @@ fn execute_intent(runtime: &mut CliRuntime, intent: &IntentTemplate) {
     // Short-circuit ReadFact: reading is a pure query with no side-effects.
     // Running it through the full pipeline would emit 4 DomainEvents and
     // increment `revision` on every read. Answer directly from current state.
+    //
+    // Safety invariant: persist_template_result() is a no-op for ReadFact —
+    // it only writes to the memory adapter for WriteFact/RemoveFact/Halt.
+    // Skipping apply_template() + persist_template_result() is safe and does
+    // not change observable storage state.
     if let IntentTemplate::Read { key } = intent {
         print_read_value(&runtime.state, key);
         return;
