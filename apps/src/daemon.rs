@@ -181,6 +181,13 @@ pub fn execute_daemon_run(input: DaemonRunInput) -> io::Result<DaemonRunSummary>
                 // AXIOM_METRICS_PORT is configured.  A successful connect
                 // (or immediate RST) proves the port is bound.  If the env
                 // var is absent the gateway check is treated as a pass.
+                //
+                // Timeout is configurable via AXIOM_SUPERVISOR_GATEWAY_TIMEOUT_MS
+                // (default 500 ms).
+                let timeout_ms = env::var("AXIOM_SUPERVISOR_GATEWAY_TIMEOUT_MS")
+                    .ok()
+                    .and_then(|v| v.trim().parse::<u64>().ok())
+                    .unwrap_or(500);
                 match env::var(axiom_apps::metrics_http::ENV_METRICS_PORT)
                     .ok()
                     .and_then(|raw| raw.trim().parse::<u16>().ok())
@@ -192,7 +199,7 @@ pub fn execute_daemon_run(input: DaemonRunInput) -> io::Result<DaemonRunSummary>
                             &addr.parse().map_err(|_| {
                                 SupervisorError::terminal("metrics port addr parse failed")
                             })?,
-                            Duration::from_millis(200),
+                            Duration::from_millis(timeout_ms),
                         )
                         .map(|_| ())
                         .map_err(|e| SupervisorError::retryable(format!("gateway tcp connect failed: {e}")))
@@ -201,16 +208,52 @@ pub fn execute_daemon_run(input: DaemonRunInput) -> io::Result<DaemonRunSummary>
                 }
             }
             SupervisorComponentKind::Channels => {
-                // Channel presence is optional; an unconfigured channel is
-                // not an error.  We simply confirm the env var is readable.
-                let _ = env::var(ENV_DAEMON_CHANNEL).ok();
-                Ok(())
+                // Channel presence is optional; an unconfigured channel is not
+                // an error.  When configured, the name must be a known channel
+                // type.
+                const VALID_CHANNELS: &[&str] =
+                    &["telegram", "discord", "slack", "irc", "matrix", "whatsapp"];
+                match env::var(ENV_DAEMON_CHANNEL)
+                    .ok()
+                    .filter(|s| !s.trim().is_empty())
+                {
+                    None => Ok(()),
+                    Some(name) => {
+                        let name = name.trim().to_lowercase();
+                        if VALID_CHANNELS.contains(&name.as_str()) {
+                            Ok(())
+                        } else {
+                            Err(SupervisorError::retryable(format!(
+                                "unknown channel type '{}'; valid: {}",
+                                name,
+                                VALID_CHANNELS.join(", ")
+                            )))
+                        }
+                    }
+                }
             }
             SupervisorComponentKind::Scheduler => {
-                // A cron expression is optional.  Record whether one is
-                // configured but never fail on its absence.
-                let _ = env::var("AXIOM_CRON_EXPR").ok();
-                Ok(())
+                // A cron expression is optional.  When configured, it must
+                // have at least 5 whitespace-separated fields (standard cron
+                // format: minute hour day month weekday).
+                match env::var("AXIOM_CRON_EXPR")
+                    .ok()
+                    .filter(|s| !s.trim().is_empty())
+                {
+                    None => Ok(()),
+                    Some(expr) => {
+                        let field_count = expr.trim().split_whitespace().count();
+                        if field_count >= 5 {
+                            Ok(())
+                        } else {
+                            Err(SupervisorError::retryable(format!(
+                                "invalid AXIOM_CRON_EXPR '{}': expected at least 5 fields, got {}",
+                                expr.trim(),
+                                field_count
+                            )))
+                        }
+                    }
+                }
             }
             SupervisorComponentKind::Heartbeat => {
                 // The health file must exist and be a regular file.
