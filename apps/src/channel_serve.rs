@@ -164,8 +164,8 @@ mod tests {
     #[test]
     fn serve_loop_processes_messages_and_sends_replies() {
         let mut channel = MockChannel::new(vec![
-            ChannelMessage::new("mock-channel", "hello"),
-            ChannelMessage::new("mock-channel", "world"),
+            ChannelMessage::new("user-123", "hello"),
+            ChannelMessage::new("user-456", "world"),
         ]);
         let agent = EchoAgent;
 
@@ -183,16 +183,45 @@ mod tests {
         assert_eq!(processed, 2);
         assert_eq!(channel.outbox.len(), 2);
         assert!(channel.outbox[0].body.contains("echo:hello"));
-        assert_eq!(channel.outbox[0].topic, "mock-channel");
         assert!(channel.outbox[1].body.contains("echo:world"));
-        assert_eq!(channel.outbox[1].topic, "mock-channel");
+        // 회신 topic이 원본 메시지의 topic과 일치하는지 검증 (라우팅 정확성)
+        assert_eq!(channel.outbox[0].topic, "user-123");
+        assert_eq!(channel.outbox[1].topic, "user-456");
+    }
+
+    #[test]
+    fn serve_loop_routes_reply_to_original_sender_topic() {
+        // 서로 다른 발신자 topic을 가진 메시지 3개
+        let mut channel = MockChannel::new(vec![
+            ChannelMessage::new("chat-111", "ping"),
+            ChannelMessage::new("chat-222", "hello"),
+            ChannelMessage::new("chat-111", "again"), // 같은 발신자 반복
+        ]);
+        let agent = EchoAgent;
+
+        let processed =
+            run_channel_serve_loop(
+                &mut channel,
+                &agent,
+                None,
+                Duration::from_millis(0),
+                Some(1),
+                None,
+            )
+            .expect("loop should succeed");
+
+        assert_eq!(processed, 3);
+        // 각 회신이 원본 발신자에게 가는지 검증
+        assert_eq!(channel.outbox[0].topic, "chat-111");
+        assert_eq!(channel.outbox[1].topic, "chat-222");
+        assert_eq!(channel.outbox[2].topic, "chat-111");
     }
 
     #[test]
     fn serve_loop_skips_empty_body() {
         let mut channel = MockChannel::new(vec![
-            ChannelMessage::new("mock-channel", "   "),
-            ChannelMessage::new("mock-channel", "hi"),
+            ChannelMessage::new("user-789", "   "), // empty body → skip
+            ChannelMessage::new("user-789", "hi"),
         ]);
         let agent = EchoAgent;
 
@@ -209,6 +238,7 @@ mod tests {
 
         assert_eq!(processed, 1);
         assert_eq!(channel.outbox.len(), 1);
+        assert_eq!(channel.outbox[0].topic, "user-789");
     }
 
     #[test]
