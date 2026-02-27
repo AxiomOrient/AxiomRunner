@@ -74,8 +74,8 @@ trap on_exit EXIT
 if [ ! -f Cargo.toml ]; then
   append_error "run from repository root with Cargo.toml"
 else
-  run_step release_gate_debug cargo test -q -p axiom_apps release_gate_s2
-  run_step release_gate_release cargo test -q --release -p axiom_apps release_gate_s2
+  run_step release_gate_debug cargo test -q -p axiom_apps --test release_security_gate
+  run_step release_gate_release cargo test -q --release -p axiom_apps --test release_security_gate
   run_step adapter_contract cargo test -q -p axiom_adapters --tests
   run_step cli_contract cargo test -q -p axiom_apps e2e_cli
   run_step transition_gates bash scripts/run_transition_gates.sh

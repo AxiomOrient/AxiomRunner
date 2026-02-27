@@ -1,4 +1,4 @@
-name: G-2 Release Security Gate
+name: G-2 Release Approval Gate
 
 on:
   push:
@@ -6,9 +6,9 @@ on:
   workflow_dispatch:
 
 jobs:
-  release-security-gate:
+  release-approval-gate:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
 
     steps:
       - name: Checkout
@@ -20,8 +20,24 @@ jobs:
       - name: Cache cargo build outputs
         uses: Swatinem/rust-cache@v2
 
-      - name: Run release security gate test target (debug contract)
-        run: cargo test -q -p axiom_apps --test release_security_gate
+      - name: Run release approval gate (security + perf)
+        run: bash scripts/run_release_approval_gate.sh
+        env:
+          RELEASE_GATE_BENCH_PROFILE: release
+          RELEASE_GATE_BENCH_ITERATIONS: 20
+          RELEASE_GATE_BENCH_RECORDS: 2000
+          RELEASE_GATE_BENCH_WARMUP: 2
+          RELEASE_GATE_BENCH_REQUIRED_CONSECUTIVE_PASSES: 1
+          RELEASE_GATE_BENCH_MAX_PASSES: 1
 
-      - name: Run release security gate test target (release profile gate)
-        run: cargo test -q --release -p axiom_apps --test release_security_gate
+      - name: Upload release approval gate artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-approval-gate
+          path: |
+            target/release-approval-gate
+            benchmarks/summary.tsv
+            benchmarks/summary.md
+            benchmarks/config.env
+            benchmarks/raw/perf_suite_pass*.json

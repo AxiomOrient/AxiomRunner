@@ -40,14 +40,16 @@ cargo build --release
 # 3. Initialize agent identity (first run only)
 ./target/release/axiom_apps onboard
 
-# 4. Run the agent with mock provider (no API key required)
-./target/release/axiom_apps agent
+# 4. Run locally with mock agent backend (no API key required)
+AXIOM_AGENT_ID=mock \
+AXIOM_ALLOW_MOCK_AGENT=1 \
+./target/release/axiom_apps agent --message "health check"
 
-# 5. Run with a real LLM provider (OpenAI example)
-AXIOM_RUNTIME_PROVIDER=openai \
-OPENAI_API_KEY=sk-... \
-./target/release/axiom_apps agent
+# 5. Run with the default coclai backend (network required)
+./target/release/axiom_apps agent --message "hello"
 ```
+
+`agent` uses `AgentAdapter` (`coclai` by default). `AXIOM_RUNTIME_PROVIDER` applies to runtime/provider paths, not the `agent` backend selector.
 
 ---
 

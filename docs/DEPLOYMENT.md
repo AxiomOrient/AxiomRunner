@@ -4,32 +4,34 @@
 
 아래 변수들은 `AXIOM_PROFILE`, `AXIOM_ENDPOINT` 등 CLI args, 환경변수, 설정 파일 순으로 우선순위가 적용됩니다.
 
-| 변수 | 기본값 | 설명 |
-|------|--------|------|
-| `AXIOM_PROFILE` | `prod` | 실행 프로파일 이름 |
-| `AXIOM_ENDPOINT` | `http://127.0.0.1:8080` | 게이트웨이 엔드포인트 URL |
-| `AXIOM_RUNTIME_PROVIDER` | `mock-local` | 프로바이더 ID (`mock-local` / `openai` / `openrouter`) |
-| `OPENAI_API_KEY` | — | OpenAI API 키 (`AXIOM_RUNTIME_PROVIDER=openai` 시 필수) |
-| `OPENROUTER_API_KEY` | — | OpenRouter API 키 (`AXIOM_RUNTIME_PROVIDER=openrouter` 시 필수) |
-| `AXIOM_RUNTIME_PROVIDER_MODEL` | `gpt-4o-mini` | 모델명 (프로바이더별 모델 ID) |
-| `AXIOM_RUNTIME_MAX_TOKENS` | `4096` | 응답 최대 토큰 수 |
-| `AXIOM_RUNTIME_MEMORY_PATH` | `~/.axiom/memory.db` | 메모리 DB 경로 (없으면 자동 생성) |
-| `AXIOM_RUNTIME_TOOL_WORKSPACE` | `~/.axiom/workspace` | 툴 워크스페이스 디렉토리 (없으면 자동 생성) |
-| `AXIOM_RUNTIME_TOOL_LOG_PATH` | `.axiom/runtime-compose.log` | 툴 실행 로그 경로 |
-| `AXIOM_RUNTIME_BOOTSTRAP_ROOT` | — | 에이전트 컨텍스트 bootstrap 루트 디렉토리 |
-| `AXIOM_RUNTIME_CHANNEL` | — | 활성화할 채널 ID |
-| `AXIOM_RUNTIME_TOOLS` | — | 활성화할 툴 목록 (쉼표 구분) |
-| `AXIOM_CONTEXT_ROOT` | — | AxiomMe RAG 컨텍스트 루트 디렉토리 (없으면 RAG 비활성화) |
-| `AXIOM_GATEWAY_SECRET` | — | HTTP 게이트웨이 HMAC 서명 시크릿 (설정 시 서명 검증 활성화) |
-| `AXIOM_OTP_SECRET` | — | CLI OTP 시크릿 (base32 인코딩, 설정 시 TOTP 강제) |
-| `AXIOM_OTP_CODE` | — | TOTP 인증 코드 (`AXIOM_OTP_SECRET` 설정 시 필요) |
-| `AXIOM_CHANNEL_STORE_PATH` | `~/.axiom/channel/store.db` | 채널 레코드 저장 경로 |
-| `AXIOM_CHANNEL_TELEGRAM_TOKEN` | — | Telegram 봇 토큰 (Telegram 채널 사용 시 필수) |
-| `AXIOM_CHANNEL_DISCORD_WEBHOOK` | — | Discord Webhook URL (Discord 채널 사용 시 필요) |
-| `AXIOM_CHANNEL_SLACK_WEBHOOK` | — | Slack Incoming Webhook URL (Slack 채널 사용 시 필요) |
-| `AXIOM_GATEWAY_REQUESTS` | — | 게이트웨이 요청 설정 경로 |
-| `COMPOSIO_API_KEY` | — | Composio platform API 키 (`integrations info composio` 참조) |
-| `H2_ALLOWED_DIFF` | `0` | h2_verify 바이너리의 허용 헤더 차이 임계값 |
+| 변수                            | 기본값                       | 설명                                                            |
+| ------------------------------- | ---------------------------- | --------------------------------------------------------------- |
+| `AXIOM_PROFILE`                 | `prod`                       | 실행 프로파일 이름                                              |
+| `AXIOM_ENDPOINT`                | `http://127.0.0.1:8080`      | 게이트웨이 엔드포인트 URL                                       |
+| `AXIOM_RUNTIME_PROVIDER`        | `mock-local`                 | 프로바이더 ID (`mock-local` / `openai` / `openrouter`)          |
+| `AXIOM_AGENT_ID`                | `coclai`                     | `agent` 커맨드 백엔드 ID (`coclai` / `mock`)                    |
+| `AXIOM_ALLOW_MOCK_AGENT`        | —                            | `AXIOM_AGENT_ID=mock` 허용 플래그 (`1`/`true`/`yes`)            |
+| `OPENAI_API_KEY`                | —                            | OpenAI API 키 (`AXIOM_RUNTIME_PROVIDER=openai` 시 필수)         |
+| `OPENROUTER_API_KEY`            | —                            | OpenRouter API 키 (`AXIOM_RUNTIME_PROVIDER=openrouter` 시 필수) |
+| `AXIOM_RUNTIME_PROVIDER_MODEL`  | `gpt-4o-mini`                | 모델명 (프로바이더별 모델 ID)                                   |
+| `AXIOM_RUNTIME_MAX_TOKENS`      | `4096`                       | 응답 최대 토큰 수                                               |
+| `AXIOM_RUNTIME_MEMORY_PATH`     | `~/.axiom/memory.db`         | 메모리 DB 경로 (없으면 자동 생성)                               |
+| `AXIOM_RUNTIME_TOOL_WORKSPACE`  | `~/.axiom/workspace`         | 툴 워크스페이스 디렉토리 (없으면 자동 생성)                     |
+| `AXIOM_RUNTIME_TOOL_LOG_PATH`   | `.axiom/runtime-compose.log` | 툴 실행 로그 경로                                               |
+| `AXIOM_RUNTIME_BOOTSTRAP_ROOT`  | —                            | 에이전트 컨텍스트 bootstrap 루트 디렉토리                       |
+| `AXIOM_RUNTIME_CHANNEL`         | —                            | 활성화할 채널 ID                                                |
+| `AXIOM_RUNTIME_TOOLS`           | —                            | 활성화할 툴 목록 (쉼표 구분)                                    |
+| `AXIOM_CONTEXT_ROOT`            | —                            | AxiomMe RAG 컨텍스트 루트 디렉토리 (없으면 RAG 비활성화)        |
+| `AXIOM_GATEWAY_SECRET`          | —                            | HTTP 게이트웨이 HMAC 서명 시크릿 (설정 시 서명 검증 활성화)     |
+| `AXIOM_OTP_SECRET`              | —                            | CLI OTP 시크릿 (base32 인코딩, 설정 시 TOTP 강제)               |
+| `AXIOM_OTP_CODE`                | —                            | TOTP 인증 코드 (`AXIOM_OTP_SECRET` 설정 시 필요)                |
+| `AXIOM_CHANNEL_STORE_PATH`      | `~/.axiom/channel/store.db`  | 채널 레코드 저장 경로                                           |
+| `AXIOM_CHANNEL_TELEGRAM_TOKEN`  | —                            | Telegram 봇 토큰 (Telegram 채널 사용 시 필수)                   |
+| `AXIOM_CHANNEL_DISCORD_WEBHOOK` | —                            | Discord Webhook URL (Discord 채널 사용 시 필요)                 |
+| `AXIOM_CHANNEL_SLACK_WEBHOOK`   | —                            | Slack Incoming Webhook URL (Slack 채널 사용 시 필요)            |
+| `AXIOM_GATEWAY_REQUESTS`        | —                            | 게이트웨이 요청 설정 경로                                       |
+| `COMPOSIO_API_KEY`              | —                            | Composio platform API 키 (`integrations info composio` 참조)    |
+| `H2_ALLOWED_DIFF`               | `0`                          | h2_verify 바이너리의 허용 헤더 차이 임계값                      |
 
 > **주의**: `anthropic` 프로바이더는 직접 지원하지 않습니다. Anthropic 모델을 사용하려면 `openrouter` 프로바이더와 함께 Anthropic 모델 ID를 지정하세요.
 
@@ -62,18 +64,45 @@ cargo build --release
 ### 4. 에이전트 테스트
 
 ```bash
-./target/release/axiom_apps agent run
+AXIOM_AGENT_ID=mock \
+AXIOM_ALLOW_MOCK_AGENT=1 \
+./target/release/axiom_apps agent --message "health check"
 ```
 
-기본 `mock-local` 프로바이더로 에이전트 루프를 테스트합니다.
+mock 에이전트 백엔드로 로컬 실행 경로를 검증합니다.
 
-### 5. OpenAI 연동 확인 (선택)
+### 5. coclai 연동 확인 (선택, 네트워크 필요)
 
 ```bash
-export AXIOM_RUNTIME_PROVIDER=openai
-export OPENAI_API_KEY=sk-...
-./target/release/axiom_apps agent run
+./target/release/axiom_apps agent --message "hello"
 ```
+
+### 6. 배포 승인 게이트 실행 (필수)
+
+프로덕션 배포 직전에는 아래 통합 게이트를 반드시 통과해야 합니다.
+
+```bash
+bash scripts/run_release_approval_gate.sh
+```
+
+빠른 로컬 점검(저부하)은 아래처럼 실행합니다.
+
+```bash
+RELEASE_GATE_BENCH_ITERATIONS=1 \
+RELEASE_GATE_BENCH_RECORDS=200 \
+RELEASE_GATE_BENCH_WARMUP=0 \
+RELEASE_GATE_BENCH_REQUIRED_CONSECUTIVE_PASSES=1 \
+RELEASE_GATE_BENCH_MAX_PASSES=1 \
+bash scripts/run_release_approval_gate.sh
+```
+
+승인 기준:
+
+- `target/release-approval-gate/report.json`에서 `passed=true`
+- `errors=[]`
+- `security_gate_debug`, `security_gate_release`, `perf_gate` 모두 `pass`
+
+실패 시에는 배포를 즉시 중지하고, 상세 절차는 [`docs/release-readiness-gate.md`](release-readiness-gate.md)의 장애 대응 절차를 따릅니다.
 
 ---
 
@@ -107,7 +136,7 @@ ENV AXIOM_RUNTIME_TOOL_WORKSPACE=/data/axiom/workspace
 ENV AXIOM_CHANNEL_STORE_PATH=/data/axiom/channel/store.db
 
 ENTRYPOINT ["/app/axiom_apps"]
-CMD ["agent", "run"]
+CMD ["serve", "--mode=daemon"]
 ```
 
 ### docker-compose.yml
@@ -281,15 +310,15 @@ export AXIOM_CHANNEL_TELEGRAM_TOKEN=1234567890:ABCdef...
 
 ## 운영 점검 커맨드
 
-| 커맨드 | 설명 |
-|--------|------|
-| `axiom_apps doctor` | 전체 시스템 진단 (provider, memory, tool, channel 상태) |
-| `axiom_apps status` | 현재 에이전트 상태 요약 |
-| `axiom_apps health` | 헬스체크 (게이트웨이/데몬 연결 확인) |
-| `axiom_apps channel doctor` | 채널 어댑터 진단 |
-| `axiom_apps channel list` | 등록된 채널 목록 및 상태 |
-| `axiom_apps cron list` | 등록된 cron 작업 목록 |
-| `axiom_apps service status` | systemd 서비스 상태 |
+| 커맨드                      | 설명                                                    |
+| --------------------------- | ------------------------------------------------------- |
+| `axiom_apps doctor`         | 전체 시스템 진단 (provider, memory, tool, channel 상태) |
+| `axiom_apps status`         | 현재 에이전트 상태 요약                                 |
+| `axiom_apps health`         | 헬스체크 (게이트웨이/데몬 연결 확인)                    |
+| `axiom_apps channel doctor` | 채널 어댑터 진단                                        |
+| `axiom_apps channel list`   | 등록된 채널 목록 및 상태                                |
+| `axiom_apps cron list`      | 등록된 cron 작업 목록                                   |
+| `axiom_apps service status` | systemd 서비스 상태                                     |
 
 ### doctor 출력 예시
 
@@ -307,20 +336,6 @@ revision    : 1
 [warn] gateway-secret  AXIOM_GATEWAY_SECRET not set — HTTP signatures disabled
 [warn] otp-secret      AXIOM_OTP_SECRET not set — CLI OTP disabled
 ```
-
----
-
-## 마이그레이션
-
-기존 데이터를 새 경로로 이전할 때:
-
-```bash
-./target/release/axiom_apps migrate \
-  --legacy-root /old/axiom/path \
-  --target-root /new/axiom/path
-```
-
-마이그레이션 전 반드시 백업을 수행하고, 데몬이 중지된 상태에서 실행하세요.
 
 ---
 

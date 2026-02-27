@@ -115,21 +115,37 @@ jobs:
       - name: Build release binaries
         run: cargo build --locked --workspace --release
 
-  release-security-gate:
-    name: Release Security Gate
+  release-approval-gate:
+    name: Release Approval Gate (Security + Perf)
     needs: [changes]
     if: needs.changes.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
 
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Run release security gate tests (debug contract)
-        run: cargo test -q release_security_gate
-      - name: Run release security gate tests (release profile gate)
-        run: cargo test -q --release release_security_gate
+      - name: Run release approval gate (security + perf)
+        run: bash scripts/run_release_approval_gate.sh
+        env:
+          RELEASE_GATE_BENCH_PROFILE: release
+          RELEASE_GATE_BENCH_ITERATIONS: 20
+          RELEASE_GATE_BENCH_RECORDS: 2000
+          RELEASE_GATE_BENCH_WARMUP: 2
+          RELEASE_GATE_BENCH_REQUIRED_CONSECUTIVE_PASSES: 1
+          RELEASE_GATE_BENCH_MAX_PASSES: 1
+      - name: Upload release approval gate artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-approval-gate
+          path: |
+            target/release-approval-gate
+            benchmarks/summary.tsv
+            benchmarks/summary.md
+            benchmarks/config.env
+            benchmarks/raw/perf_suite_pass*.json
 
   docs-only:
     name: Docs-Only Fast Path
@@ -144,7 +160,7 @@ jobs:
   ci-required:
     name: CI Required Gate
     if: always()
-    needs: [changes, lint, test, build, release-security-gate, docs-only]
+    needs: [changes, lint, test, build, release-approval-gate, docs-only]
     runs-on: ubuntu-latest
 
     steps:
@@ -161,12 +177,12 @@ jobs:
           lint_result="${{ needs.lint.result }}"
           test_result="${{ needs.test.result }}"
           build_result="${{ needs.build.result }}"
-          release_gate_result="${{ needs.release-security-gate.result }}"
+          release_gate_result="${{ needs.release-approval-gate.result }}"
 
           echo "lint=${lint_result}"
           echo "test=${test_result}"
           echo "build=${build_result}"
-          echo "release-security-gate=${release_gate_result}"
+          echo "release-approval-gate=${release_gate_result}"
 
           if [ "$lint_result" != "success" ] \
             || [ "$test_result" != "success" ] \
