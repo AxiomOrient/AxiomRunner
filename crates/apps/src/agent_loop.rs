@@ -1,12 +1,14 @@
-use std::env;
 use std::fmt::Write as FmtWrite;
 
-use axiom_adapters::contracts::ContextAdapter;
-use axiom_adapters::{AgentAdapter, AgentRequest};
+use axonrunner_adapters::contracts::ContextAdapter;
+use axonrunner_adapters::{AgentAdapter, AgentRequest};
 
+use crate::env_util::read_env_trimmed;
 use crate::parse_util::parse_non_empty;
 
-const ENV_AGENT_SCRIPT: &str = "AXIOM_AGENT_SCRIPT";
+const ENV_AGENT_SCRIPT: &str = "AXONRUNNER_AGENT_SCRIPT";
+const MEMORY_SCOPE_URI: &str = "axonrunner://agent/memory";
+const LEGACY_MEMORY_SCOPE_URI: &str = "axiom://agent/memory";
 const DEFAULT_MODEL: &str = "anthropic/claude-sonnet-4-20250514";
 const MAX_INTERACTIVE_TURNS: usize = 16;
 
@@ -107,7 +109,7 @@ pub fn execute_agent_action(
             let input = parse_non_empty(&message, "agent message")?;
             // RAG: enrich message with semantic memory hits (explicit, isolated I/O)
             let effective_message = if let Some(ctx) = context {
-                match ctx.semantic_search(&input, "axiom://agent/memory", 5) {
+                match semantic_search_with_legacy(ctx, &input, 5) {
                     Ok(hits) if !hits.is_empty() => enrich_with_context(&input, &hits),
                     _ => input.clone(), // graceful degradation: proceed without context
                 }
@@ -142,7 +144,7 @@ fn execute_interactive(
 ) -> Result<AgentResult, String> {
     if script.is_empty() {
         return Err(String::from(
-            "interactive agent script is empty; set AXIOM_AGENT_SCRIPT or provide --message",
+            "interactive agent script is empty; set AXONRUNNER_AGENT_SCRIPT or provide --message",
         ));
     }
 
@@ -166,7 +168,7 @@ fn execute_interactive(
         // RAG: enrich each turn with semantic memory hits (graceful degradation)
         let effective_message = if !stop {
             if let Some(ctx) = context {
-                match ctx.semantic_search(&input, "axiom://agent/memory", 5) {
+                match semantic_search_with_legacy(ctx, &input, 5) {
                     Ok(hits) if !hits.is_empty() => enrich_with_context(&input, &hits),
                     _ => input.clone(),
                 }
@@ -210,7 +212,7 @@ fn call_agent(
     agent: &dyn AgentAdapter,
     cwd: &str,
     prompt: &str,
-) -> Result<String, axiom_adapters::AdapterError> {
+) -> Result<String, axonrunner_adapters::AdapterError> {
     let request = AgentRequest::new(cwd, prompt);
     agent.run(request).map(|r| r.content)
 }
@@ -230,11 +232,25 @@ fn resolve_cwd(cwd: Option<String>) -> Result<String, String> {
     }
 }
 
+fn semantic_search_with_legacy(
+    context: &dyn ContextAdapter,
+    input: &str,
+    limit: usize,
+) -> axonrunner_adapters::AdapterResult<Vec<axonrunner_adapters::contracts::ContextHit>> {
+    let hits = context.semantic_search(input, MEMORY_SCOPE_URI, limit)?;
+    if hits.is_empty() {
+        context.semantic_search(input, LEGACY_MEMORY_SCOPE_URI, limit)
+    } else {
+        Ok(hits)
+    }
+}
+
 const DEFAULT_INTERACTIVE_SCRIPT: &[&str] = &["status", "exit"];
 
 fn parse_interactive_script_from_env() -> Vec<String> {
-    let from_env = env::var(ENV_AGENT_SCRIPT)
+    let from_env = read_env_trimmed(ENV_AGENT_SCRIPT)
         .ok()
+        .flatten()
         .map(|value| {
             value
                 .split('|')
@@ -258,7 +274,10 @@ fn parse_interactive_script_from_env() -> Vec<String> {
 /// Prepend retrieved context hits to the user message.
 /// Pure function: same inputs always produce same output.
 /// O(n) where n = sum of snippet lengths.
-fn enrich_with_context(message: &str, hits: &[axiom_adapters::contracts::ContextHit]) -> String {
+fn enrich_with_context(
+    message: &str,
+    hits: &[axonrunner_adapters::contracts::ContextHit],
+) -> String {
     if hits.is_empty() {
         return message.to_string();
     }
@@ -300,8 +319,10 @@ mod tests {
         execute_interactive, is_stop_command,
     };
     use crate::estop::EStop;
-    use axiom_adapters::contracts::{AdapterHealth, AgentAdapter, AgentRequest, AgentResponse};
-    use axiom_adapters::error::AdapterResult;
+    use axonrunner_adapters::contracts::{
+        AdapterHealth, AgentAdapter, AgentRequest, AgentResponse,
+    };
+    use axonrunner_adapters::error::AdapterResult;
 
     struct MockAgent;
 
@@ -464,9 +485,9 @@ mod tests {
 
     #[test]
     fn enrich_with_context_prepends_hits() {
-        use axiom_adapters::contracts::ContextHit;
+        use axonrunner_adapters::contracts::ContextHit;
         let hits = vec![ContextHit {
-            uri: "axiom://agent/memory/test".to_string(),
+            uri: "axonrunner://agent/memory/test".to_string(),
             score: 0.95,
             snippet: "relevant fact".to_string(),
             content: String::new(),

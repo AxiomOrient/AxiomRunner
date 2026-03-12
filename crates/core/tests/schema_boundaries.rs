@@ -1,9 +1,9 @@
-use axiom_core::audit::{PolicyAuditPayload, PolicyAuditPayloadError};
-use axiom_core::decision::{DecisionOutcomePayload, DecisionPayload, DecisionPayloadError};
-use axiom_core::effect::{EffectPayload, EffectPayloadError};
-use axiom_core::event::{DomainEventPayload, DomainEventPayloadError};
-use axiom_core::intent::{IntentKindPayload, IntentPayload, IntentPayloadError};
-use axiom_core::{
+use axonrunner_core::audit::{PolicyAuditPayload, PolicyAuditPayloadError};
+use axonrunner_core::decision::{DecisionOutcomePayload, DecisionPayload, DecisionPayloadError};
+use axonrunner_core::effect::{EffectPayload, EffectPayloadError};
+use axonrunner_core::event::{DomainEventPayload, DomainEventPayloadError};
+use axonrunner_core::intent::{IntentKindPayload, IntentPayload, IntentPayloadError};
+use axonrunner_core::{
     Decision, DecisionOutcome, DomainEvent, Effect, ExecutionMode, Intent, PolicyAuditRecord,
     PolicyCode,
 };

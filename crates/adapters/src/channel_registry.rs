@@ -111,6 +111,23 @@ pub fn resolve_channel_adapter_id(name: &str) -> Option<&'static str> {
     resolve_channel_entry(name).map(|entry| entry.adapter_id)
 }
 
+/// Returns whether the channel kind is compiled into this binary.
+/// This probe is side-effect free: it does not read runtime credentials or build adapters.
+pub fn channel_is_compiled(name: &str) -> bool {
+    let Some(entry) = resolve_channel_entry(name) else {
+        return false;
+    };
+
+    match entry.kind {
+        ChannelKind::Discord => cfg!(feature = "channel-discord"),
+        ChannelKind::Slack => cfg!(feature = "channel-slack"),
+        ChannelKind::Telegram => true,
+        ChannelKind::Irc => cfg!(feature = "channel-irc"),
+        ChannelKind::Matrix => cfg!(feature = "channel-matrix"),
+        ChannelKind::WhatsApp => cfg!(feature = "channel-whatsapp"),
+    }
+}
+
 pub fn build_contract_channel(name: &str) -> Result<Box<dyn ChannelAdapter>, String> {
     let entry = resolve_channel_entry(name).ok_or_else(|| {
         let available = channel_registry()
@@ -125,9 +142,10 @@ pub fn build_contract_channel(name: &str) -> Result<Box<dyn ChannelAdapter>, Str
         ChannelKind::Discord => {
             #[cfg(feature = "channel-discord")]
             {
-                let bot_token = read_env_required("AXIOM_DISCORD_BOT_TOKEN", "discord.bot_token")?;
-                let guild_id = read_env_optional("AXIOM_DISCORD_GUILD_ID");
-                let webhook_url = read_env_optional("AXIOM_CHANNEL_DISCORD_WEBHOOK");
+                let bot_token =
+                    read_env_required("AXONRUNNER_DISCORD_BOT_TOKEN", "discord.bot_token")?;
+                let guild_id = read_env_optional("AXONRUNNER_DISCORD_GUILD_ID");
+                let webhook_url = read_env_optional("AXONRUNNER_CHANNEL_DISCORD_WEBHOOK");
                 let config = DiscordConfig::new(bot_token, guild_id, Vec::new())
                     .map_err(|e| format!("discord config error: {e}"))?
                     .with_webhook(webhook_url)
@@ -144,9 +162,9 @@ pub fn build_contract_channel(name: &str) -> Result<Box<dyn ChannelAdapter>, Str
         ChannelKind::Slack => {
             #[cfg(feature = "channel-slack")]
             {
-                let bot_token = read_env_required("AXIOM_SLACK_BOT_TOKEN", "slack.bot_token")?;
-                let channel_id = read_env_optional("AXIOM_SLACK_CHANNEL_ID");
-                let webhook_url = read_env_optional("AXIOM_CHANNEL_SLACK_WEBHOOK");
+                let bot_token = read_env_required("AXONRUNNER_SLACK_BOT_TOKEN", "slack.bot_token")?;
+                let channel_id = read_env_optional("AXONRUNNER_SLACK_CHANNEL_ID");
+                let webhook_url = read_env_optional("AXONRUNNER_CHANNEL_SLACK_WEBHOOK");
                 let config = SlackConfig::new(bot_token, channel_id, Vec::new())
                     .map_err(|e| format!("slack config error: {e}"))?
                     .with_webhook(webhook_url)
@@ -159,9 +177,12 @@ pub fn build_contract_channel(name: &str) -> Result<Box<dyn ChannelAdapter>, Str
             return Err("slack channel not compiled (enable channel-slack feature)".to_string());
         }
         ChannelKind::Telegram => {
-            let bot_token = read_env_required("AXIOM_TELEGRAM_BOT_TOKEN", "telegram.bot_token")?;
-            let allowed_users =
-                read_env_list_required("AXIOM_TELEGRAM_ALLOWED_USERS", "telegram.allowed_users")?;
+            let bot_token =
+                read_env_required("AXONRUNNER_TELEGRAM_BOT_TOKEN", "telegram.bot_token")?;
+            let allowed_users = read_env_list_required(
+                "AXONRUNNER_TELEGRAM_ALLOWED_USERS",
+                "telegram.allowed_users",
+            )?;
             let config = TelegramConfig::new(bot_token, allowed_users)
                 .map_err(|e| format!("telegram config error: {e}"))?;
             let adapter = TelegramChannelAdapter::live(config)
@@ -171,10 +192,10 @@ pub fn build_contract_channel(name: &str) -> Result<Box<dyn ChannelAdapter>, Str
         ChannelKind::Irc => {
             #[cfg(feature = "channel-irc")]
             {
-                let server = read_env_required("AXIOM_IRC_SERVER", "irc.server")?;
-                let channel = read_env_optional("AXIOM_IRC_CHANNEL");
-                let nick =
-                    read_env_trimmed("AXIOM_IRC_NICK").unwrap_or_else(|| String::from("axiom-bot"));
+                let server = read_env_required("AXONRUNNER_IRC_SERVER", "irc.server")?;
+                let channel = read_env_optional("AXONRUNNER_IRC_CHANNEL");
+                let nick = read_env_trimmed("AXONRUNNER_IRC_NICK")
+                    .unwrap_or_else(|| String::from("axonrunner-bot"));
                 let config = IrcConfig::new(server, channel, nick, Vec::new())
                     .map_err(|e| format!("irc config error: {e}"))?;
                 let adapter = IrcChannelAdapter::live(config)
@@ -188,9 +209,9 @@ pub fn build_contract_channel(name: &str) -> Result<Box<dyn ChannelAdapter>, Str
             #[cfg(feature = "channel-matrix")]
             {
                 let access_token =
-                    read_env_required("AXIOM_MATRIX_ACCESS_TOKEN", "matrix.access_token")?;
-                let room_id = read_env_optional("AXIOM_MATRIX_ROOM_ID");
-                let homeserver = read_env_optional("AXIOM_MATRIX_HOMESERVER");
+                    read_env_required("AXONRUNNER_MATRIX_ACCESS_TOKEN", "matrix.access_token")?;
+                let room_id = read_env_optional("AXONRUNNER_MATRIX_ROOM_ID");
+                let homeserver = read_env_optional("AXONRUNNER_MATRIX_HOMESERVER");
                 let config = MatrixConfig::new(access_token, room_id, homeserver, Vec::new())
                     .map_err(|e| format!("matrix config error: {e}"))?;
                 let adapter = MatrixChannelAdapter::live(config)
@@ -204,9 +225,10 @@ pub fn build_contract_channel(name: &str) -> Result<Box<dyn ChannelAdapter>, Str
             #[cfg(feature = "channel-whatsapp")]
             {
                 let api_token =
-                    read_env_required("AXIOM_WHATSAPP_API_TOKEN", "whatsapp.api_token")?;
-                let phone_number_id = read_env_optional("AXIOM_WHATSAPP_PHONE_NUMBER_ID");
-                let business_account_id = read_env_optional("AXIOM_WHATSAPP_BUSINESS_ACCOUNT_ID");
+                    read_env_required("AXONRUNNER_WHATSAPP_API_TOKEN", "whatsapp.api_token")?;
+                let phone_number_id = read_env_optional("AXONRUNNER_WHATSAPP_PHONE_NUMBER_ID");
+                let business_account_id =
+                    read_env_optional("AXONRUNNER_WHATSAPP_BUSINESS_ACCOUNT_ID");
                 let config = WhatsAppConfig::new(
                     api_token,
                     phone_number_id,
@@ -257,19 +279,34 @@ fn read_env_optional(key: &str) -> Option<String> {
     read_env_trimmed(key)
 }
 
-fn read_env_trimmed(key: &str) -> Option<String> {
+pub(crate) fn read_env_trimmed(key: &str) -> Option<String> {
     if key.is_empty() {
         return None;
     }
-    std::env::var(key)
-        .ok()
-        .map(|value| value.trim().to_owned())
-        .filter(|value| !value.is_empty())
+    for candidate in env_candidates(key) {
+        if let Ok(value) = std::env::var(candidate.as_str()) {
+            let value = value.trim().to_owned();
+            if !value.is_empty() {
+                return Some(value);
+            }
+        }
+    }
+    None
+}
+
+fn env_candidates(key: &str) -> [String; 2] {
+    let legacy = key
+        .strip_prefix("AXONRUNNER_")
+        .map(|suffix| format!("AXIOM_{suffix}"))
+        .unwrap_or_else(|| key.to_owned());
+    [key.to_owned(), legacy]
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_csv_list, resolve_channel_adapter_id, resolve_channel_id};
+    use super::{
+        channel_is_compiled, parse_csv_list, resolve_channel_adapter_id, resolve_channel_id,
+    };
 
     #[test]
     fn resolve_channel_id_accepts_namespaced_aliases() {
@@ -306,5 +343,12 @@ mod tests {
             ]
         );
         assert!(parse_csv_list(" , , ").is_empty());
+    }
+
+    #[test]
+    fn channel_is_compiled_tracks_registry_entries() {
+        assert!(channel_is_compiled("telegram"));
+        assert!(channel_is_compiled("channel.telegram"));
+        assert!(!channel_is_compiled("unknown-channel"));
     }
 }

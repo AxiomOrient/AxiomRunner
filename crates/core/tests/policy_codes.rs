@@ -1,5 +1,5 @@
-use axiom_core::PolicyCode;
-use axiom_core::policy_codes::POLICY_REJECTION_CODES;
+use axonrunner_core::PolicyCode;
+use axonrunner_core::policy_codes::POLICY_REJECTION_CODES;
 
 fn rejection_occurrences(code: PolicyCode) -> usize {
     POLICY_REJECTION_CODES

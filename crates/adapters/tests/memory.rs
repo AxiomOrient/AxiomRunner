@@ -4,9 +4,9 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use axiom_adapters::MemoryAdapter;
-use axiom_adapters::contracts::AdapterHealth;
-use axiom_adapters::memory::{MarkdownMemoryAdapter, SqliteMemoryAdapter};
+use axonrunner_adapters::MemoryAdapter;
+use axonrunner_adapters::contracts::AdapterHealth;
+use axonrunner_adapters::memory::{MarkdownMemoryAdapter, SqliteMemoryAdapter};
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(0);
 
@@ -239,7 +239,7 @@ fn temp_path(prefix: &str, ext: &str) -> PathBuf {
     let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
 
     env::temp_dir().join(format!(
-        "axiom_adapters_{prefix}_{}_{}_{}.{}",
+        "axonrunner_adapters_{prefix}_{}_{}_{}.{}",
         std::process::id(),
         seed,
         id,

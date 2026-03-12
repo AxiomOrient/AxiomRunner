@@ -89,52 +89,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c08606f8c3cbf4ce6ec8e28fb0014a2c086708fe954eaa885384a6165172e7e8"
 
 [[package]]
-name = "axiom_adapters"
-version = "0.1.0"
-dependencies = [
- "axiom_core",
- "axiomme-core",
- "coclai",
- "reqwest",
- "rusqlite",
- "serde_json",
- "tokio",
-]
-
-[[package]]
-name = "axiom_apps"
-version = "0.1.0"
-dependencies = [
- "axiom_adapters",
- "axiom_core",
- "axiom_schema",
- "hmac",
- "reqwest",
- "rusqlite",
- "serde",
- "serde_json",
- "sha2",
- "tokio",
- "toml",
- "totp-rs",
-]
-
-[[package]]
-name = "axiom_core"
-version = "0.1.0"
-
-[[package]]
-name = "axiom_infra"
-version = "0.1.0"
-
-[[package]]
-name = "axiom_schema"
-version = "0.1.0"
-
-[[package]]
 name = "axiomme-core"
 version = "0.1.1"
-source = "git+https://github.com/AxiomOrient/AxiomMe?rev=8d2e66ee57217d6a61c800547127684327510855#8d2e66ee57217d6a61c800547127684327510855"
+source = "git+https://github.com/AxiomOrient/AxiomSync?rev=8d2e66ee57217d6a61c800547127684327510855#8d2e66ee57217d6a61c800547127684327510855"
 dependencies = [
  "blake3",
  "chrono",
@@ -152,6 +109,51 @@ dependencies = [
  "walkdir",
  "zip",
 ]
+
+[[package]]
+name = "axonrunner_adapters"
+version = "0.0.1"
+dependencies = [
+ "axiomme-core",
+ "axonrunner_core",
+ "axonrunner_infra",
+ "coclai",
+ "reqwest",
+ "rusqlite",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "axonrunner_apps"
+version = "0.0.1"
+dependencies = [
+ "axonrunner_adapters",
+ "axonrunner_core",
+ "axonrunner_infra",
+ "axonrunner_schema",
+ "hmac",
+ "reqwest",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tokio",
+ "toml",
+ "totp-rs",
+]
+
+[[package]]
+name = "axonrunner_core"
+version = "0.0.1"
+
+[[package]]
+name = "axonrunner_infra"
+version = "0.0.1"
+
+[[package]]
+name = "axonrunner_schema"
+version = "0.0.1"
 
 [[package]]
 name = "base32"

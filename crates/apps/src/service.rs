@@ -4,9 +4,9 @@ use crate::time_util::unix_now_seconds;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-const ENV_SERVICE_STATE_PATH: &str = "AXIOM_SERVICE_STATE_PATH";
-const DEFAULT_SERVICE_STATE_PATH: &str = ".axiom/service/state.db";
-const SERVICE_STATE_FORMAT: &str = "format=axiom-service-v1";
+const ENV_SERVICE_STATE_PATH: &str = "AXONRUNNER_SERVICE_STATE_PATH";
+const DEFAULT_SERVICE_STATE_PATH: &str = ".axonrunner/service/state.db";
+const SERVICE_STATE_FORMAT: &str = "format=axonrunner-service-v1";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ServiceAction {
@@ -261,7 +261,7 @@ mod tests {
             .unwrap_or(Duration::from_secs(0))
             .as_nanos();
         std::env::temp_dir().join(format!(
-            "axiom-service-{label}-{}-{tick}.{extension}",
+            "axonrunner-service-{label}-{}-{tick}.{extension}",
             std::process::id()
         ))
     }

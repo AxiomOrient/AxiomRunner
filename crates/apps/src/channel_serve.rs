@@ -1,14 +1,17 @@
-use axiom_adapters::contracts::{AgentAdapter, ChannelAdapter, ChannelMessage, ContextAdapter};
+use axonrunner_adapters::contracts::{
+    AgentAdapter, ChannelAdapter, ChannelMessage, ContextAdapter,
+};
 use std::sync::Arc;
 
 use crate::agent_loop::{
     AgentAction, AgentExecutionContext, AgentResultKind, execute_agent_action,
 };
+use crate::env_util::read_env_trimmed;
 use crate::estop::EStop;
-use axiom_apps::async_runtime_host::global_async_runtime_host;
+use axonrunner_apps::async_runtime_host::global_async_runtime_host;
 
 const MAX_SEND_RETRIES: u32 = 3;
-const ENV_CHANNEL_SERVE_CONCURRENCY: &str = "AXIOM_CHANNEL_SERVE_CONCURRENCY";
+const ENV_CHANNEL_SERVE_CONCURRENCY: &str = "AXONRUNNER_CHANNEL_SERVE_CONCURRENCY";
 const DEFAULT_CHANNEL_SERVE_CONCURRENCY_FALLBACK: usize = 4;
 const DEFAULT_CHANNEL_SERVE_CONCURRENCY_CAP: usize = 8;
 
@@ -177,8 +180,9 @@ fn run_channel_serve_loop_with_parallelism(
 }
 
 fn channel_serve_parallelism_from_env() -> usize {
-    std::env::var(ENV_CHANNEL_SERVE_CONCURRENCY)
+    read_env_trimmed(ENV_CHANNEL_SERVE_CONCURRENCY)
         .ok()
+        .flatten()
         .and_then(|raw| raw.trim().parse::<usize>().ok())
         .filter(|&value| value > 0)
         .unwrap_or_else(default_channel_serve_concurrency)
@@ -326,10 +330,10 @@ fn extract_reply(kind: &AgentResultKind) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axiom_adapters::contracts::{
+    use axonrunner_adapters::contracts::{
         AdapterFuture, AdapterHealth, AgentRequest, AgentResponse, ChannelSendReceipt,
     };
-    use axiom_adapters::error::AdapterResult;
+    use axonrunner_adapters::error::AdapterResult;
     use std::collections::VecDeque;
     use std::time::Duration;
 

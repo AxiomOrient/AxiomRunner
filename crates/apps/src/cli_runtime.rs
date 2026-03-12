@@ -6,14 +6,15 @@ use crate::doctor::{
     DAEMON_HEALTH_ENV, DaemonHealthInput, DaemonHealthReadErrorKind, DoctorContextInput,
     DoctorInput, DoctorRuntimeInput, build_doctor_report, parse_daemon_health,
 };
+use crate::env_util::read_env_trimmed;
 use crate::runtime_compose::{RuntimeComposeConfig, RuntimeComposeState};
 use crate::status::{
     ChannelStatusInput, RuntimeStatusInput, StateStatusInput, StatusInput, StatusSnapshot,
     render_status_lines,
 };
-use axiom_adapters::contracts::ContextAdapter;
-use axiom_apps::{daemon, gateway};
-use axiom_core::{
+use axonrunner_adapters::contracts::ContextAdapter;
+use axonrunner_apps::{daemon, gateway};
+use axonrunner_core::{
     AgentState, DecisionOutcome, DomainEvent, Intent, IntentKind, PolicyCode, build_policy_audit,
     decide, evaluate_policy, project_from,
 };
@@ -38,20 +39,23 @@ pub struct CliRuntime {
 }
 
 impl CliRuntime {
-    pub fn new(actor_id: String, config: &AppConfig) -> Self {
+    pub fn new(actor_id: String, config: &AppConfig) -> Result<Self, String> {
         Self::new_with_compose(
             actor_id,
             RuntimeComposeConfig::from_env(config.provider.as_str()),
         )
     }
 
-    fn new_with_compose(actor_id: String, compose_config: RuntimeComposeConfig) -> Self {
-        Self {
+    fn new_with_compose(
+        actor_id: String,
+        compose_config: RuntimeComposeConfig,
+    ) -> Result<Self, String> {
+        Ok(Self {
             state: AgentState::default(),
             actor_id,
             next_intent_seq: 0,
-            compose_state: RuntimeComposeState::new(compose_config),
-        }
+            compose_state: RuntimeComposeState::new(compose_config)?,
+        })
     }
 
     pub fn context(&self) -> Option<&dyn ContextAdapter> {
@@ -248,24 +252,20 @@ fn execute_doctor(runtime: &CliRuntime, config: &AppConfig) {
 }
 
 fn daemon_health_from_config(config: &AppConfig) -> DaemonHealthInput {
-    let path = match std::env::var(DAEMON_HEALTH_ENV) {
-        Ok(path) => {
-            if path.trim().is_empty() {
-                return DaemonHealthInput::InvalidEnvValue {
-                    reason: "empty_path",
-                };
-            }
-            std::path::PathBuf::from(path)
-        }
-        Err(std::env::VarError::NotPresent) => {
-            match daemon::resolve_health_path_from_state(&config.profile, &config.endpoint) {
-                Some(path) => path,
-                None => return DaemonHealthInput::MissingEnv,
-            }
-        }
-        Err(std::env::VarError::NotUnicode(_)) => {
+    let path = match read_env_trimmed(DAEMON_HEALTH_ENV) {
+        Ok(Some(path)) => std::path::PathBuf::from(path),
+        Ok(None) => match daemon::resolve_health_path_from_state(&config.profile, &config.endpoint)
+        {
+            Some(path) => path,
+            None => return DaemonHealthInput::MissingEnv,
+        },
+        Err(error) => {
             return DaemonHealthInput::InvalidEnvValue {
-                reason: "not_unicode",
+                reason: if error.contains("empty") {
+                    "empty_path"
+                } else {
+                    "not_unicode"
+                },
             };
         }
     };
@@ -402,7 +402,7 @@ mod tests {
     use super::{CliRuntime, RuntimeComposeConfig, execute_command};
     use crate::cli_command::{CliCommand, IntentTemplate};
     use crate::config_loader::AppConfig;
-    use axiom_adapters::{MemoryAdapter, memory::MarkdownMemoryAdapter};
+    use axonrunner_adapters::{MemoryAdapter, memory::MarkdownMemoryAdapter};
     use std::fs;
     use std::path::PathBuf;
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -413,7 +413,7 @@ mod tests {
             .unwrap_or(Duration::from_secs(0))
             .as_nanos();
         std::env::temp_dir().join(format!(
-            "axiom-cli-runtime-{label}-{}-{tick}.{extension}",
+            "axonrunner-cli-runtime-{label}-{}-{tick}.{extension}",
             std::process::id()
         ))
     }
@@ -431,7 +431,7 @@ mod tests {
             max_tokens: 4096,
             bootstrap_root: None,
             channel_id: None,
-            tool_ids: vec![axiom_adapters::DEFAULT_TOOL_ID.to_owned()],
+            tool_ids: vec![axonrunner_adapters::DEFAULT_TOOL_ID.to_owned()],
             context_root: None,
         }
     }
@@ -442,7 +442,8 @@ mod tests {
         let mut runtime = CliRuntime::new_with_compose(
             String::from("system"),
             compose_config(Some(path.clone()), None),
-        );
+        )
+        .expect("runtime should initialize");
 
         let config = AppConfig::default();
         execute_command(
@@ -471,7 +472,8 @@ mod tests {
         let mut runtime = CliRuntime::new_with_compose(
             String::from("system"),
             compose_config(Some(path.clone()), None),
-        );
+        )
+        .expect("runtime should initialize");
 
         let config = AppConfig::default();
         execute_command(
@@ -510,7 +512,8 @@ mod tests {
         let mut runtime = CliRuntime::new_with_compose(
             String::from("system"),
             compose_config(Some(memory_path.clone()), Some(workspace.clone())),
-        );
+        )
+        .expect("runtime should initialize");
 
         let config = AppConfig::default();
         execute_command(
@@ -569,7 +572,7 @@ mod tests {
 
     #[test]
     fn otp_gate_empty_code_is_rejected() {
-        // Mirrors the case where AXIOM_OTP_CODE is absent:
+        // Mirrors the case where AXONRUNNER_OTP_CODE is absent:
         // unwrap_or_default() yields "" and verify must reject it.
         const SECRET: &str = "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP";
         let gate = crate::otp_gate::OtpGate::new(SECRET).expect("valid secret");
@@ -587,7 +590,8 @@ mod tests {
     #[test]
     fn read_intent_does_not_increment_revision() {
         let mut runtime =
-            CliRuntime::new_with_compose(String::from("system"), compose_config(None, None));
+            CliRuntime::new_with_compose(String::from("system"), compose_config(None, None))
+                .expect("runtime should initialize");
         let config = AppConfig::default();
         execute_command(
             &mut runtime,
@@ -619,7 +623,8 @@ mod tests {
     #[test]
     fn read_intent_does_not_increment_revision_on_missing_key() {
         let mut runtime =
-            CliRuntime::new_with_compose(String::from("system"), compose_config(None, None));
+            CliRuntime::new_with_compose(String::from("system"), compose_config(None, None))
+                .expect("runtime should initialize");
         let config = AppConfig::default();
         let baseline = runtime.state.revision;
 

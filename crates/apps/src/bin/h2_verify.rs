@@ -2,12 +2,12 @@ fn main() -> std::process::ExitCode {
     h2_impl::run()
 }
 
-use axiom_apps::display::mode_name;
-use axiom_apps::gateway;
+use axonrunner_apps::display::mode_name;
+use axonrunner_apps::gateway;
 
 mod h2_impl {
     use super::{gateway, mode_name};
-    use axiom_core::DecisionOutcome;
+    use axonrunner_core::DecisionOutcome;
     use gateway::{GatewayRejectReason, GatewayRuntime, HttpBoundaryRequest};
     use std::{
         fmt::Write as _,
@@ -247,15 +247,18 @@ mod h2_impl {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_nanos();
-        let tmp_root =
-            std::env::temp_dir().join(format!("axiom_h2_verify_{}_{}", std::process::id(), stamp));
+        let tmp_root = std::env::temp_dir().join(format!(
+            "axonrunner_h2_verify_{}_{}",
+            std::process::id(),
+            stamp
+        ));
         let workspace = tmp_root.join("workspace");
         fs::create_dir_all(&workspace)
             .map_err(|e| format!("failed to create h2 temp workspace: {e}"))?;
         let memory = tmp_root.join("memory.db");
         let out = Command::new(apps_bin)
-            .env("AXIOM_RUNTIME_MEMORY_PATH", memory.as_os_str())
-            .env("AXIOM_RUNTIME_TOOL_WORKSPACE", workspace.as_os_str())
+            .env("AXONRUNNER_RUNTIME_MEMORY_PATH", memory.as_os_str())
+            .env("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", workspace.as_os_str())
             .args(args)
             .output()
             .map_err(|e| format!("failed to execute apps binary: {e}"))?;

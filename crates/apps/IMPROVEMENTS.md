@@ -1,4 +1,4 @@
-# axiom_apps Crate Improvements (개선점 및 최종 검토)
+# axonrunner_apps Crate Improvements (개선점 및 최종 검토)
 
 `crates/apps` 폴더를 워크스페이스(Workspace) 관점에서 다른 크레이트(`core`, `adapters`, `schema` 등)와의 관계를 고려하여 중립적인 시각에서 최종 검토한 결과입니다.
 

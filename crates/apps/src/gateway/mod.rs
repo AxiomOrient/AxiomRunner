@@ -1,11 +1,11 @@
-use axiom_apps::metrics::{
+use crate::env_util::read_env_trimmed;
+use axonrunner_apps::metrics::{
     MetricsSnapshot, record_copy_bytes, record_lock_wait_ns, record_queue_depth,
 };
-use axiom_core::{
+use axonrunner_core::{
     AgentState, Decision, DecisionOutcome, DomainEvent, Intent, PolicyAuditRecord, PolicyCode,
     build_policy_audit, decide, evaluate_policy, project_from,
 };
-use std::env;
 
 mod boundary;
 pub mod signature;
@@ -18,7 +18,7 @@ pub const GATEWAY_METHOD: &str = "POST";
 pub const GATEWAY_PATH: &str = "/v1/intents";
 pub const MAX_BODY_BYTES: usize = 4096;
 
-const ENV_GATEWAY_REQUESTS: &str = "AXIOM_GATEWAY_REQUESTS";
+const ENV_GATEWAY_REQUESTS: &str = "AXONRUNNER_GATEWAY_REQUESTS";
 const DEFAULT_GATEWAY_SOURCE_IP: &str = "127.0.0.1";
 const DEFAULT_GATEWAY_BODY: &str = "read:health";
 
@@ -162,9 +162,9 @@ pub fn parse_gateway_requests(raw: &str) -> Result<Vec<GatewayRunRequest>, Strin
 }
 
 fn load_gateway_requests() -> Result<Vec<GatewayRunRequest>, String> {
-    match env::var(ENV_GATEWAY_REQUESTS) {
-        Ok(raw) => parse_gateway_requests(&raw),
-        Err(_) => Ok(default_gateway_requests()),
+    match read_env_trimmed(ENV_GATEWAY_REQUESTS)? {
+        Some(raw) => parse_gateway_requests(&raw),
+        None => Ok(default_gateway_requests()),
     }
 }
 

@@ -7,11 +7,12 @@ use crate::cli_command::{
     OnboardActionTemplate, ServiceActionTemplate, SkillsActionTemplate,
 };
 use crate::cron::{CronAction, CronResult, execute_cron_action};
+use crate::env_util::read_env_trimmed;
 use crate::integrations::{IntegrationsAction, IntegrationsResult, execute_integrations_action};
 use crate::onboard::{OnboardAction, OnboardResult, execute_onboard_action};
 use crate::service::{ServiceAction, ServiceResult, execute_service_action};
 use crate::skills::{SkillsAction, SkillsResult, execute_skills_action};
-use axiom_adapters::contracts::ContextAdapter;
+use axonrunner_adapters::contracts::ContextAdapter;
 
 pub(super) fn execute_onboard(profile: &str, action: OnboardActionTemplate) -> Result<(), String> {
     let result = execute_onboard_action(OnboardAction::Configure {
@@ -51,19 +52,22 @@ pub(super) fn execute_agent(
     action: AgentActionTemplate,
     context: Option<&dyn ContextAdapter>,
 ) -> Result<(), String> {
-    // OTP gate: if AXIOM_OTP_SECRET is set, require a valid TOTP code via AXIOM_OTP_CODE.
+    // OTP gate: if AXONRUNNER_OTP_SECRET is set, require a valid TOTP code via AXONRUNNER_OTP_CODE.
     // If the env var is absent the gate is disabled and execution proceeds unchanged.
     if let Some(gate_result) = crate::otp_gate::OtpGate::load_from_env() {
         let gate = gate_result.map_err(|e| format!("OTP gate config error: {e}"))?;
-        let provided = std::env::var("AXIOM_OTP_CODE").unwrap_or_default();
+        let provided = read_env_trimmed("AXONRUNNER_OTP_CODE")
+            .map_err(|e| format!("OTP gate config error: {e}"))?
+            .unwrap_or_default();
         if !gate.verify(&provided) {
             return Err(
-                "OTP verification failed. Set AXIOM_OTP_CODE=<6-digit-code> and retry.".to_string(),
+                "OTP verification failed. Set AXONRUNNER_OTP_CODE=<6-digit-code> and retry."
+                    .to_string(),
             );
         }
     }
 
-    let agent = axiom_adapters::build_contract_agent("")
+    let agent = axonrunner_adapters::build_contract_agent("")
         .map_err(|e| format!("agent backend init failed: {e}"))?;
 
     let result = execute_agent_action(
@@ -319,7 +323,7 @@ pub(super) fn execute_channel(action: ChannelActionTemplate) -> Result<(), Strin
                 println!(
                     "channel entry name={} type={} running={} health={} updated_at={} config={}",
                     channel.name,
-                    channel.channel_type.as_str(),
+                    channel.channel_type,
                     channel.running,
                     channel
                         .last_health
@@ -334,13 +338,22 @@ pub(super) fn execute_channel(action: ChannelActionTemplate) -> Result<(), Strin
             path,
             started,
             total_running,
+            failed,
+            failures,
         } => {
             println!(
-                "channel start started={} running={} path={}",
+                "channel start started={} running={} failed={} path={}",
                 started,
                 total_running,
+                failed,
                 path.display()
             );
+            for failure in &failures {
+                println!("channel start failure {failure}");
+            }
+            if failed > 0 {
+                return Err(format!("channel start failed unhealthy={failed}"));
+            }
         }
         ChannelResult::Doctored {
             path,
@@ -359,18 +372,21 @@ pub(super) fn execute_channel(action: ChannelActionTemplate) -> Result<(), Strin
                 println!(
                     "channel check name={} type={} status={} detail={} checked_at={}",
                     check.name,
-                    check.channel_type.as_str(),
+                    check.channel_type,
                     check.status.as_str(),
                     check.detail,
                     check.checked_at
                 );
+            }
+            if unhealthy > 0 {
+                return Err(format!("channel doctor failed unhealthy={unhealthy}"));
             }
         }
         ChannelResult::Added { path, channel } => {
             println!(
                 "channel added name={} type={} path={}",
                 channel.name,
-                channel.channel_type.as_str(),
+                channel.channel_type,
                 path.display()
             );
         }

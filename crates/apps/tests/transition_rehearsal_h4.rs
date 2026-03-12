@@ -9,7 +9,7 @@ fn test_root(label: &str) -> PathBuf {
         .unwrap_or_default()
         .as_nanos();
     let root = std::env::temp_dir().join(format!(
-        "axiom-transition-rehearsal-h4-{label}-{}-{stamp}",
+        "axonrunner-transition-rehearsal-h4-{label}-{}-{stamp}",
         std::process::id()
     ));
     fs::create_dir_all(&root).expect("test root should be created");
@@ -89,7 +89,7 @@ fn default_args(
         String::from("--health-file"),
         health_file.display().to_string(),
         String::from("--apps-bin"),
-        String::from(env!("CARGO_BIN_EXE_axiom_apps")),
+        String::from(env!("CARGO_BIN_EXE_axonrunner_apps")),
         String::from("--h2-bin"),
         String::from(env!("CARGO_BIN_EXE_h2_verify")),
         String::from("--report"),

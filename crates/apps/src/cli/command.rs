@@ -1,8 +1,8 @@
-use axiom_core::Intent;
+use axonrunner_core::Intent;
 
 pub const USAGE: &str = "\
 usage:
-  axiom_apps [global-options] <command> [command-args]
+  axonrunner_apps [global-options] <command> [command-args]
 
 global-options:
   --config-file <path>

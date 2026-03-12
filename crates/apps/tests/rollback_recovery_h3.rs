@@ -9,7 +9,7 @@ fn test_root(label: &str) -> PathBuf {
         .unwrap_or_default()
         .as_nanos();
     let root = std::env::temp_dir().join(format!(
-        "axiom-rollback-recovery-{label}-{}-{stamp}",
+        "axonrunner-rollback-recovery-{label}-{}-{stamp}",
         std::process::id()
     ));
     fs::create_dir_all(&root).expect("test root should be created");

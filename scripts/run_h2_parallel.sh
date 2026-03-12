@@ -2,7 +2,7 @@
 set -euo pipefail
 
 if [ "$#" -ne 1 ]; then
-  echo "usage: $0 <path-to-axiom_apps-binary>"
+  echo "usage: $0 <path-to-axonrunner_apps-binary>"
   exit 2
 fi
 
@@ -21,7 +21,7 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "$script_dir/.." && pwd)"
 
 set +e
-output="$(cd "$repo_root" && cargo run -q -p axiom_apps --bin h2_verify -- --apps-bin "$apps_bin" --allowed-diff "$allowed_diff" 2>&1)"
+output="$(cd "$repo_root" && cargo run -q -p axonrunner_apps --bin h2_verify -- --apps-bin "$apps_bin" --allowed-diff "$allowed_diff" 2>&1)"
 status=$?
 set -e
 

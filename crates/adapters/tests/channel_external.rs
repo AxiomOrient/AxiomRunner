@@ -1,16 +1,16 @@
-use axiom_adapters::{
+use axonrunner_adapters::{
     AdapterHealth, ChannelAdapter, ChannelMessage, TelegramChannelAdapter, TelegramConfig,
 };
 #[cfg(feature = "channel-discord")]
-use axiom_adapters::{DiscordChannelAdapter, DiscordConfig};
+use axonrunner_adapters::{DiscordChannelAdapter, DiscordConfig};
 #[cfg(feature = "channel-irc")]
-use axiom_adapters::{IrcChannelAdapter, IrcConfig};
+use axonrunner_adapters::{IrcChannelAdapter, IrcConfig};
 #[cfg(feature = "channel-matrix")]
-use axiom_adapters::{MatrixChannelAdapter, MatrixConfig};
+use axonrunner_adapters::{MatrixChannelAdapter, MatrixConfig};
 #[cfg(feature = "channel-slack")]
-use axiom_adapters::{SlackChannelAdapter, SlackConfig};
+use axonrunner_adapters::{SlackChannelAdapter, SlackConfig};
 #[cfg(feature = "channel-whatsapp")]
-use axiom_adapters::{WhatsAppChannelAdapter, WhatsAppConfig};
+use axonrunner_adapters::{WhatsAppChannelAdapter, WhatsAppConfig};
 use std::future::Future;
 
 fn block_on<T>(future: impl Future<Output = T>) -> T {

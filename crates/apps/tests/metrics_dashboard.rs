@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 use std::fs;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use axiom_apps::{daemon, gateway, metrics};
+use axonrunner_apps::{daemon, gateway, metrics};
 
 use daemon::{DaemonConfig, Sleeper, WorkError, WorkExecutor, WorkItem};
 
@@ -47,7 +47,7 @@ fn temp_health_path(label: &str) -> std::path::PathBuf {
         .as_nanos();
 
     std::env::temp_dir().join(format!(
-        "axiom-metrics-dashboard-{label}-{}-{stamp}.health",
+        "axonrunner-metrics-dashboard-{label}-{}-{stamp}.health",
         std::process::id()
     ))
 }

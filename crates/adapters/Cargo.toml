@@ -1,10 +1,10 @@
 [package]
-name = "axiom_adapters"
+name = "axonrunner_adapters"
 version.workspace = true
 edition.workspace = true
 
 [lib]
-name = "axiom_adapters"
+name = "axonrunner_adapters"
 path = "src/lib.rs"
 
 [features]
@@ -18,10 +18,11 @@ channel-whatsapp = []
 workspace = true
 
 [dependencies]
-axiom_core = { path = "../core" }
+axonrunner_core = { path = "../core" }
+axonrunner_infra = { path = "../infra" }
 rusqlite = { version = "0.32.1", features = ["bundled"] }
 coclai = { path = "../../../coclai/crates/coclai" }
 tokio = { version = "1", features = ["rt-multi-thread"] }
 reqwest = { version = "0.12", features = ["blocking", "json", "rustls-tls"], default-features = false }
 serde_json = "1"
-axiomme-core = { git = "https://github.com/AxiomOrient/AxiomMe", rev = "8d2e66ee57217d6a61c800547127684327510855" }
+axiomme-core = { git = "https://github.com/AxiomOrient/AxiomSync", rev = "8d2e66ee57217d6a61c800547127684327510855" }

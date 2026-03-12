@@ -1,12 +1,14 @@
 use crate::contracts::{AdapterFuture, AdapterHealth, ToolAdapter, ToolCall, ToolOutput};
-use crate::error::{AdapterError, AdapterResult, RetryClass};
+use crate::error::{AdapterError, AdapterResult, RetryClass, classify_reqwest_error};
 use std::collections::BTreeMap;
 use std::sync::Mutex;
+use std::time::Duration;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BrowserToolAction {
     Open,
     Current,
+    Find,
 }
 
 impl BrowserToolAction {
@@ -14,6 +16,7 @@ impl BrowserToolAction {
         match name {
             "browser.open" | "browser_open" => Some(Self::Open),
             "browser.current" | "browser_current" => Some(Self::Current),
+            "browser.find" | "browser_find" => Some(Self::Find),
             _ => None,
         }
     }
@@ -24,6 +27,9 @@ pub struct BrowserToolConfig {
     pub allowed_hosts: Vec<String>,
     pub require_https: bool,
     pub max_url_bytes: usize,
+    pub max_page_bytes: usize,
+    pub max_query_bytes: usize,
+    pub request_timeout_secs: u64,
 }
 
 impl Default for BrowserToolConfig {
@@ -32,6 +38,9 @@ impl Default for BrowserToolConfig {
             allowed_hosts: vec![String::from("example.com")],
             require_https: true,
             max_url_bytes: 2048,
+            max_page_bytes: 256 * 1024,
+            max_query_bytes: 512,
+            request_timeout_secs: 20,
         }
     }
 }
@@ -41,19 +50,41 @@ struct BrowserOpenInput {
     url: String,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct BrowserFindInput {
+    query: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct BrowserPageSnapshot {
+    url: String,
+    host: String,
+    status: u16,
+    title: Option<String>,
+    body: String,
+    body_bytes: usize,
+}
+
 pub struct BrowserToolAdapter {
     config: BrowserToolConfig,
-    current_url: Mutex<Option<String>>,
+    http_client: reqwest::blocking::Client,
+    current_page: Mutex<Option<BrowserPageSnapshot>>,
 }
 
 impl BrowserToolAdapter {
     pub fn new(mut config: BrowserToolConfig) -> Self {
         normalize_allowed_hosts(&mut config.allowed_hosts);
+        let timeout = Duration::from_secs(config.request_timeout_secs.max(1));
+        let http_client = reqwest::blocking::Client::builder()
+            .connect_timeout(Duration::from_secs(5))
+            .timeout(timeout)
+            .build()
+            .unwrap_or_else(|_| reqwest::blocking::Client::new());
 
         Self {
             config,
-            current_url: Mutex::new(None),
+            http_client,
+            current_page: Mutex::new(None),
         }
     }
 }
@@ -89,31 +120,79 @@ impl ToolAdapter for BrowserToolAdapter {
                     let input = parse_open_input(&call.args, self.config.max_url_bytes)?;
                     let parsed = parse_url(&input.url)?;
                     validate_url(parsed, &self.config)?;
+                    let snapshot = fetch_page_snapshot(
+                        &self.http_client,
+                        &input.url,
+                        parsed.host,
+                        self.config.max_page_bytes,
+                    )?;
+                    let title = snapshot.title.as_deref().unwrap_or("<none>");
 
-                    let mut current = self.current_url.lock().map_err(|_| {
+                    let mut current = self.current_page.lock().map_err(|_| {
                         AdapterError::failed(
                             "browser.current.lock",
                             "browser lock poisoned",
                             RetryClass::NonRetryable,
                         )
                     })?;
-                    *current = Some(input.url.clone());
+                    *current = Some(snapshot.clone());
 
                     Ok(ToolOutput {
-                        content: format!("browser.open url={} host={}", input.url, parsed.host),
+                        content: format!(
+                            "browser.open url={} host={} status={} bytes={} title={}",
+                            snapshot.url,
+                            snapshot.host,
+                            snapshot.status,
+                            snapshot.body_bytes,
+                            title
+                        ),
                     })
                 }
                 BrowserToolAction::Current => {
-                    let current = self.current_url.lock().map_err(|_| {
+                    let current = self.current_page.lock().map_err(|_| {
                         AdapterError::failed(
                             "browser.current.lock",
                             "browser lock poisoned",
                             RetryClass::NonRetryable,
                         )
                     })?;
-                    let current = current.as_deref().unwrap_or("<none>");
+                    match current.as_ref() {
+                        Some(snapshot) => Ok(ToolOutput {
+                            content: format!(
+                                "browser.current url={} host={} status={} bytes={} title={}",
+                                snapshot.url,
+                                snapshot.host,
+                                snapshot.status,
+                                snapshot.body_bytes,
+                                snapshot.title.as_deref().unwrap_or("<none>")
+                            ),
+                        }),
+                        None => Ok(ToolOutput {
+                            content: String::from("browser.current url=<none>"),
+                        }),
+                    }
+                }
+                BrowserToolAction::Find => {
+                    let input = parse_find_input(&call.args, self.config.max_query_bytes)?;
+                    let current = self.current_page.lock().map_err(|_| {
+                        AdapterError::failed(
+                            "browser.current.lock",
+                            "browser lock poisoned",
+                            RetryClass::NonRetryable,
+                        )
+                    })?;
+                    let snapshot = current.as_ref().ok_or_else(|| {
+                        AdapterError::invalid_input(
+                            "browser.current",
+                            "no page is currently loaded",
+                        )
+                    })?;
+                    let hits = count_case_insensitive_occurrences(&snapshot.body, &input.query);
                     Ok(ToolOutput {
-                        content: format!("browser.current url={current}"),
+                        content: format!(
+                            "browser.find url={} query={} hits={hits}",
+                            snapshot.url, input.query
+                        ),
                     })
                 }
             }
@@ -143,6 +222,31 @@ fn parse_open_input(
     }
     Ok(BrowserOpenInput {
         url: url.to_string(),
+    })
+}
+
+fn parse_find_input(
+    args: &BTreeMap<String, String>,
+    max_query_bytes: usize,
+) -> AdapterResult<BrowserFindInput> {
+    let raw_query = args
+        .get("query")
+        .ok_or_else(|| AdapterError::invalid_input("browser.query", "is required"))?;
+    let query = raw_query.trim();
+    if query.is_empty() {
+        return Err(AdapterError::invalid_input(
+            "browser.query",
+            "must not be empty",
+        ));
+    }
+    if query.len() > max_query_bytes {
+        return Err(AdapterError::invalid_input(
+            "browser.query",
+            "exceeds byte limit",
+        ));
+    }
+    Ok(BrowserFindInput {
+        query: query.to_string(),
     })
 }
 
@@ -204,6 +308,99 @@ fn validate_url(parsed: ParsedUrl<'_>, config: &BrowserToolConfig) -> AdapterRes
     Ok(())
 }
 
+fn fetch_page_snapshot(
+    client: &reqwest::blocking::Client,
+    url: &str,
+    host: &str,
+    max_page_bytes: usize,
+) -> AdapterResult<BrowserPageSnapshot> {
+    let client = client.clone();
+    let url_owned = url.to_string();
+    let fetch_result = std::thread::spawn(move || {
+        let response = client.get(&url_owned).send()?;
+        let status = response.status().as_u16();
+        let body = response.text()?;
+        Ok::<(u16, String), reqwest::Error>((status, body))
+    })
+    .join()
+    .map_err(|_| {
+        AdapterError::failed(
+            "browser.open.fetch",
+            "worker thread panicked",
+            RetryClass::Retryable,
+        )
+    })?;
+
+    let (status, body_raw) = fetch_result.map_err(|error| {
+        AdapterError::failed(
+            "browser.open.fetch",
+            classify_reqwest_error(&error),
+            RetryClass::Retryable,
+        )
+    })?;
+    if status >= 400 {
+        return Err(AdapterError::failed(
+            "browser.open.fetch",
+            format!("http status {status}"),
+            RetryClass::NonRetryable,
+        ));
+    }
+
+    let body = truncate_utf8_bytes(&body_raw, max_page_bytes);
+    let title = extract_html_title(&body);
+    let body_bytes = body.len();
+
+    Ok(BrowserPageSnapshot {
+        url: url.to_string(),
+        host: host.to_string(),
+        status,
+        title,
+        body,
+        body_bytes,
+    })
+}
+
+fn truncate_utf8_bytes(raw: &str, max_bytes: usize) -> String {
+    if raw.len() <= max_bytes {
+        return raw.to_string();
+    }
+    let cut = (0..=max_bytes)
+        .rev()
+        .find(|i| raw.is_char_boundary(*i))
+        .unwrap_or(0);
+    raw[..cut].to_string()
+}
+
+fn extract_html_title(body: &str) -> Option<String> {
+    let lower = body.to_ascii_lowercase();
+    let title_tag_start = lower.find("<title")?;
+    let title_open_end = lower[title_tag_start..].find('>')?;
+    let content_start = title_tag_start + title_open_end + 1;
+    let title_close_rel = lower[content_start..].find("</title>")?;
+    let content_end = content_start + title_close_rel;
+    let title = normalize_inline_text(&body[content_start..content_end]);
+    if title.is_empty() { None } else { Some(title) }
+}
+
+fn normalize_inline_text(raw: &str) -> String {
+    raw.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn count_case_insensitive_occurrences(haystack: &str, needle: &str) -> usize {
+    if needle.is_empty() {
+        return 0;
+    }
+    let needle = needle.to_ascii_lowercase();
+    let haystack = haystack.to_ascii_lowercase();
+    let mut count = 0usize;
+    let mut offset = 0usize;
+    while let Some(idx) = haystack[offset..].find(&needle) {
+        count = count.saturating_add(1);
+        offset = offset.saturating_add(idx + needle.len());
+    }
+    count
+}
+
 fn is_host_allowed(host: &str, allowed_hosts: &[String]) -> bool {
     let host = host.to_ascii_lowercase();
 
@@ -231,4 +428,38 @@ fn normalize_allowed_hosts(allowed_hosts: &mut Vec<String>) {
     allowed_hosts.retain(|host| !host.is_empty());
     allowed_hosts.sort_unstable();
     allowed_hosts.dedup();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        count_case_insensitive_occurrences, extract_html_title, normalize_inline_text,
+        truncate_utf8_bytes,
+    };
+
+    #[test]
+    fn extract_html_title_returns_trimmed_single_line_title() {
+        let body = "<html><head><title>  AxonRunner   Browser \n Tool </title></head></html>";
+        let title = extract_html_title(body);
+        assert_eq!(title.as_deref(), Some("AxonRunner Browser Tool"));
+    }
+
+    #[test]
+    fn truncate_utf8_bytes_preserves_char_boundaries() {
+        let text = "abcdéfgh";
+        let truncated = truncate_utf8_bytes(text, 5);
+        assert_eq!(truncated, "abcd");
+    }
+
+    #[test]
+    fn count_case_insensitive_occurrences_counts_matches() {
+        let hits = count_case_insensitive_occurrences("AxonRunner axonrunner AXIOM", "axonrunner");
+        assert_eq!(hits, 3);
+    }
+
+    #[test]
+    fn normalize_inline_text_collapses_whitespace() {
+        let normalized = normalize_inline_text("one \n two\t three");
+        assert_eq!(normalized, "one two three");
+    }
 }

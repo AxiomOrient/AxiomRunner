@@ -1,5 +1,5 @@
 pub const DEFAULT_REGISTRY_URL: &str =
-    "https://raw.githubusercontent.com/AxiomOrient/axiom-skills-registry/main/registry.json";
+    "https://raw.githubusercontent.com/AxiomOrient/axonrunner-skills-registry/main/registry.json";
 const REGISTRY_HTTP_CONNECT_TIMEOUT_SECS: u64 = 10;
 const REGISTRY_HTTP_REQUEST_TIMEOUT_SECS: u64 = 30;
 
@@ -92,8 +92,8 @@ mod tests {
     use super::*;
 
     const SAMPLE_JSON: &str = r#"[
-        {"name": "echo-skill", "version": "1.0.0", "repo_url": "https://github.com/AxiomOrient/axiom-skill-echo", "description": "Echo skill"},
-        {"name": "timer-skill", "version": "0.2.1", "repo_url": "https://github.com/AxiomOrient/axiom-skill-timer", "description": "Timer skill"}
+        {"name": "echo-skill", "version": "1.0.0", "repo_url": "https://github.com/AxiomOrient/axonrunner-skill-echo", "description": "Echo skill"},
+        {"name": "timer-skill", "version": "0.2.1", "repo_url": "https://github.com/AxiomOrient/axonrunner-skill-timer", "description": "Timer skill"}
     ]"#;
 
     #[test]
@@ -104,7 +104,7 @@ mod tests {
         assert_eq!(entries[0].version, "1.0.0");
         assert_eq!(
             entries[0].repo_url,
-            "https://github.com/AxiomOrient/axiom-skill-echo"
+            "https://github.com/AxiomOrient/axonrunner-skill-echo"
         );
     }
 

@@ -1,5 +1,5 @@
-use axiom_apps::gateway;
-use axiom_core::{DecisionOutcome, DomainEvent, ExecutionMode, PolicyCode};
+use axonrunner_apps::gateway;
+use axonrunner_core::{DecisionOutcome, DomainEvent, ExecutionMode, PolicyCode};
 
 fn make_request(body: &str, source_ip: &str) -> gateway::HttpBoundaryRequest {
     gateway::HttpBoundaryRequest::new(

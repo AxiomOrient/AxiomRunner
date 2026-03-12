@@ -179,31 +179,31 @@ pub trait RuntimeAdapter: Send + Sync {
     fn state(&self) -> RuntimeState;
 }
 
-/// A semantic context hit from AxiomMe search results.
-/// Exposes score, snippet, and full URI — preserving AxiomMe's data model.
+/// A semantic context hit from AxiomSync search results.
+/// Exposes score, snippet, and full URI — preserving AxiomSync's data model.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ContextHit {
     pub uri: String,
     pub score: f32,
-    pub snippet: String, // short excerpt (maps to AxiomMe's abstract_text)
+    pub snippet: String, // short excerpt (maps to AxiomSync's abstract_text)
     pub content: String, // full document content (may be empty if not fetched)
 }
 
-/// A full context document stored under an AxiomMe URI.
+/// A full context document stored under an AxiomSync URI.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContextDocument {
     pub uri: String,
     pub content: String,
 }
 
-/// High-level context adapter: exposes AxiomMe's URI model and semantic search.
+/// High-level context adapter: exposes AxiomSync's URI model and semantic search.
 /// Distinct from MemoryAdapter (key/value) — this models DOCUMENTS and SESSIONS.
-/// All methods are synchronous (AxiomMe has no async API).
+/// All methods are synchronous (AxiomSync has no async API).
 pub trait ContextAdapter: Send + Sync {
     fn id(&self) -> &str;
 
     /// Store a document at the given URI.
-    /// uri example: "axiom://agent/memory/my-fact"
+    /// uri example: "axonrunner://agent/memory/my-fact"
     fn store_document(&self, uri: &str, content: &str) -> AdapterResult<()>;
 
     /// Semantic search over the given scope URI.
@@ -222,7 +222,7 @@ pub trait ContextAdapter: Send + Sync {
     fn remove_document(&self, uri: &str) -> AdapterResult<bool>;
 
     /// Store a session message for conversation history tracking.
-    /// uri_prefix example: "axiom://session/sess-001"
+    /// uri_prefix example: "axonrunner://session/sess-001"
     fn store_session_message(
         &self,
         session_prefix_uri: &str,

@@ -22,7 +22,7 @@ fn unique_report_path() -> PathBuf {
         .duration_since(UNIX_EPOCH)
         .unwrap_or(Duration::from_secs(0))
         .as_nanos();
-    std::env::temp_dir().join(format!("axiom_perf_suite_{nonce}.json"))
+    std::env::temp_dir().join(format!("axonrunner_perf_suite_{nonce}.json"))
 }
 
 #[test]

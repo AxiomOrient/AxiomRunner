@@ -3,6 +3,9 @@ use std::collections::HashMap;
 #[path = "../src/config_loader.rs"]
 #[allow(dead_code)]
 mod config_loader;
+#[path = "../src/env_util.rs"]
+#[allow(dead_code)]
+mod env_util;
 #[path = "../src/parse_util.rs"]
 #[allow(dead_code)]
 mod parse_util;
@@ -24,9 +27,9 @@ fn config_priority_cli_over_env_over_file_over_default() {
     .expect("file config should parse");
 
     let env_values = HashMap::from([
-        (String::from("AXIOM_PROFILE"), String::from("env")),
+        (String::from("AXONRUNNER_PROFILE"), String::from("env")),
         (
-            String::from("AXIOM_ENDPOINT"),
+            String::from("AXONRUNNER_ENDPOINT"),
             String::from("http://env.local"),
         ),
     ]);
@@ -115,17 +118,20 @@ fn startup_parser_preserves_actor_and_config_file_spellings() {
         String::from("--actor"),
         String::from("alice"),
         String::from("--config-file"),
-        String::from("/tmp/axiom.cfg"),
+        String::from("/tmp/axonrunner.cfg"),
         String::from("status"),
     ])
     .expect("spaced options should parse");
 
     assert_eq!(spaced.actor_id, "alice");
-    assert_eq!(spaced.config_file_path.as_deref(), Some("/tmp/axiom.cfg"));
+    assert_eq!(
+        spaced.config_file_path.as_deref(),
+        Some("/tmp/axonrunner.cfg")
+    );
 
     let equals = cli_args::parse_startup_args(vec![
         String::from("--actor=bob"),
-        String::from("--config-file=/tmp/axiom-equals.cfg"),
+        String::from("--config-file=/tmp/axonrunner-equals.cfg"),
         String::from("status"),
     ])
     .expect("equals options should parse");
@@ -133,7 +139,7 @@ fn startup_parser_preserves_actor_and_config_file_spellings() {
     assert_eq!(equals.actor_id, "bob");
     assert_eq!(
         equals.config_file_path.as_deref(),
-        Some("/tmp/axiom-equals.cfg")
+        Some("/tmp/axonrunner-equals.cfg")
     );
 }
 

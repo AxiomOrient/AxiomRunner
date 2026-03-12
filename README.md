@@ -1,4 +1,4 @@
-# axiomAi
+# AxonRunner
 
 **Single-binary, multi-channel AI agent framework built on event sourcing.**
 
@@ -19,7 +19,7 @@ Deploy a production-grade AI agent that responds to users across Telegram, Disco
 |---|---|
 | **Agent** | Claude Sonnet 4 via coclai · RAG memory enrichment per turn · Skills registry |
 | **Channels** | Telegram · Discord · Slack · IRC · Matrix · WhatsApp (6 adapters) |
-| **Memory** | SQLite WAL (default) · Markdown · AxiomMe semantic indexing + BM25 RAG |
+| **Memory** | SQLite WAL (default) · Markdown · AxiomSync semantic indexing + BM25 RAG |
 | **Tools** | Shell (allowlist) · FileRead · FileWrite · Memory · Composio · Delegate (depth 3) |
 | **Security** | HMAC-SHA256 gateway · TOTP OTP gate · Shell metachar detection · no `sh -c` |
 | **Ops** | Prometheus metrics · Daemon mode · Cron scheduler · systemd integration |
@@ -35,21 +35,21 @@ Deploy a production-grade AI agent that responds to users across Telegram, Disco
 cargo build --release
 
 # 2. Run system health check
-./target/release/axiom_apps doctor
+./target/release/axonrunner_apps doctor
 
 # 3. Initialize agent identity (first run only)
-./target/release/axiom_apps onboard
+./target/release/axonrunner_apps onboard
 
 # 4. Run locally with mock agent backend (no API key required)
-AXIOM_AGENT_ID=mock \
-AXIOM_ALLOW_MOCK_AGENT=1 \
-./target/release/axiom_apps agent --message "health check"
+AXONRUNNER_AGENT_ID=mock \
+AXONRUNNER_ALLOW_MOCK_AGENT=1 \
+./target/release/axonrunner_apps agent --message "health check"
 
 # 5. Run with the default coclai backend (network required)
-./target/release/axiom_apps agent --message "hello"
+./target/release/axonrunner_apps agent --message "hello"
 ```
 
-`agent` uses `AgentAdapter` (`coclai` by default). `AXIOM_RUNTIME_PROVIDER` applies to runtime/provider paths, not the `agent` backend selector.
+`agent` uses `AgentAdapter` (`coclai` by default). `AXONRUNNER_RUNTIME_PROVIDER` applies to runtime/provider paths, not the `agent` backend selector.
 
 ---
 
@@ -65,7 +65,7 @@ User Input
 ```
 
 ```
-axiomAi/
+AxonRunner/
 ├── core/       Pure event sourcing pipeline — zero I/O dependencies
 ├── apps/       CLI · agent loop · daemon · channels · doctor · cron
 ├── adapters/   Channel adapters · Memory backends · Tools · Providers
@@ -79,16 +79,16 @@ The `core/` crate has **zero I/O dependencies**. Every side effect — network c
 
 ## Channels
 
-Channel selection is always done via the `AXIOM_RUNTIME_CHANNEL` environment variable. The `channel serve` command reads this variable at startup.
+Channel selection is always done via the `AXONRUNNER_RUNTIME_CHANNEL` environment variable. The `channel serve` command reads this variable at startup.
 
 ### Telegram
 
 Long-polling adapter. Offset is persisted to disk so no messages are replayed across restarts.
 
 ```bash
-AXIOM_RUNTIME_CHANNEL=telegram \
-AXIOM_TELEGRAM_BOT_TOKEN=<bot-token> \
-./target/release/axiom_apps channel serve
+AXONRUNNER_RUNTIME_CHANNEL=telegram \
+AXONRUNNER_TELEGRAM_BOT_TOKEN=<bot-token> \
+./target/release/axonrunner_apps channel serve
 ```
 
 Get a token from [@BotFather](https://t.me/BotFather).
@@ -98,10 +98,10 @@ Get a token from [@BotFather](https://t.me/BotFather).
 Send via webhook. Receive requires gateway events (not yet polled; see [Limitations](#limitations)).
 
 ```bash
-AXIOM_RUNTIME_CHANNEL=discord \
-AXIOM_DISCORD_BOT_TOKEN=<bot-token> \
-AXIOM_CHANNEL_DISCORD_WEBHOOK=https://discord.com/api/webhooks/... \
-./target/release/axiom_apps channel serve
+AXONRUNNER_RUNTIME_CHANNEL=discord \
+AXONRUNNER_DISCORD_BOT_TOKEN=<bot-token> \
+AXONRUNNER_CHANNEL_DISCORD_WEBHOOK=https://discord.com/api/webhooks/... \
+./target/release/axonrunner_apps channel serve
 ```
 
 ### Slack
@@ -109,10 +109,10 @@ AXIOM_CHANNEL_DISCORD_WEBHOOK=https://discord.com/api/webhooks/... \
 Send via Incoming Webhook. Receive requires Slack Event API (not yet polled; see [Limitations](#limitations)).
 
 ```bash
-AXIOM_RUNTIME_CHANNEL=slack \
-AXIOM_SLACK_BOT_TOKEN=xoxb-... \
-AXIOM_CHANNEL_SLACK_WEBHOOK=https://hooks.slack.com/services/... \
-./target/release/axiom_apps channel serve
+AXONRUNNER_RUNTIME_CHANNEL=slack \
+AXONRUNNER_SLACK_BOT_TOKEN=xoxb-... \
+AXONRUNNER_CHANNEL_SLACK_WEBHOOK=https://hooks.slack.com/services/... \
+./target/release/axonrunner_apps channel serve
 ```
 
 ### IRC
@@ -120,11 +120,11 @@ AXIOM_CHANNEL_SLACK_WEBHOOK=https://hooks.slack.com/services/... \
 Raw TCP transport. Handles `PING`/`PONG` keep-alive automatically. No TLS, no SASL (see [Limitations](#limitations)).
 
 ```bash
-AXIOM_RUNTIME_CHANNEL=irc \
-AXIOM_IRC_SERVER=irc.libera.chat:6667 \
-AXIOM_IRC_CHANNEL='#axiom' \
-AXIOM_IRC_NICK=axiom-bot \
-./target/release/axiom_apps channel serve
+AXONRUNNER_RUNTIME_CHANNEL=irc \
+AXONRUNNER_IRC_SERVER=irc.libera.chat:6667 \
+AXONRUNNER_IRC_CHANNEL='#axonrunner' \
+AXONRUNNER_IRC_NICK=axonrunner-bot \
+./target/release/axonrunner_apps channel serve
 ```
 
 ### Matrix
@@ -132,11 +132,11 @@ AXIOM_IRC_NICK=axiom-bot \
 Polls `/_matrix/client/v3/sync`. The `next_batch` token is persisted across restarts.
 
 ```bash
-AXIOM_RUNTIME_CHANNEL=matrix \
-AXIOM_MATRIX_ACCESS_TOKEN=<access-token> \
-AXIOM_MATRIX_HOMESERVER=https://matrix.org \
-AXIOM_MATRIX_ROOM_ID='!abc123:matrix.org' \
-./target/release/axiom_apps channel serve
+AXONRUNNER_RUNTIME_CHANNEL=matrix \
+AXONRUNNER_MATRIX_ACCESS_TOKEN=<access-token> \
+AXONRUNNER_MATRIX_HOMESERVER=https://matrix.org \
+AXONRUNNER_MATRIX_ROOM_ID='!abc123:matrix.org' \
+./target/release/axonrunner_apps channel serve
 ```
 
 ### WhatsApp (send-only)
@@ -144,10 +144,10 @@ AXIOM_MATRIX_ROOM_ID='!abc123:matrix.org' \
 Sends via Meta Cloud API v17.0. Receiving messages requires a Meta webhook endpoint (platform limitation; see [Limitations](#limitations)).
 
 ```bash
-AXIOM_RUNTIME_CHANNEL=whatsapp \
-AXIOM_WHATSAPP_API_TOKEN=<api-token> \
-AXIOM_WHATSAPP_PHONE_NUMBER_ID=<phone-number-id> \
-./target/release/axiom_apps channel serve
+AXONRUNNER_RUNTIME_CHANNEL=whatsapp \
+AXONRUNNER_WHATSAPP_API_TOKEN=<api-token> \
+AXONRUNNER_WHATSAPP_PHONE_NUMBER_ID=<phone-number-id> \
+./target/release/axonrunner_apps channel serve
 ```
 
 ### Daemon with Channel
@@ -155,11 +155,11 @@ AXIOM_WHATSAPP_PHONE_NUMBER_ID=<phone-number-id> \
 Run a persistent daemon that polls a channel alongside scheduled work items:
 
 ```bash
-AXIOM_RUNTIME_CHANNEL=telegram \
-AXIOM_TELEGRAM_BOT_TOKEN=<token> \
-AXIOM_METRICS_PORT=9090 \
-AXIOM_DAEMON_IDLE_SECS=3600 \
-./target/release/axiom_apps serve --mode=daemon
+AXONRUNNER_RUNTIME_CHANNEL=telegram \
+AXONRUNNER_TELEGRAM_BOT_TOKEN=<token> \
+AXONRUNNER_METRICS_PORT=9090 \
+AXONRUNNER_DAEMON_IDLE_SECS=3600 \
+./target/release/axonrunner_apps serve --mode=daemon
 ```
 
 ---
@@ -168,11 +168,11 @@ AXIOM_DAEMON_IDLE_SECS=3600 \
 
 | Backend | Key variable | Description |
 |---|---|---|
-| `sqlite` (default) | `AXIOM_RUNTIME_MEMORY_PATH` | SQLite WAL mode — recommended for production. Default path: `~/.axiom/memory.db` |
-| `markdown` | `AXIOM_RUNTIME_MEMORY_PATH` | Plain text files. Human-readable and diff-friendly |
-| `axiomme` | `AXIOM_CONTEXT_ROOT` | AxiomMe semantic indexing with BM25 + semantic ranking. RAG enrichment per agent turn |
+| `sqlite` (default) | `AXONRUNNER_RUNTIME_MEMORY_PATH` | SQLite WAL mode — recommended for production. Default path: `~/.axonrunner/memory.db` |
+| `markdown` | `AXONRUNNER_RUNTIME_MEMORY_PATH` | Plain text files. Human-readable and diff-friendly |
+| `axiomsync` | `AXONRUNNER_CONTEXT_ROOT` | AxiomSync semantic indexing with BM25 + semantic ranking. RAG enrichment per agent turn |
 
-When `AXIOM_CONTEXT_ROOT` is set, the agent automatically retrieves relevant context from the AxiomMe store before each LLM turn. Unset this variable to disable RAG entirely.
+When `AXONRUNNER_CONTEXT_ROOT` is set, the agent automatically retrieves relevant context from the AxiomSync store before each LLM turn. Unset this variable to disable RAG entirely.
 
 ---
 
@@ -181,7 +181,7 @@ When `AXIOM_CONTEXT_ROOT` is set, the agent automatically retrieves relevant con
 ### Global Options
 
 ```
-axiom_apps [--config-file <path>] [--profile <name>] [--endpoint <url>] [--actor <id>] <command>
+axonrunner_apps [--config-file <path>] [--profile <name>] [--endpoint <url>] [--actor <id>] <command>
 ```
 
 ### Commands
@@ -204,11 +204,11 @@ axiom_apps [--config-file <path>] [--profile <name>] [--endpoint <url>] [--actor
 | `cron list` | List all scheduled tasks |
 | `cron add <expr> <intent>` | Add a cron task (standard cron expression) |
 | `cron remove <id>` | Remove a scheduled task by ID |
-| `service install` | Install axiomAi as a systemd service |
+| `service install` | Install AxonRunner as a systemd service |
 | `service start \| stop \| status \| uninstall` | Manage the systemd service lifecycle |
 | `channel list` | List registered channel adapters |
 | `channel add <type> <name>` | Register a new channel |
-| `channel serve` | Start channel polling (reads `AXIOM_RUNTIME_CHANNEL`) |
+| `channel serve` | Start channel polling (reads `AXONRUNNER_RUNTIME_CHANNEL`) |
 | `channel doctor` | Diagnose channel adapter health |
 | `channel remove <name>` | Remove a registered channel |
 | `integrations list` | List all 23 catalog entries |
@@ -230,8 +230,8 @@ Memory reads and writes are scoped to a single CLI invocation. Two separate call
 
 ```bash
 # This does NOT work as expected — separate sessions
-./target/release/axiom_apps write config prod
-./target/release/axiom_apps read config
+./target/release/axonrunner_apps write config prod
+./target/release/axonrunner_apps read config
 # output: value=<none>  (expected — session isolated)
 ```
 
@@ -239,7 +239,7 @@ Use `batch` to read and write within the same invocation:
 
 ```bash
 # Correct — single invocation, shared state
-./target/release/axiom_apps batch "write:config=prod" "read:config"
+./target/release/axonrunner_apps batch "write:config=prod" "read:config"
 # output: read key=config value=prod
 ```
 
@@ -255,11 +255,11 @@ Priority order: **CLI flags > Environment variables > Config file**
 
 | Variable | Default | Description |
 |---|---|---|
-| `AXIOM_PROFILE` | `prod` | Runtime profile name |
-| `AXIOM_ENDPOINT` | `http://127.0.0.1:8080` | Gateway endpoint URL |
-| `AXIOM_RUNTIME_PROVIDER` | `mock-local` | Provider ID (see AI Providers table below) |
-| `AXIOM_RUNTIME_PROVIDER_MODEL` | `gpt-4o-mini` | Model name for the selected provider |
-| `AXIOM_RUNTIME_MAX_TOKENS` | `4096` | Maximum response tokens |
+| `AXONRUNNER_PROFILE` | `prod` | Runtime profile name |
+| `AXONRUNNER_ENDPOINT` | `http://127.0.0.1:8080` | Gateway endpoint URL |
+| `AXONRUNNER_RUNTIME_PROVIDER` | `mock-local` | Provider ID (see AI Providers table below) |
+| `AXONRUNNER_RUNTIME_PROVIDER_MODEL` | `gpt-4o-mini` | Model name for the selected provider |
+| `AXONRUNNER_RUNTIME_MAX_TOKENS` | `4096` | Maximum response tokens |
 
 ### AI Providers
 
@@ -286,49 +286,49 @@ Priority order: **CLI flags > Environment variables > Config file**
 
 | Variable | Default | Description |
 |---|---|---|
-| `AXIOM_RUNTIME_MEMORY_PATH` | `~/.axiom/memory.db` | SQLite or Markdown memory path |
-| `AXIOM_RUNTIME_TOOL_WORKSPACE` | `~/.axiom/workspace/` | Tool execution workspace directory |
-| `AXIOM_CONTEXT_ROOT` | — | AxiomMe RAG root directory. Unset disables RAG |
+| `AXONRUNNER_RUNTIME_MEMORY_PATH` | `~/.axonrunner/memory.db` | SQLite or Markdown memory path |
+| `AXONRUNNER_RUNTIME_TOOL_WORKSPACE` | `~/.axonrunner/workspace/` | Tool execution workspace directory |
+| `AXONRUNNER_CONTEXT_ROOT` | — | AxiomSync RAG root directory. Unset disables RAG |
 | `COMPOSIO_API_KEY` | — | Composio API key for the Composio tool adapter |
-| `AXIOM_RUNTIME_TOOLS` | — | Comma-separated list of tools to activate |
+| `AXONRUNNER_RUNTIME_TOOLS` | — | Comma-separated list of tools to activate |
 
 ### Channels
 
 | Variable | Channel | Required |
 |---|---|---|
-| `AXIOM_RUNTIME_CHANNEL` | all (daemon) | Required to specify which channel to poll |
-| `AXIOM_TELEGRAM_BOT_TOKEN` | Telegram | Yes |
-| `AXIOM_DISCORD_BOT_TOKEN` | Discord | Yes |
-| `AXIOM_CHANNEL_DISCORD_WEBHOOK` | Discord | Yes (for sending) |
-| `AXIOM_DISCORD_GUILD_ID` | Discord | No |
-| `AXIOM_SLACK_BOT_TOKEN` | Slack | Yes |
-| `AXIOM_CHANNEL_SLACK_WEBHOOK` | Slack | Yes (for sending) |
-| `AXIOM_SLACK_CHANNEL_ID` | Slack | No |
-| `AXIOM_IRC_SERVER` | IRC | Yes (format: `host:port`) |
-| `AXIOM_IRC_CHANNEL` | IRC | No |
-| `AXIOM_IRC_NICK` | IRC | No (default: `axiom-bot`) |
-| `AXIOM_MATRIX_ACCESS_TOKEN` | Matrix | Yes |
-| `AXIOM_MATRIX_HOMESERVER` | Matrix | No (default: `https://matrix.org`) |
-| `AXIOM_MATRIX_ROOM_ID` | Matrix | No |
-| `AXIOM_WHATSAPP_API_TOKEN` | WhatsApp | Yes |
-| `AXIOM_WHATSAPP_PHONE_NUMBER_ID` | WhatsApp | Yes |
+| `AXONRUNNER_RUNTIME_CHANNEL` | all (daemon) | Required to specify which channel to poll |
+| `AXONRUNNER_TELEGRAM_BOT_TOKEN` | Telegram | Yes |
+| `AXONRUNNER_DISCORD_BOT_TOKEN` | Discord | Yes |
+| `AXONRUNNER_CHANNEL_DISCORD_WEBHOOK` | Discord | Yes (for sending) |
+| `AXONRUNNER_DISCORD_GUILD_ID` | Discord | No |
+| `AXONRUNNER_SLACK_BOT_TOKEN` | Slack | Yes |
+| `AXONRUNNER_CHANNEL_SLACK_WEBHOOK` | Slack | Yes (for sending) |
+| `AXONRUNNER_SLACK_CHANNEL_ID` | Slack | No |
+| `AXONRUNNER_IRC_SERVER` | IRC | Yes (format: `host:port`) |
+| `AXONRUNNER_IRC_CHANNEL` | IRC | No |
+| `AXONRUNNER_IRC_NICK` | IRC | No (default: `axonrunner-bot`) |
+| `AXONRUNNER_MATRIX_ACCESS_TOKEN` | Matrix | Yes |
+| `AXONRUNNER_MATRIX_HOMESERVER` | Matrix | No (default: `https://matrix.org`) |
+| `AXONRUNNER_MATRIX_ROOM_ID` | Matrix | No |
+| `AXONRUNNER_WHATSAPP_API_TOKEN` | WhatsApp | Yes |
+| `AXONRUNNER_WHATSAPP_PHONE_NUMBER_ID` | WhatsApp | Yes |
 
 ### Security
 
 | Variable | Description |
 |---|---|
-| `AXIOM_GATEWAY_SECRET` | HMAC-SHA256 signing secret for the HTTP gateway (opt-in) |
-| `AXIOM_OTP_SECRET` | Base32-encoded TOTP secret, minimum 128 bits (opt-in) |
-| `AXIOM_OTP_CODE` | 6-digit TOTP code. Required when `AXIOM_OTP_SECRET` is set |
+| `AXONRUNNER_GATEWAY_SECRET` | HMAC-SHA256 signing secret for the HTTP gateway (opt-in) |
+| `AXONRUNNER_OTP_SECRET` | Base32-encoded TOTP secret, minimum 128 bits (opt-in) |
+| `AXONRUNNER_OTP_CODE` | 6-digit TOTP code. Required when `AXONRUNNER_OTP_SECRET` is set |
 
 ### Daemon and Metrics
 
 | Variable | Default | Description |
 |---|---|---|
-| `AXIOM_METRICS_PORT` | — | Prometheus metrics port (e.g. `9090`). Unset disables metrics |
-| `AXIOM_DAEMON_MAX_TICKS` | `32` | Maximum daemon work iterations before exit |
-| `AXIOM_DAEMON_IDLE_SECS` | — | Keep daemon alive N seconds after work completes |
-| `AXIOM_DAEMON_WORK_ITEMS` | `startup-check` | Comma-separated work item IDs |
+| `AXONRUNNER_METRICS_PORT` | — | Prometheus metrics port (e.g. `9090`). Unset disables metrics |
+| `AXONRUNNER_DAEMON_MAX_TICKS` | `32` | Maximum daemon work iterations before exit |
+| `AXONRUNNER_DAEMON_IDLE_SECS` | — | Keep daemon alive N seconds after work completes |
+| `AXONRUNNER_DAEMON_WORK_ITEMS` | `startup-check` | Comma-separated work item IDs |
 
 ---
 
@@ -336,21 +336,21 @@ Priority order: **CLI flags > Environment variables > Config file**
 
 ### HMAC Gateway Signatures
 
-Set `AXIOM_GATEWAY_SECRET` to enable per-request HMAC-SHA256 request fingerprinting on the HTTP gateway. All requests without a valid signature return HTTP 401. Comparison uses constant-time XOR to prevent timing attacks.
+Set `AXONRUNNER_GATEWAY_SECRET` to enable per-request HMAC-SHA256 request fingerprinting on the HTTP gateway. All requests without a valid signature return HTTP 401. Comparison uses constant-time XOR to prevent timing attacks.
 
 ```bash
-export AXIOM_GATEWAY_SECRET=your-secret-here
-./target/release/axiom_apps serve --mode=gateway
+export AXONRUNNER_GATEWAY_SECRET=your-secret-here
+./target/release/axonrunner_apps serve --mode=gateway
 ```
 
 ### TOTP OTP Gate
 
-Set `AXIOM_OTP_SECRET` (Base32-encoded, minimum 128 bits) to require a valid 6-digit TOTP code before each `agent` invocation. Uses SHA1, 30-second window (RFC 6238 compatible).
+Set `AXONRUNNER_OTP_SECRET` (Base32-encoded, minimum 128 bits) to require a valid 6-digit TOTP code before each `agent` invocation. Uses SHA1, 30-second window (RFC 6238 compatible).
 
 ```bash
-export AXIOM_OTP_SECRET=JBSWY3DPEHPK3PXP  # example base32 secret
-export AXIOM_OTP_CODE=$(oathtool --totp --base32 "$AXIOM_OTP_SECRET")
-./target/release/axiom_apps agent
+export AXONRUNNER_OTP_SECRET=JBSWY3DPEHPK3PXP  # example base32 secret
+export AXONRUNNER_OTP_CODE=$(oathtool --totp --base32 "$AXONRUNNER_OTP_SECRET")
+./target/release/axonrunner_apps agent
 ```
 
 Any standard TOTP app (Google Authenticator, Authy, 1Password) works as the code source.
@@ -370,37 +370,37 @@ The shell tool enforces three layers of protection:
 Start the Prometheus metrics endpoint alongside the daemon:
 
 ```bash
-AXIOM_METRICS_PORT=9090 \
-AXIOM_DAEMON_IDLE_SECS=3600 \
-./target/release/axiom_apps serve --mode=daemon
+AXONRUNNER_METRICS_PORT=9090 \
+AXONRUNNER_DAEMON_IDLE_SECS=3600 \
+./target/release/axonrunner_apps serve --mode=daemon
 ```
 
 Scrape endpoint: `GET http://localhost:9090/metrics`
 
 ```
-# HELP axiom_queue_current_depth Current number of items in the work queue.
-# TYPE axiom_queue_current_depth gauge
-axiom_queue_current_depth 0
+# HELP axonrunner_queue_current_depth Current number of items in the work queue.
+# TYPE axonrunner_queue_current_depth gauge
+axonrunner_queue_current_depth 0
 
-# HELP axiom_queue_peak_depth Peak number of items observed in the work queue.
-# TYPE axiom_queue_peak_depth gauge
-axiom_queue_peak_depth 2
+# HELP axonrunner_queue_peak_depth Peak number of items observed in the work queue.
+# TYPE axonrunner_queue_peak_depth gauge
+axonrunner_queue_peak_depth 2
 
-# HELP axiom_lock_wait_count Total number of lock-wait events recorded.
-# TYPE axiom_lock_wait_count counter
-axiom_lock_wait_count 0
+# HELP axonrunner_lock_wait_count Total number of lock-wait events recorded.
+# TYPE axonrunner_lock_wait_count counter
+axonrunner_lock_wait_count 0
 
-# HELP axiom_lock_wait_ns_total Total nanoseconds spent waiting for locks.
-# TYPE axiom_lock_wait_ns_total counter
-axiom_lock_wait_ns_total 0
+# HELP axonrunner_lock_wait_ns_total Total nanoseconds spent waiting for locks.
+# TYPE axonrunner_lock_wait_ns_total counter
+axonrunner_lock_wait_ns_total 0
 
-# HELP axiom_copy_in_bytes_total Total bytes received across all channel inputs.
-# TYPE axiom_copy_in_bytes_total counter
-axiom_copy_in_bytes_total 1024
+# HELP axonrunner_copy_in_bytes_total Total bytes received across all channel inputs.
+# TYPE axonrunner_copy_in_bytes_total counter
+axonrunner_copy_in_bytes_total 1024
 
-# HELP axiom_copy_out_bytes_total Total bytes sent across all channel outputs.
-# TYPE axiom_copy_out_bytes_total counter
-axiom_copy_out_bytes_total 2048
+# HELP axonrunner_copy_out_bytes_total Total bytes sent across all channel outputs.
+# TYPE axonrunner_copy_out_bytes_total counter
+axonrunner_copy_out_bytes_total 2048
 ```
 
 ---
@@ -411,38 +411,66 @@ axiom_copy_out_bytes_total 2048
 
 | Category | Integrations |
 |---|---|
-| **Chat** (6) | telegram · discord · slack · matrix · whatsapp · irc |
-| **AI Models** (13) | openai (active) · openrouter · anthropic · deepseek · groq · mistral · fireworks · together · perplexity · xai · moonshot · qwen · openai-compatible |
-| **Platform** (3) | browser · composio · cron |
+| **Chat** (6) | telegram (available) · discord (partial) · slack (partial) · matrix (available) · whatsapp (partial) · irc (available) |
+| **AI Models** (13) | openai (active) · openrouter (available) · anthropic (available) · deepseek/groq/mistral/fireworks/together/perplexity/xai/moonshot/qwen/openai-compatible (coming_soon) |
+| **Platform** (3) | browser (available) · composio (available) · cron (active) |
 | **Productivity** (1) | github (coming soon) |
+
+`integrations list` is the source-of-truth output for runtime capability status. The snapshot below is auto-verified against the catalog.
+
+<!-- INTEGRATIONS_STATUS_SNAPSHOT:BEGIN -->
+integrations list name=telegram category=chat status=available
+integrations list name=discord category=chat status=partial
+integrations list name=slack category=chat status=partial
+integrations list name=matrix category=chat status=available
+integrations list name=whatsapp category=chat status=partial
+integrations list name=irc category=chat status=available
+integrations list name=openai category=ai_model status=active
+integrations list name=openrouter category=ai_model status=available
+integrations list name=anthropic category=ai_model status=available
+integrations list name=deepseek category=ai_model status=coming_soon
+integrations list name=groq category=ai_model status=coming_soon
+integrations list name=mistral category=ai_model status=coming_soon
+integrations list name=fireworks category=ai_model status=coming_soon
+integrations list name=together category=ai_model status=coming_soon
+integrations list name=perplexity category=ai_model status=coming_soon
+integrations list name=xai category=ai_model status=coming_soon
+integrations list name=moonshot category=ai_model status=coming_soon
+integrations list name=qwen category=ai_model status=coming_soon
+integrations list name=openai-compatible category=ai_model status=coming_soon
+integrations list name=github category=productivity status=coming_soon
+integrations list name=browser category=platform status=available
+integrations list name=composio category=platform status=available
+integrations list name=cron category=platform status=active
+<!-- INTEGRATIONS_STATUS_SNAPSHOT:END -->
 
 ```bash
 # List all integrations
-./target/release/axiom_apps integrations list
+./target/release/axonrunner_apps integrations list
 
 # Show details for a specific integration
-./target/release/axiom_apps integrations info telegram
-./target/release/axiom_apps integrations info composio
+./target/release/axonrunner_apps integrations info telegram
+./target/release/axonrunner_apps integrations info composio
 
 # Show installation instructions
-./target/release/axiom_apps integrations install openai
+./target/release/axonrunner_apps integrations install openai
 ```
 
 ---
 
 ## Skills
 
-Skills extend the agent with additional domain-specific capabilities. They are installed from git repositories, local paths, or archives and stored under `AXIOM_SKILLS_DIR` (default: `~/.axiom/skills/`).
+Skills extend the agent with additional domain-specific capabilities. They are installed from git repositories, local paths, or archives and stored under `AXONRUNNER_SKILLS_DIR` (default: `~/.axonrunner/skills/`).
 
 ```bash
 # List installed skills
-./target/release/axiom_apps skills list
+./target/release/axonrunner_apps skills list
 
 # Install a skill from a git repository
-./target/release/axiom_apps skills install https://github.com/your-org/axiom-skill-example
+./target/release/axonrunner_apps skills install https://github.com/your-org/axonrunner-skill-example
 
 # Remove a skill
-./target/release/axiom_apps skills remove skill-name
+./target/release/axonrunner_apps skills remove skill-name
 ```
 
 ---
@@ -453,13 +481,13 @@ Schedule recurring intents using standard cron expressions:
 
 ```bash
 # Add a task that fires at 09:00 every day
-./target/release/axiom_apps cron add "0 9 * * *" "write:daily_check=true"
+./target/release/axonrunner_apps cron add "0 9 * * *" "write:daily_check=true"
 
 # List all scheduled tasks
-./target/release/axiom_apps cron list
+./target/release/axonrunner_apps cron list
 
 # Remove a task by ID
-./target/release/axiom_apps cron remove <id>
+./target/release/axonrunner_apps cron remove <id>
 ```
 
 Cron tasks are stored persistently and survive restarts.
@@ -468,13 +496,12 @@ Cron tasks are stored persistently and survive restarts.
 
 ## Limitations
 
-The following are known limitations as of v0.1.0:
+The following are known limitations as of v0.0.1:
 
 - **Discord receive**: send-only via webhook. Receiving messages from Discord requires gateway polling, which is not yet implemented.
 - **Slack receive**: send-only via Incoming Webhook. Receiving messages requires the Slack Event API, which is not yet polled.
 - **WhatsApp receive**: send-only via Meta Cloud API v17.0. Receiving requires a Meta-registered webhook endpoint; polling is not supported by the platform.
 - **IRC TLS**: the IRC adapter uses plain TCP. No TLS and no SASL authentication are supported in the current implementation.
-- **Browser tool**: the browser adapter is a stub. Headless browser automation is listed in the integration catalog but real execution is not yet implemented.
 - **Session isolation**: `read` and `write` CLI commands do not share state across separate invocations. Use `batch` or the interactive `agent` session for stateful workflows.
 
 ---
@@ -512,7 +539,7 @@ make audit
 | `make test` | `cargo test --workspace --all-features` |
 | `make clippy` | `cargo clippy --workspace -- -D warnings` |
 | `make audit` | `cargo audit` |
-| `make doctor` | Build release binary and run `axiom_apps doctor` |
+| `make doctor` | Build release binary and run `axonrunner_apps doctor` |
 | `make check` | Run clippy + full test suite |
 | `make clean` | `cargo clean` |
 
@@ -550,7 +577,7 @@ See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for:
 
 MIT — see [LICENSE](LICENSE)
 
-Copyright (c) 2026 axiomAi Contributors
+Copyright (c) 2026 AxonRunner Contributors
 
 ---
 
@@ -558,9 +585,9 @@ Copyright (c) 2026 axiomAi Contributors
 
 See [CHANGELOG.md](CHANGELOG.md) for the full release history.
 
-**v0.1.0** (2026-02-25) — Initial release.
+**v0.0.1** (2026-02-25) — Initial release.
 - Event sourcing framework with 6 channel adapters
 - HMAC gateway, TOTP OTP gate, shell allowlist
-- SQLite WAL + AxiomMe semantic memory + BM25 RAG
+- SQLite WAL + AxiomSync semantic memory + BM25 RAG
 - Prometheus metrics, daemon mode, cron scheduler, 23-entry integrations catalog
 - 563 tests, 0 failures · clippy 0 warnings · audit 0 vulnerabilities

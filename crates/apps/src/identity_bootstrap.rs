@@ -271,7 +271,7 @@ mod tests {
             .unwrap_or(Duration::from_secs(0))
             .as_nanos();
         std::env::temp_dir().join(format!(
-            "axiom-bootstrap-{label}-{}-{tick}",
+            "axonrunner-bootstrap-{label}-{}-{tick}",
             std::process::id()
         ))
     }

@@ -101,6 +101,36 @@ jobs:
       - name: Run tests
         run: cargo test --locked --workspace --all-targets
 
+  execution-contract:
+    name: Execution Contract Gate
+    needs: [changes]
+    if: needs.changes.outputs.docs_only != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Run execution contract gate
+        run: bash scripts/run_execution_contract_gate.sh
+
+  audit:
+    name: Security Audit
+    needs: [changes]
+    if: needs.changes.outputs.docs_only != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked --force
+      - name: Run cargo audit
+        run: cargo audit --deny vulnerabilities
+
   build:
     name: Build (Smoke)
     needs: [changes]
@@ -147,6 +177,28 @@ jobs:
             benchmarks/config.env
             benchmarks/raw/perf_suite_pass*.json
 
+  release-rehearsal-gate:
+    name: Release Rehearsal Gate (Transition + Rollback)
+    needs: [changes]
+    if: needs.changes.outputs.docs_only != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Run release rehearsal gate (transition + rollback)
+        run: bash scripts/run_release_rehearsal_gate.sh
+      - name: Upload release rehearsal artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-rehearsal-gate
+          path: |
+            target/release-rehearsal-gate
+            target/transition-gates
+
   docs-only:
     name: Docs-Only Fast Path
     needs: [changes]
@@ -160,7 +212,7 @@ jobs:
   ci-required:
     name: CI Required Gate
     if: always()
-    needs: [changes, lint, test, build, release-approval-gate, docs-only]
+    needs: [changes, lint, test, execution-contract, audit, build, release-approval-gate, release-rehearsal-gate, docs-only]
     runs-on: ubuntu-latest
 
     steps:
@@ -176,18 +228,27 @@ jobs:
 
           lint_result="${{ needs.lint.result }}"
           test_result="${{ needs.test.result }}"
+          execution_contract_result="${{ needs.execution-contract.result }}"
+          audit_result="${{ needs.audit.result }}"
           build_result="${{ needs.build.result }}"
           release_gate_result="${{ needs.release-approval-gate.result }}"
+          rehearsal_gate_result="${{ needs.release-rehearsal-gate.result }}"
 
           echo "lint=${lint_result}"
           echo "test=${test_result}"
+          echo "execution-contract=${execution_contract_result}"
+          echo "audit=${audit_result}"
           echo "build=${build_result}"
           echo "release-approval-gate=${release_gate_result}"
+          echo "release-rehearsal-gate=${rehearsal_gate_result}"
 
           if [ "$lint_result" != "success" ] \
             || [ "$test_result" != "success" ] \
+            || [ "$execution_contract_result" != "success" ] \
+            || [ "$audit_result" != "success" ] \
             || [ "$build_result" != "success" ] \
-            || [ "$release_gate_result" != "success" ]; then
+            || [ "$release_gate_result" != "success" ] \
+            || [ "$rehearsal_gate_result" != "success" ]; then
             echo "Required CI jobs did not pass."
             exit 1
           fi

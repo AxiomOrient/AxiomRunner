@@ -21,20 +21,20 @@ for key in TG_H4_ALLOWED_DIFF TG_H4_ROLLBACK_SLO_MS TG_H4_TOTAL_TIMEOUT_MS; do
     fi
 done
 
-apps_bin="${repo_root}/target/debug/axiom_apps"
+apps_bin="${repo_root}/target/debug/axonrunner_apps"
 h2_bin="${repo_root}/target/debug/h2_verify"
 
 echo "step: build bins"
-cargo build -q -p axiom_apps --bin axiom_apps --bin h2_verify
+cargo build -q -p axonrunner_apps --bin axonrunner_apps --bin h2_verify
 
 echo "step: test h2_parallel"
-cargo test -q -p axiom_apps h2_parallel
+cargo test -q -p axonrunner_apps h2_parallel
 
 echo "step: test rollback_recovery_h3"
-cargo test -q -p axiom_apps rollback_recovery_h3
+cargo test -q -p axonrunner_apps rollback_recovery_h3
 
 echo "step: test transition_rehearsal_h4"
-cargo test -q -p axiom_apps transition_rehearsal_h4
+cargo test -q -p axonrunner_apps transition_rehearsal_h4
 
 tmp_workspace="$(mktemp -d "${TMPDIR:-/tmp}/transition-gates.h4.XXXXXX")"
 cleanup() {

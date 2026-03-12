@@ -1,19 +1,21 @@
 use std::io::Write as IoWrite;
 use std::path::PathBuf;
 
-use axiomme_core::{AxiomError, AxiomMe};
+use axiomme_core::{AxiomError, AxiomMe as AxiomSync};
 
 use crate::contracts::{ContextAdapter, ContextDocument, ContextHit};
 use crate::error::{AdapterError, AdapterResult, RetryClass};
 
-/// ContextAdapter backed by AxiomMe — stores documents at arbitrary URIs and
+/// ContextAdapter backed by AxiomSync — stores documents at arbitrary URIs and
 /// provides semantic search over URI-scoped document collections.
 ///
-/// Unlike AxiommeMemoryAdapter (key/value), this adapter exposes the full
-/// AxiomMe URI model: any URI is valid, scores and snippets are preserved.
-pub struct AxiommeContextAdapter {
-    client: AxiomMe,
+/// Unlike AxiomsyncMemoryAdapter (key/value), this adapter exposes the full
+/// AxiomSync URI model: any URI is valid, scores and snippets are preserved.
+pub struct AxiomsyncContextAdapter {
+    client: AxiomSync,
 }
+
+pub type AxiommeContextAdapter = AxiomsyncContextAdapter;
 
 struct TempPathCleanup {
     path: PathBuf,
@@ -35,26 +37,26 @@ impl Drop for TempPathCleanup {
     }
 }
 
-impl AxiommeContextAdapter {
-    /// Initialize (or open) an AxiomMe context rooted at `root_dir`.
+impl AxiomsyncContextAdapter {
+    /// Initialize (or open) an AxiomSync context rooted at `root_dir`.
     ///
-    /// `root_dir` will be created by AxiomMe if it does not exist.
+    /// `root_dir` will be created by AxiomSync if it does not exist.
     pub fn new(root_dir: impl Into<PathBuf>) -> Result<Self, String> {
         let root = root_dir.into();
-        let client = AxiomMe::new(&root).map_err(|e| format!("AxiomMe::new failed: {e}"))?;
+        let client = AxiomSync::new(&root).map_err(|e| format!("AxiomSync::new failed: {e}"))?;
         client
             .initialize()
-            .map_err(|e| format!("AxiomMe::initialize failed: {e}"))?;
+            .map_err(|e| format!("AxiomSync::initialize failed: {e}"))?;
         Ok(Self { client })
     }
 }
 
-impl ContextAdapter for AxiommeContextAdapter {
+impl ContextAdapter for AxiomsyncContextAdapter {
     fn id(&self) -> &str {
-        "axiomme"
+        "axiomsync"
     }
 
-    /// Store `content` at the given AxiomMe URI.
+    /// Store `content` at the given AxiomSync URI.
     ///
     /// Implementation: write to a temp file → add_resource → delete temp file.
     /// The URI is used directly (no `.md` suffix appended).
@@ -67,20 +69,21 @@ impl ContextAdapter for AxiommeContextAdapter {
             .subsec_nanos();
         let tid = format!("{:?}", std::thread::current().id()).replace(['(', ')'], "");
         let safe_name = uri.replace(['/', ':'], "_");
-        let tmp_path = std::env::temp_dir().join(format!("axiomme_ctx_{safe_name}_{ts}_{tid}.md"));
+        let tmp_path =
+            std::env::temp_dir().join(format!("axiomsync_ctx_{safe_name}_{ts}_{tid}.md"));
         let tmp_path = TempPathCleanup::new(tmp_path);
 
         {
             let mut f = std::fs::File::create(tmp_path.path()).map_err(|e| {
                 AdapterError::failed(
-                    "axiomme_ctx.store.tmpfile",
+                    "axiomsync_ctx.store.tmpfile",
                     e.to_string(),
                     RetryClass::NonRetryable,
                 )
             })?;
             f.write_all(content.as_bytes()).map_err(|e| {
                 AdapterError::failed(
-                    "axiomme_ctx.store.write",
+                    "axiomsync_ctx.store.write",
                     e.to_string(),
                     RetryClass::NonRetryable,
                 )
@@ -92,7 +95,7 @@ impl ContextAdapter for AxiommeContextAdapter {
             .add_resource(&tmp_str, Some(uri), None, None, true, None)
             .map_err(|e| {
                 AdapterError::failed(
-                    "axiomme_ctx.store.add",
+                    "axiomsync_ctx.store.add",
                     e.to_string(),
                     RetryClass::Retryable,
                 )
@@ -102,7 +105,7 @@ impl ContextAdapter for AxiommeContextAdapter {
 
     /// Semantic search over documents whose URI starts with `scope_uri`.
     ///
-    /// Returns ranked hits with scores (f32) and snippets from AxiomMe.
+    /// Returns ranked hits with scores (f32) and snippets from AxiomSync.
     /// Allocates O(limit) ContextHit values.
     fn semantic_search(
         &self,
@@ -120,7 +123,7 @@ impl ContextAdapter for AxiommeContextAdapter {
             Err(AxiomError::NotFound(_)) => return Ok(Vec::new()),
             Err(e) => {
                 return Err(AdapterError::failed(
-                    "axiomme_ctx.search",
+                    "axiomsync_ctx.search",
                     e.to_string(),
                     RetryClass::NonRetryable,
                 ));
@@ -152,7 +155,7 @@ impl ContextAdapter for AxiommeContextAdapter {
             })),
             Err(AxiomError::NotFound(_)) => Ok(None),
             Err(e) => Err(AdapterError::failed(
-                "axiomme_ctx.get",
+                "axiomsync_ctx.get",
                 e.to_string(),
                 RetryClass::NonRetryable,
             )),
@@ -165,7 +168,7 @@ impl ContextAdapter for AxiommeContextAdapter {
             Ok(()) => Ok(true),
             Err(AxiomError::NotFound(_)) => Ok(false),
             Err(e) => Err(AdapterError::failed(
-                "axiomme_ctx.remove",
+                "axiomsync_ctx.remove",
                 e.to_string(),
                 RetryClass::NonRetryable,
             )),
@@ -207,6 +210,9 @@ impl ContextAdapter for AxiommeContextAdapter {
 mod tests {
     use super::*;
 
+    const LIVE_ENV: &str = "AXONRUNNER_RUN_AXIOMSYNC_LIVE";
+    const LEGACY_LIVE_ENV: &str = "AXONRUNNER_RUN_AXIOMME_LIVE";
+
     fn tmp_dir(name: &str) -> PathBuf {
         let d = std::env::temp_dir().join(name);
         std::fs::create_dir_all(&d).unwrap();
@@ -215,17 +221,17 @@ mod tests {
 
     #[test]
     fn new_initializes_successfully() {
-        let dir = tmp_dir("axiomme_ctx_init");
-        let result = AxiommeContextAdapter::new(&dir);
+        let dir = tmp_dir("axiomsync_ctx_init");
+        let result = AxiomsyncContextAdapter::new(&dir);
         assert!(result.is_ok(), "init failed: {:?}", result.err());
         std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
-    fn id_returns_axiomme() {
-        let dir = tmp_dir("axiomme_ctx_id");
-        if let Ok(a) = AxiommeContextAdapter::new(&dir) {
-            assert_eq!(a.id(), "axiomme");
+    fn id_returns_axiomsync() {
+        let dir = tmp_dir("axiomsync_ctx_id");
+        if let Ok(a) = AxiomsyncContextAdapter::new(&dir) {
+            assert_eq!(a.id(), "axiomsync");
         }
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -233,22 +239,21 @@ mod tests {
     #[test]
     #[ignore]
     fn store_and_search_roundtrip() {
-        if std::env::var_os("AXIOM_RUN_AXIOMME_LIVE").is_none() {
-            eprintln!(
-                "skipping store_and_search_roundtrip: set AXIOM_RUN_AXIOMME_LIVE=1 to enable"
-            );
+        if std::env::var_os(LIVE_ENV).is_none() && std::env::var_os(LEGACY_LIVE_ENV).is_none() {
+            eprintln!("skipping store_and_search_roundtrip: set {LIVE_ENV}=1 to enable");
             return;
         }
-        let dir = tmp_dir("axiomme_ctx_roundtrip");
-        let a = AxiommeContextAdapter::new(&dir).unwrap();
-        a.store_document("axiom://agent/memory/test-doc", "semantic hello world")
+        let dir = tmp_dir("axiomsync_ctx_roundtrip");
+        let a = AxiomsyncContextAdapter::new(&dir).unwrap();
+        a.store_document("axonrunner://agent/memory/test-doc", "semantic hello world")
             .unwrap();
         let hits = a
-            .semantic_search("hello", "axiom://agent/memory", 5)
+            .semantic_search("hello", "axonrunner://agent/memory", 5)
             .unwrap();
         assert!(!hits.is_empty());
         assert!(hits[0].score > 0.0);
-        a.remove_document("axiom://agent/memory/test-doc").unwrap();
+        a.remove_document("axonrunner://agent/memory/test-doc")
+            .unwrap();
         std::fs::remove_dir_all(&dir).ok();
     }
 }

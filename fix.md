@@ -87,7 +87,7 @@ P1 — Important (스프린트 내 수정 권장)
 - cron.rs 스케줄 파서: 분 필드 변형만 지원. 표준 cron 표현식 대부분 미지원
 - gateway.rs handle(): ~130줄, 서명 검증 + 경계 검증 + 정책 평가 + 투영 + 메트릭 혼합
 - migrate_io.rs 수기 TOML 이스케이프: Windows 경로 등 엣지케이스에서 파손 가능
-- agent_registry.rs MockAgentAdapter 노출: 프로덕션 레지스트리에 격리 없이 노출 (AXIOM_AGENT_ID=mock)
+- agent_registry.rs MockAgentAdapter 노출: 프로덕션 레지스트리에 격리 없이 노출 (AXONRUNNER_AGENT_ID=mock)
 - memory_hybrid.rs::semantic_score: 이름은 "semantic"이지만 실제로 substring/prefix 매칭
 - h2_verify.rs 가독성 훼손: #[rustfmt::skip] + 극단적 코드 압축
 

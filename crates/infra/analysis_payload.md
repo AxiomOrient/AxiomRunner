@@ -14,7 +14,7 @@
       {
         "id": "H1",
         "statement": "The `crates/infra` crate is an overly fragmented nano-crate (Assumption Error) that currently only serves as a shared error definition rather than containing actual infrastructure implementations or abstractions.",
-        "falsification_step": "Search the rest of the workspace (e.g., `crates/adapters`) for usages of `axiom_infra`. If the crate is solely used to import `InfraError` without any infra-level traits (like `HttpClient` or `DbPool`), the hypothesis is true."
+        "falsification_step": "Search the rest of the workspace (e.g., `crates/adapters`) for usages of `axonrunner_infra`. If the crate is solely used to import `InfraError` without any infra-level traits (like `HttpClient` or `DbPool`), the hypothesis is true."
       },
       {
         "id": "H2",

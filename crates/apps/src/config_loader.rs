@@ -1,12 +1,15 @@
 use std::fmt::{Display, Formatter};
 
+use axonrunner_schema::merge_optional;
+
+use crate::env_util::read_env_trimmed;
 use crate::parse_util::parse_tools_list;
 
-const ENV_PROFILE: &str = "AXIOM_PROFILE";
-const ENV_ENDPOINT: &str = "AXIOM_ENDPOINT";
-const ENV_PROVIDER: &str = "AXIOM_PROVIDER";
-const ENV_CHANNEL: &str = "AXIOM_RUNTIME_CHANNEL";
-const ENV_TOOLS: &str = "AXIOM_RUNTIME_TOOLS";
+const ENV_PROFILE: &str = "AXONRUNNER_PROFILE";
+const ENV_ENDPOINT: &str = "AXONRUNNER_ENDPOINT";
+const ENV_PROVIDER: &str = "AXONRUNNER_RUNTIME_PROVIDER";
+const ENV_CHANNEL: &str = "AXONRUNNER_RUNTIME_CHANNEL";
+const ENV_TOOLS: &str = "AXONRUNNER_RUNTIME_TOOLS";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AppConfig {
@@ -38,18 +41,6 @@ pub struct PartialConfig {
     pub tools: Option<Vec<String>>,
 }
 
-impl PartialConfig {
-    pub fn merge(self, higher_priority: PartialConfig) -> PartialConfig {
-        PartialConfig {
-            profile: higher_priority.profile.or(self.profile),
-            endpoint: higher_priority.endpoint.or(self.endpoint),
-            provider: higher_priority.provider.or(self.provider),
-            channel: higher_priority.channel.or(self.channel),
-            tools: higher_priority.tools.or(self.tools),
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConfigError {
     message: String,
@@ -76,22 +67,49 @@ pub fn load_config(args: &[String], file_contents: Option<&str>) -> Result<AppCo
         Some(contents) => parse_file_config(contents)?,
         None => PartialConfig::default(),
     };
-    let env = parse_env_config(|key| std::env::var(key).ok())?;
+    let env = parse_env_config(|key| read_env_trimmed(key).ok().flatten())?;
     let cli = parse_cli_config(args)?;
 
     Ok(resolve_config(file, env, cli))
 }
 
 pub fn resolve_config(file: PartialConfig, env: PartialConfig, cli: PartialConfig) -> AppConfig {
-    let merged = PartialConfig::default().merge(file).merge(env).merge(cli);
     let defaults = AppConfig::default();
+    let default_profile = defaults.profile;
+    let default_endpoint = defaults.endpoint;
+    let default_provider = defaults.provider;
+    let default_channel = defaults.channel;
+    let default_tools = defaults.tools;
 
     AppConfig {
-        profile: merged.profile.unwrap_or(defaults.profile),
-        endpoint: merged.endpoint.unwrap_or(defaults.endpoint),
-        provider: merged.provider.unwrap_or(defaults.provider),
-        channel: merged.channel.or(defaults.channel),
-        tools: merged.tools.or(defaults.tools),
+        profile: merge_optional(
+            Some(default_profile),
+            file.profile,
+            env.profile,
+            cli.profile,
+        )
+        .expect("profile default must always exist")
+        .value,
+        endpoint: merge_optional(
+            Some(default_endpoint),
+            file.endpoint,
+            env.endpoint,
+            cli.endpoint,
+        )
+        .expect("endpoint default must always exist")
+        .value,
+        provider: merge_optional(
+            Some(default_provider),
+            file.provider,
+            env.provider,
+            cli.provider,
+        )
+        .expect("provider default must always exist")
+        .value,
+        channel: merge_optional(default_channel, file.channel, env.channel, cli.channel)
+            .map(|selected| selected.value),
+        tools: merge_optional(default_tools, file.tools, env.tools, cli.tools)
+            .map(|selected| selected.value),
     }
 }
 
@@ -273,7 +291,7 @@ mod tests {
     #[test]
     fn parse_env_config_reads_provider() {
         let parsed = parse_env_config(|key| match key {
-            "AXIOM_PROVIDER" => Some(String::from("openrouter")),
+            "AXONRUNNER_RUNTIME_PROVIDER" => Some(String::from("openrouter")),
             _ => None,
         })
         .expect("env parse should succeed");

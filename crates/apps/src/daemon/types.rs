@@ -1,22 +1,6 @@
+pub use axonrunner_infra::RetryClass;
 use std::path::PathBuf;
 use std::time::Duration;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RetryClass {
-    Retryable,
-    NonRetryable,
-    PolicyDenied,
-}
-
-impl RetryClass {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            RetryClass::Retryable => "retryable",
-            RetryClass::NonRetryable => "non_retryable",
-            RetryClass::PolicyDenied => "policy_denied",
-        }
-    }
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WorkError {

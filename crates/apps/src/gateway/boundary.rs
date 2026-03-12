@@ -1,4 +1,4 @@
-use axiom_core::{Intent, IntentKind};
+use axonrunner_core::{Intent, IntentKind};
 use std::net::IpAddr;
 
 use super::{

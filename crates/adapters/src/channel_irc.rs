@@ -197,7 +197,7 @@ impl IrcChannelAdapter {
         write!(stream, "PASS *\r\n").map_err(|e| format!("irc: PASS write failed: {e}"))?;
         write!(stream, "NICK {}\r\n", config.nick)
             .map_err(|e| format!("irc: NICK write failed: {e}"))?;
-        write!(stream, "USER {} 0 * :Axiom Bot\r\n", config.nick)
+        write!(stream, "USER {} 0 * :AxonRunner Bot\r\n", config.nick)
             .map_err(|e| format!("irc: USER write failed: {e}"))?;
 
         wait_for_welcome(&mut stream).map_err(|e| format!("irc: welcome handshake failed: {e}"))?;
@@ -569,7 +569,7 @@ mod tests {
         IrcConfig::new(
             "irc.example.com:6667",
             Some("test".to_string()),
-            "axiom-bot",
+            "axonrunner-bot",
             vec![],
         )
         .unwrap()
@@ -615,7 +615,8 @@ mod tests {
 
     #[test]
     fn live_without_channel_returns_error() {
-        let config = IrcConfig::new("irc.example.com:6667", None, "axiom-bot", vec![]).unwrap();
+        let config =
+            IrcConfig::new("irc.example.com:6667", None, "axonrunner-bot", vec![]).unwrap();
         let error = IrcChannelAdapter::live(config).expect_err("missing channel should fail");
         assert!(error.contains("requires channel"));
     }
@@ -645,7 +646,8 @@ mod tests {
 
     #[test]
     fn health_is_degraded_when_channel_is_none() {
-        let config = IrcConfig::new("irc.example.com:6667", None, "axiom-bot", vec![]).unwrap();
+        let config =
+            IrcConfig::new("irc.example.com:6667", None, "axonrunner-bot", vec![]).unwrap();
         assert_eq!(config.health(), AdapterHealth::Degraded);
     }
 

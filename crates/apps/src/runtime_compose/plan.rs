@@ -1,5 +1,5 @@
 use crate::cli_command::IntentTemplate;
-use axiom_core::DecisionOutcome;
+use axonrunner_core::DecisionOutcome;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum MemoryPlan {

@@ -1,6 +1,7 @@
 use crate::contracts::{
     AdapterFuture, AdapterHealth, ProviderAdapter, ProviderRequest, ProviderResponse,
 };
+use crate::provider_anthropic::AnthropicProvider;
 use crate::provider_openai::OpenAiCompatProvider;
 
 pub const DEFAULT_PROVIDER_ID: &str = "mock-local";
@@ -99,9 +100,14 @@ pub fn build_contract_provider(id: &str) -> Result<Box<dyn ProviderAdapter>, Str
                 "https://openrouter.ai/api/v1",
             )))
         }
-        "anthropic" => Err(String::from(
-            "anthropic provider uses a different API format; use openrouter with anthropic models instead",
-        )),
+        "anthropic" => {
+            let api_key = std::env::var("ANTHROPIC_API_KEY")
+                .map_err(|_| String::from("ANTHROPIC_API_KEY env var not set"))?;
+            Ok(Box::new(AnthropicProvider::new(
+                api_key,
+                "https://api.anthropic.com/v1",
+            )))
+        }
         _ => Err(String::from("unreachable provider registry state")),
     }
 }
@@ -191,5 +197,16 @@ mod tests {
             .err()
             .expect("should fail without key");
         assert!(err.contains("OPENAI_API_KEY"));
+    }
+
+    #[test]
+    fn build_contract_provider_fails_without_anthropic_key() {
+        if std::env::var("ANTHROPIC_API_KEY").is_ok() {
+            return;
+        }
+        let err = build_contract_provider("anthropic")
+            .err()
+            .expect("should fail without anthropic key");
+        assert!(err.contains("ANTHROPIC_API_KEY"));
     }
 }

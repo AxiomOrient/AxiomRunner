@@ -4,10 +4,6 @@ use crate::state::{AgentState, ExecutionMode};
 
 pub const MAX_KEY_LEN: usize = 128;
 pub const MAX_VALUE_LEN: usize = 4096;
-pub const LOCALHOST_BIND: &str = "127.0.0.1";
-pub const ENV_DEV_MODE: &str = "DEV_MODE";
-pub const ENV_BIND: &str = "BIND";
-pub const ENV_ALLOW_REMOTE: &str = "ALLOW_REMOTE";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DevModeMitigationInput {
@@ -29,12 +25,12 @@ impl DevModeMitigationInput {
         }
     }
 
-    pub fn from_env_values(dev_mode: bool, bind: &str, allow_remote: bool) -> Self {
-        Self::new(
-            Some(dev_mode),
-            Some(bind == LOCALHOST_BIND),
-            Some(allow_remote),
-        )
+    pub const fn from_boundary_values(
+        dev_mode: bool,
+        bind_is_localhost: bool,
+        allow_remote: bool,
+    ) -> Self {
+        Self::new(Some(dev_mode), Some(bind_is_localhost), Some(allow_remote))
     }
 }
 
@@ -123,10 +119,7 @@ pub fn evaluate_policy(state: &AgentState, intent: &Intent) -> PolicyVerdict {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        DevModeMitigationInput, ENV_ALLOW_REMOTE, ENV_BIND, ENV_DEV_MODE, LOCALHOST_BIND,
-        dev_mode_mitigation_active, dev_mode_mitigation_enabled,
-    };
+    use super::{DevModeMitigationInput, dev_mode_mitigation_active, dev_mode_mitigation_enabled};
 
     #[test]
     fn policy_dev_mode_mitigation_requires_explicit_local_tuple() {
@@ -152,10 +145,11 @@ mod tests {
 
         let missing_allow_remote = DevModeMitigationInput::new(Some(true), Some(true), None);
         assert!(!dev_mode_mitigation_active(missing_allow_remote));
+    }
 
-        assert_eq!(ENV_DEV_MODE, "DEV_MODE");
-        assert_eq!(ENV_BIND, "BIND");
-        assert_eq!(ENV_ALLOW_REMOTE, "ALLOW_REMOTE");
-        assert_eq!(LOCALHOST_BIND, "127.0.0.1");
+    #[test]
+    fn policy_dev_mode_mitigation_accepts_boundary_values() {
+        let input = DevModeMitigationInput::from_boundary_values(true, true, false);
+        assert!(dev_mode_mitigation_active(input));
     }
 }

@@ -1,7 +1,9 @@
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
 
-const ENV_GATEWAY_SECRET: &str = "AXIOM_GATEWAY_SECRET";
+use crate::env_util::read_env_trimmed;
+
+const ENV_GATEWAY_SECRET: &str = "AXONRUNNER_GATEWAY_SECRET";
 
 /// Computes HMAC-SHA256 of `body` keyed with `secret`.
 /// Returns a 32-byte digest. Same inputs always produce the same digest.
@@ -52,12 +54,10 @@ fn hex_nibble(ch: char) -> Option<u8> {
     }
 }
 
-/// Loads the gateway secret from `AXIOM_GATEWAY_SECRET` env var.
+/// Loads the gateway secret from `AXONRUNNER_GATEWAY_SECRET` env var.
 /// Returns `None` if the env var is not set or is empty.
 pub fn load_gateway_secret() -> Option<String> {
-    std::env::var(ENV_GATEWAY_SECRET)
-        .ok()
-        .filter(|s| !s.trim().is_empty())
+    read_env_trimmed(ENV_GATEWAY_SECRET).ok().flatten()
 }
 
 #[cfg(test)]
@@ -135,7 +135,7 @@ mod tests {
 
     #[test]
     fn load_gateway_secret_returns_none_when_not_set() {
-        // This test is safe only if AXIOM_GATEWAY_SECRET is not set in CI.
+        // This test is safe only if AXONRUNNER_GATEWAY_SECRET is not set in CI.
         // We cannot unset env vars portably, so just verify the return type contract.
         let result = load_gateway_secret();
         // Either Some(non-empty) or None — never Some("")

@@ -264,8 +264,8 @@ mod tests {
     #[test]
     #[ignore]
     fn delegate_live_run() {
-        if std::env::var_os("AXIOM_RUN_DELEGATE_LIVE").is_none() {
-            eprintln!("skipping delegate_live_run: set AXIOM_RUN_DELEGATE_LIVE=1 to enable");
+        if std::env::var_os("AXONRUNNER_RUN_DELEGATE_LIVE").is_none() {
+            eprintln!("skipping delegate_live_run: set AXONRUNNER_RUN_DELEGATE_LIVE=1 to enable");
             return;
         }
         let adapter = DelegateToolAdapter::new(3).expect("should build");

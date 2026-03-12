@@ -4,6 +4,9 @@ mod config_loader;
 #[path = "../src/dev_guard.rs"]
 #[allow(dead_code)]
 mod dev_guard;
+#[path = "../src/env_util.rs"]
+#[allow(dead_code)]
+mod env_util;
 #[path = "../src/parse_util.rs"]
 #[allow(dead_code)]
 mod parse_util;
@@ -117,7 +120,7 @@ fn release_security_gate_rejects_legacy_cli_bypass_flag() {
 fn release_security_gate_legacy_env_bypass_signal_does_not_allow_release_startup() {
     let output = run_cli_with_env(
         &["--profile=dev", "status"],
-        &[("AXIOM_ALLOW_DEV_IN_RELEASE", "true")],
+        &[("AXONRUNNER_ALLOW_DEV_IN_RELEASE", "true")],
     );
     let stdout = stdout_of(&output);
     let stderr = stderr_of(&output);

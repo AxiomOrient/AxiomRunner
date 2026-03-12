@@ -1,9 +1,9 @@
 use std::fs;
 
-use axiom_core::audit::{
+use axonrunner_core::audit::{
     format_policy_decision_audit_line, policy_reason_code, policy_risk_effect_path,
 };
-use axiom_core::{AgentState, Intent, PolicyCode, build_policy_audit, evaluate_policy};
+use axonrunner_core::{AgentState, Intent, PolicyCode, build_policy_audit, evaluate_policy};
 
 #[test]
 fn policy_audit_logs_reason_code_and_risk_effect_path_for_denied_policy() {

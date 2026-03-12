@@ -1,4 +1,4 @@
-use axiom_core::{
+use axonrunner_core::{
     AgentState, DecisionOutcome, DomainEvent, ExecutionMode, Intent, PolicyCode,
     build_policy_audit, decide, evaluate_policy, project, project_from, reduce,
 };

@@ -1,47 +1,20 @@
 use std::path::{Path, PathBuf};
 
-use axiom_adapters::{TelegramChannelAdapter, TelegramConfig};
+use axonrunner_adapters::{build_contract_agent, build_contract_channel};
 
-use crate::env_util::resolve_env_path;
+use crate::env_util::{read_env_trimmed, resolve_env_path};
 use crate::time_util::unix_now_seconds;
 
-const ENV_CHANNEL_STORE_PATH: &str = "AXIOM_CHANNEL_STORE_PATH";
-const DEFAULT_CHANNEL_STORE_PATH: &str = ".axiom/channel/store.db";
-const CHANNEL_STORE_FORMAT: &str = "format=axiom-channel-v1";
+const ENV_CHANNEL_STORE_PATH: &str = "AXONRUNNER_CHANNEL_STORE_PATH";
+const DEFAULT_CHANNEL_STORE_PATH: &str = ".axonrunner/channel/store.db";
+const CHANNEL_STORE_FORMAT: &str = "format=axonrunner-channel-v1";
 
 mod store;
 
 use self::store::{
-    load_store, parse_channel_config, parse_channel_kind, save_store, sort_channels,
-    try_build_channel_adapter, validate_channel_config, validate_channel_name,
+    load_store, parse_channel_id, save_store, sort_channels, try_build_channel_adapter,
+    validate_channel_config, validate_channel_name,
 };
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ChannelKind {
-    Telegram,
-    Discord,
-    Slack,
-    Matrix,
-    Whatsapp,
-    Irc,
-    Webhook,
-    Cli,
-}
-
-impl ChannelKind {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            ChannelKind::Telegram => "telegram",
-            ChannelKind::Discord => "discord",
-            ChannelKind::Slack => "slack",
-            ChannelKind::Matrix => "matrix",
-            ChannelKind::Whatsapp => "whatsapp",
-            ChannelKind::Irc => "irc",
-            ChannelKind::Webhook => "webhook",
-            ChannelKind::Cli => "cli",
-        }
-    }
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChannelHealthStatus {
@@ -61,7 +34,7 @@ impl ChannelHealthStatus {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChannelRecord {
     pub name: String,
-    pub channel_type: ChannelKind,
+    pub channel_type: String,
     pub config: String,
     pub running: bool,
     pub last_health: Option<ChannelHealthStatus>,
@@ -78,7 +51,7 @@ pub struct ChannelStore {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChannelDoctorCheck {
     pub name: String,
-    pub channel_type: ChannelKind,
+    pub channel_type: String,
     pub status: ChannelHealthStatus,
     pub detail: String,
     pub checked_at: u64,
@@ -112,6 +85,8 @@ pub enum ChannelResult {
         path: PathBuf,
         started: usize,
         total_running: usize,
+        failed: usize,
+        failures: Vec<String>,
     },
     Doctored {
         path: PathBuf,
@@ -152,43 +127,12 @@ fn execute_channel_serve(poll_interval_secs: u64) -> Result<ChannelResult, Strin
     use std::sync::Arc;
     use std::time::Duration;
 
-    // 채널 스토어에서 Telegram 설정 로드
-    let path = resolve_env_path(
-        ENV_CHANNEL_STORE_PATH,
-        Path::new(DEFAULT_CHANNEL_STORE_PATH),
-    )?;
-    let store = load_store(&path)?;
+    let channel_name = resolve_runtime_channel_id_from_env()?;
+    let mut channel = build_contract_channel(&channel_name)
+        .map_err(|e| format!("channel adapter init failed: {e}"))?;
 
-    let telegram_record = store
-        .channels
-        .iter()
-        .find(|c| c.channel_type == ChannelKind::Telegram)
-        .ok_or_else(|| {
-            String::from(
-                "no telegram channel configured; run 'channel add telegram bot_token=<token>,allowed_users=<id>' first",
-            )
-        })?;
-
-    let cfg = parse_channel_config(&telegram_record.config);
-    let bot_token = cfg
-        .get("bot_token")
-        .filter(|v| !v.is_empty())
-        .ok_or_else(|| String::from("missing bot_token in telegram config"))?
-        .clone();
-    let allowed_users = cfg
-        .get("allowed_users")
-        .map(|v| v.split(':').map(String::from).collect::<Vec<_>>())
-        .unwrap_or_default();
-
-    let tg_config = TelegramConfig::new(bot_token, allowed_users).map_err(|e| e.to_string())?;
-    let channel_name = telegram_record.name.clone();
-
-    let mut channel = TelegramChannelAdapter::live(tg_config)?;
-
-    let agent: Arc<dyn axiom_adapters::contracts::AgentAdapter> = Arc::from(
-        axiom_adapters::build_contract_agent("")
-            .map_err(|e| format!("agent backend init failed: {e}"))?,
-    );
+    let agent: Arc<dyn axonrunner_adapters::contracts::AgentAdapter> =
+        Arc::from(build_contract_agent("").map_err(|e| format!("agent backend init failed: {e}"))?);
 
     let interval = Duration::from_secs(poll_interval_secs.max(1));
     eprintln!(
@@ -197,13 +141,13 @@ fn execute_channel_serve(poll_interval_secs: u64) -> Result<ChannelResult, Strin
     );
 
     let estop = Arc::new(EStop::new());
-    let rag_context: Option<Arc<dyn axiom_adapters::contracts::ContextAdapter>> =
-        std::env::var("AXIOM_CONTEXT_ROOT")
+    let rag_context: Option<Arc<dyn axonrunner_adapters::contracts::ContextAdapter>> =
+        read_env_trimmed("AXONRUNNER_CONTEXT_ROOT")
             .ok()
-            .filter(|s| !s.trim().is_empty())
+            .flatten()
             .and_then(|root| {
-                axiom_adapters::AxiommeContextAdapter::new(std::path::Path::new(root.trim()))
-                    .map(|a| Arc::new(a) as Arc<dyn axiom_adapters::contracts::ContextAdapter>)
+                axonrunner_adapters::AxiomsyncContextAdapter::new(std::path::Path::new(root.trim()))
+                    .map(|a| Arc::new(a) as Arc<dyn axonrunner_adapters::contracts::ContextAdapter>)
                     .map_err(|e| {
                         eprintln!("channel serve context adapter init failed (RAG disabled): {e}");
                         e
@@ -211,7 +155,7 @@ fn execute_channel_serve(poll_interval_secs: u64) -> Result<ChannelResult, Strin
                     .ok()
             });
     let processed = run_channel_serve_loop(
-        &mut channel,
+        channel.as_mut(),
         agent,
         Some(Arc::clone(&estop)),
         interval,
@@ -224,6 +168,16 @@ fn execute_channel_serve(poll_interval_secs: u64) -> Result<ChannelResult, Strin
         channel_name,
         processed,
     })
+}
+
+fn resolve_runtime_channel_id_from_env() -> Result<String, String> {
+    resolve_runtime_channel_id(|key| read_env_trimmed(key).ok().flatten())
+}
+
+fn resolve_runtime_channel_id(
+    mut read_env: impl FnMut(&str) -> Option<String>,
+) -> Result<String, String> {
+    crate::channel_runtime::resolve_runtime_channel_id(|key| read_env(key))
 }
 
 fn execute_channel_action_at(
@@ -250,9 +204,9 @@ fn execute_channel_action_at(
             channel_type,
             config,
         } => {
-            let channel_type = parse_channel_kind(&channel_type)?;
+            let channel_type = parse_channel_id(&channel_type)?;
             validate_channel_config(&config)?;
-            let name = channel_type.as_str().to_string();
+            let name = channel_type.clone();
 
             if store
                 .channels
@@ -307,6 +261,8 @@ fn execute_channel_action_at(
             }
 
             let mut started = 0;
+            let mut failed = 0;
+            let mut failures = Vec::new();
             for channel in &mut store.channels {
                 if channel.running {
                     channel.last_checked_at = Some(now);
@@ -314,7 +270,7 @@ fn execute_channel_action_at(
                     continue;
                 }
 
-                match try_build_channel_adapter(channel.channel_type, &channel.config) {
+                match run_channel_startup_probe(channel) {
                     Ok(()) => {
                         channel.running = true;
                         channel.last_health = Some(ChannelHealthStatus::Ok);
@@ -322,10 +278,15 @@ fn execute_channel_action_at(
                         channel.updated_at = now;
                         started += 1;
                     }
-                    Err(_reason) => {
+                    Err(reason) => {
                         channel.last_health = Some(ChannelHealthStatus::Unhealthy);
                         channel.last_checked_at = Some(now);
                         channel.updated_at = now;
+                        failed += 1;
+                        failures.push(format!(
+                            "name={} type={} error={reason}",
+                            channel.name, channel.channel_type
+                        ));
                         // Do not set running = true; channel stays stopped
                     }
                 }
@@ -342,6 +303,8 @@ fn execute_channel_action_at(
                 path: path.to_path_buf(),
                 started,
                 total_running,
+                failed,
+                failures,
             })
         }
         ChannelAction::Doctor => {
@@ -363,7 +326,7 @@ fn execute_channel_action_at(
 
                 checks.push(ChannelDoctorCheck {
                     name: channel.name.clone(),
-                    channel_type: channel.channel_type,
+                    channel_type: channel.channel_type.clone(),
                     status,
                     detail,
                     checked_at: now,
@@ -388,23 +351,25 @@ fn execute_channel_action_at(
 }
 
 fn health_for_channel(channel: &ChannelRecord) -> (ChannelHealthStatus, String) {
-    let config = channel.config.trim();
-    if config.is_empty() {
-        return (ChannelHealthStatus::Unhealthy, String::from("empty_config"));
-    }
-    if config.contains('\n') || config.contains('\r') {
-        return (
+    match run_channel_startup_probe(channel) {
+        Ok(()) => (ChannelHealthStatus::Ok, String::from("config_validated")),
+        Err(error) => (
             ChannelHealthStatus::Unhealthy,
-            String::from("multiline_config_not_allowed"),
-        );
+            format!("config_invalid: {error}"),
+        ),
     }
+}
 
-    (ChannelHealthStatus::Ok, String::from("config_present"))
+fn run_channel_startup_probe(channel: &ChannelRecord) -> Result<(), String> {
+    try_build_channel_adapter(&channel.channel_type, &channel.config)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{ChannelAction, ChannelHealthStatus, ChannelResult, execute_channel_action_at};
+    use super::{
+        ChannelAction, ChannelHealthStatus, ChannelResult, execute_channel_action_at,
+        resolve_runtime_channel_id,
+    };
     use std::fs;
     use std::path::PathBuf;
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -415,7 +380,7 @@ mod tests {
             .unwrap_or(Duration::from_secs(0))
             .as_nanos();
         std::env::temp_dir().join(format!(
-            "axiom-channel-{label}-{}-{tick}.{extension}",
+            "axonrunner-channel-{label}-{}-{tick}.{extension}",
             std::process::id()
         ))
     }
@@ -427,7 +392,7 @@ mod tests {
         let add = execute_channel_action_at(
             ChannelAction::Add {
                 channel_type: String::from("telegram"),
-                config: String::from("bot_token=t"),
+                config: String::from("bot_token=t,allowed_users=1001"),
             },
             &path,
             10,
@@ -436,7 +401,7 @@ mod tests {
         match add {
             ChannelResult::Added { channel, .. } => {
                 assert_eq!(channel.name, "telegram");
-                assert_eq!(channel.channel_type.as_str(), "telegram");
+                assert_eq!(channel.channel_type, "telegram");
                 assert!(!channel.running);
             }
             _ => panic!("expected added result"),
@@ -460,10 +425,12 @@ mod tests {
             ChannelResult::Started {
                 started,
                 total_running,
+                failed,
                 ..
             } => {
                 assert_eq!(started, 1);
                 assert_eq!(total_running, 1);
+                assert_eq!(failed, 0);
             }
             _ => panic!("expected started result"),
         }
@@ -585,7 +552,7 @@ mod tests {
         match add_matrix {
             ChannelResult::Added { channel, .. } => {
                 assert_eq!(channel.name, "matrix");
-                assert_eq!(channel.channel_type.as_str(), "matrix");
+                assert_eq!(channel.channel_type, "matrix");
             }
             _ => panic!("expected added result"),
         }
@@ -602,7 +569,7 @@ mod tests {
         match add_whatsapp {
             ChannelResult::Added { channel, .. } => {
                 assert_eq!(channel.name, "whatsapp");
-                assert_eq!(channel.channel_type.as_str(), "whatsapp");
+                assert_eq!(channel.channel_type, "whatsapp");
             }
             _ => panic!("expected added result"),
         }
@@ -619,11 +586,159 @@ mod tests {
         match add_irc {
             ChannelResult::Added { channel, .. } => {
                 assert_eq!(channel.name, "irc");
-                assert_eq!(channel.channel_type.as_str(), "irc");
+                assert_eq!(channel.channel_type, "irc");
             }
             _ => panic!("expected added result"),
         }
 
         let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn channel_start_rejects_invalid_slack_capability_config() {
+        let path = unique_path("start-invalid-slack", "db");
+
+        execute_channel_action_at(
+            ChannelAction::Add {
+                channel_type: String::from("slack"),
+                config: String::from("channel_id=C12345"),
+            },
+            &path,
+            60,
+        )
+        .expect("slack add should succeed");
+
+        let start = execute_channel_action_at(ChannelAction::Start, &path, 61)
+            .expect("start should complete even when config is invalid");
+
+        match start {
+            ChannelResult::Started {
+                started,
+                total_running,
+                failed,
+                failures,
+                ..
+            } => {
+                assert_eq!(started, 0);
+                assert_eq!(total_running, 0);
+                assert_eq!(failed, 1);
+                assert_eq!(failures.len(), 1);
+                assert!(
+                    failures[0].contains("missing required config key 'bot_token'"),
+                    "failure={}",
+                    failures[0]
+                );
+            }
+            _ => panic!("expected started result"),
+        }
+
+        let list =
+            execute_channel_action_at(ChannelAction::List, &path, 62).expect("list should succeed");
+        match list {
+            ChannelResult::Listed { channels, .. } => {
+                assert_eq!(channels.len(), 1);
+                assert_eq!(channels[0].name, "slack");
+                assert_eq!(
+                    channels[0].last_health,
+                    Some(ChannelHealthStatus::Unhealthy)
+                );
+                assert!(!channels[0].running);
+            }
+            _ => panic!("expected listed result"),
+        }
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn channel_doctor_reports_capability_validation_details() {
+        let path = unique_path("doctor-capability-detail", "db");
+
+        execute_channel_action_at(
+            ChannelAction::Add {
+                channel_type: String::from("discord"),
+                config: String::from("guild_id=1234"),
+            },
+            &path,
+            70,
+        )
+        .expect("discord add should succeed");
+
+        let doctor =
+            execute_channel_action_at(ChannelAction::Doctor, &path, 71).expect("doctor should run");
+
+        match doctor {
+            ChannelResult::Doctored {
+                checks,
+                healthy,
+                unhealthy,
+                ..
+            } => {
+                assert_eq!(healthy, 0);
+                assert_eq!(unhealthy, 1);
+                assert_eq!(checks.len(), 1);
+                assert_eq!(checks[0].name, "discord");
+                assert_eq!(checks[0].channel_type, "discord");
+                assert_eq!(checks[0].status, ChannelHealthStatus::Unhealthy);
+                assert!(
+                    checks[0]
+                        .detail
+                        .contains("missing required config key 'bot_token'"),
+                    "detail={}",
+                    checks[0].detail
+                );
+            }
+            _ => panic!("expected doctored result"),
+        }
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn resolve_runtime_channel_id_accepts_namespaced_aliases() {
+        let resolved = resolve_runtime_channel_id(|key| {
+            if key == crate::channel_runtime::ENV_RUNTIME_CHANNEL {
+                Some(String::from("channel.slack"))
+            } else {
+                None
+            }
+        })
+        .expect("alias should resolve");
+
+        assert_eq!(resolved, "slack");
+    }
+
+    #[test]
+    fn resolve_runtime_channel_id_rejects_missing_env() {
+        let error = resolve_runtime_channel_id(|_| None).expect_err("missing env should fail");
+        assert!(
+            error.contains(crate::channel_runtime::ENV_RUNTIME_CHANNEL),
+            "error should mention env key, got: {error}"
+        );
+        assert!(
+            error.contains("set it to one of"),
+            "error should include supported channels hint, got: {error}"
+        );
+    }
+
+    #[test]
+    fn resolve_runtime_channel_id_rejects_unknown_channel() {
+        let error = resolve_runtime_channel_id(|key| {
+            if key == crate::channel_runtime::ENV_RUNTIME_CHANNEL {
+                Some(String::from("unknown-channel"))
+            } else {
+                None
+            }
+        })
+        .expect_err("unknown channel should fail");
+
+        assert!(
+            error.contains("unsupported"),
+            "error should mention unsupported value, got: {error}"
+        );
+        assert!(
+            error.contains("telegram"),
+            "error should include supported channel list, got: {error}"
+        );
     }
 }

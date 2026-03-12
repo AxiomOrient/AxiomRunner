@@ -1,5 +1,5 @@
 [package]
-name = "axiom_apps"
+name = "axonrunner_apps"
 version.workspace = true
 edition.workspace = true
 
@@ -7,9 +7,10 @@ edition.workspace = true
 workspace = true
 
 [dependencies]
-axiom_core = { path = "../core" }
-axiom_adapters = { path = "../adapters", features = ["channel-discord", "channel-slack", "channel-irc", "channel-matrix", "channel-whatsapp"] }
-axiom_schema = { path = "../schema" }
+axonrunner_core = { path = "../core" }
+axonrunner_adapters = { path = "../adapters", features = ["channel-discord", "channel-slack", "channel-irc", "channel-matrix", "channel-whatsapp"] }
+axonrunner_infra = { path = "../infra" }
+axonrunner_schema = { path = "../schema" }
 rusqlite = { version = "0.32.1", features = ["bundled"] }
 serde_json = "1"
 serde = { version = "1", features = ["derive"] }

@@ -1,5 +1,5 @@
 [package]
-name = "axiom_infra"
+name = "axonrunner_infra"
 version.workspace = true
 edition.workspace = true
 

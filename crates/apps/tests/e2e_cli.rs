@@ -1,4 +1,4 @@
-use axiom_adapters::{MemoryAdapter, memory::MarkdownMemoryAdapter};
+use axonrunner_adapters::{MemoryAdapter, memory::MarkdownMemoryAdapter};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -6,7 +6,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const CLI_USAGE: &str = "\
 usage:
-  axiom_apps [global-options] <command> [command-args]
+  axonrunner_apps [global-options] <command> [command-args]
 
 global-options:
   --config-file <path>
@@ -41,15 +41,46 @@ intent-spec:
   halt";
 
 const SANITIZED_ENV_KEYS: &[&str] = &[
-    "AXIOM_RUNTIME_MEMORY_PATH",
-    "AXIOM_RUNTIME_TOOL_WORKSPACE",
-    "AXIOM_CHANNEL_STORE_PATH",
-    "AXIOM_DAEMON_HEALTH_PATH",
-    "AXIOM_DAEMON_HEALTH_STATE_PATH",
-    "AXIOM_SERVICE_STATE_PATH",
-    "AXIOM_ONBOARD_STATE_PATH",
-    "AXIOM_ONBOARD_WORKSPACE_PATH",
-    "AXIOM_CRON_STORE_PATH",
+    "AXONRUNNER_PROFILE",
+    "AXONRUNNER_ENDPOINT",
+    "AXONRUNNER_RUNTIME_PROVIDER",
+    "AXONRUNNER_RUNTIME_PROVIDER_MODEL",
+    "AXONRUNNER_RUNTIME_CHANNEL",
+    "AXONRUNNER_RUNTIME_TOOLS",
+    "AXONRUNNER_RUNTIME_BOOTSTRAP_ROOT",
+    "AXONRUNNER_RUNTIME_MAX_TOKENS",
+    "AXONRUNNER_CONTEXT_ROOT",
+    "AXONRUNNER_RUNTIME_MEMORY_PATH",
+    "AXONRUNNER_RUNTIME_TOOL_WORKSPACE",
+    "AXONRUNNER_RUNTIME_TOOL_LOG_PATH",
+    "AXONRUNNER_CHANNEL_STORE_PATH",
+    "AXONRUNNER_DAEMON_HEALTH_PATH",
+    "AXONRUNNER_DAEMON_HEALTH_STATE_PATH",
+    "AXONRUNNER_SERVICE_STATE_PATH",
+    "AXONRUNNER_ONBOARD_STATE_PATH",
+    "AXONRUNNER_ONBOARD_WORKSPACE_PATH",
+    "AXONRUNNER_CRON_STORE_PATH",
+    "OPENAI_API_KEY",
+    "OPENROUTER_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "COMPOSIO_API_KEY",
+    "AXONRUNNER_DISCORD_BOT_TOKEN",
+    "AXONRUNNER_CHANNEL_DISCORD_WEBHOOK",
+    "AXONRUNNER_DISCORD_GUILD_ID",
+    "AXONRUNNER_SLACK_BOT_TOKEN",
+    "AXONRUNNER_CHANNEL_SLACK_WEBHOOK",
+    "AXONRUNNER_SLACK_CHANNEL_ID",
+    "AXONRUNNER_TELEGRAM_BOT_TOKEN",
+    "AXONRUNNER_TELEGRAM_ALLOWED_USERS",
+    "AXONRUNNER_MATRIX_ACCESS_TOKEN",
+    "AXONRUNNER_MATRIX_ROOM_ID",
+    "AXONRUNNER_MATRIX_HOMESERVER",
+    "AXONRUNNER_IRC_SERVER",
+    "AXONRUNNER_IRC_CHANNEL",
+    "AXONRUNNER_IRC_NICK",
+    "AXONRUNNER_WHATSAPP_API_TOKEN",
+    "AXONRUNNER_WHATSAPP_PHONE_NUMBER_ID",
+    "AXONRUNNER_WHATSAPP_BUSINESS_ACCOUNT_ID",
 ];
 
 fn run_cli(args: &[&str]) -> Output {
@@ -59,18 +90,44 @@ fn run_cli(args: &[&str]) -> Output {
 fn run_cli_with_env(args: &[&str], env: &[(&str, &str)], label: &str) -> Output {
     let home = unique_path(&format!("home-{label}"), "dir");
     fs::create_dir_all(&home).expect("isolated home directory should be writable");
+    let canonical_home = fs::canonicalize(&home).unwrap_or(home.clone());
+    let tool_workspace = env
+        .iter()
+        .find_map(|(key, value)| {
+            matches!(
+                *key,
+                "AXONRUNNER_RUNTIME_TOOL_WORKSPACE" | "AXIOM_RUNTIME_TOOL_WORKSPACE"
+            )
+            .then(|| PathBuf::from(*value))
+        })
+        .unwrap_or_else(|| canonical_home.join(".axonrunner").join("workspace"));
 
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_axiom_apps"));
-    cmd.env("HOME", &home).args(args);
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_axonrunner_apps"));
+    cmd.env("HOME", &canonical_home).args(args);
     for key in SANITIZED_ENV_KEYS {
         cmd.env_remove(key);
+        if let Some(legacy_key) = key.strip_prefix("AXONRUNNER_") {
+            cmd.env_remove(format!("AXIOM_{legacy_key}"));
+        }
+    }
+    let has_tool_log_override = env.iter().any(|(key, _)| {
+        matches!(
+            *key,
+            "AXONRUNNER_RUNTIME_TOOL_LOG_PATH" | "AXIOM_RUNTIME_TOOL_LOG_PATH"
+        )
+    });
+    if !has_tool_log_override {
+        cmd.env(
+            "AXONRUNNER_RUNTIME_TOOL_LOG_PATH",
+            tool_workspace.join("runtime.log"),
+        );
     }
     for (key, value) in env {
         cmd.env(key, value);
     }
 
-    let output = cmd.output().expect("axiom_apps binary should run");
-    let _ = fs::remove_dir_all(&home);
+    let output = cmd.output().expect("axonrunner_apps binary should run");
+    let _ = fs::remove_dir_all(&canonical_home);
     output
 }
 
@@ -88,7 +145,7 @@ fn unique_path(label: &str, extension: &str) -> PathBuf {
         .unwrap_or(Duration::from_secs(0))
         .as_nanos();
     std::env::temp_dir().join(format!(
-        "axiom-e2e-cli-{label}-{}-{tick}.{extension}",
+        "axonrunner-e2e-cli-{label}-{}-{tick}.{extension}",
         std::process::id()
     ))
 }
@@ -109,9 +166,9 @@ fn e2e_cli_onboard_quick_initializes_workspace_and_profile() {
     let state_path = unique_path("onboard-state", "db");
     let workspace_path = unique_path("onboard-workspace", "dir");
 
-    let output = Command::new(env!("CARGO_BIN_EXE_axiom_apps"))
-        .env("AXIOM_ONBOARD_STATE_PATH", &state_path)
-        .env("AXIOM_ONBOARD_WORKSPACE_PATH", &workspace_path)
+    let output = Command::new(env!("CARGO_BIN_EXE_axonrunner_apps"))
+        .env("AXONRUNNER_ONBOARD_STATE_PATH", &state_path)
+        .env("AXONRUNNER_ONBOARD_WORKSPACE_PATH", &workspace_path)
         .args([
             "--profile=dev",
             "onboard",
@@ -120,7 +177,7 @@ fn e2e_cli_onboard_quick_initializes_workspace_and_profile() {
             "--api-key=sk-test",
         ])
         .output()
-        .expect("axiom_apps binary should run");
+        .expect("axonrunner_apps binary should run");
     let stdout = stdout_of(&output);
     let stderr = stderr_of(&output);
 
@@ -169,9 +226,9 @@ fn e2e_cli_onboard_rejects_interactive_and_channels_only_together() {
 
 #[test]
 fn e2e_cli_agent_single_message_mode() {
-    let output = Command::new(env!("CARGO_BIN_EXE_axiom_apps"))
-        .env("AXIOM_AGENT_ID", "mock")
-        .env("AXIOM_ALLOW_MOCK_AGENT", "1")
+    let output = Command::new(env!("CARGO_BIN_EXE_axonrunner_apps"))
+        .env("AXONRUNNER_AGENT_ID", "mock")
+        .env("AXONRUNNER_ALLOW_MOCK_AGENT", "1")
         .args([
             "agent",
             "--message=hello",
@@ -179,7 +236,7 @@ fn e2e_cli_agent_single_message_mode() {
             "--model=gpt-4o-mini",
         ])
         .output()
-        .expect("axiom_apps binary should run");
+        .expect("axonrunner_apps binary should run");
     let stdout = stdout_of(&output);
     let stderr = stderr_of(&output);
 
@@ -195,14 +252,39 @@ fn e2e_cli_agent_single_message_mode() {
 }
 
 #[test]
+fn e2e_cli_legacy_axiom_env_aliases_still_work() {
+    let output = run_cli_with_env(
+        &[
+            "agent",
+            "--message=hello",
+            "--cwd=/tmp",
+            "--model=gpt-4o-mini",
+        ],
+        &[("AXIOM_AGENT_ID", "mock"), ("AXIOM_ALLOW_MOCK_AGENT", "1")],
+        "legacy-agent-env",
+    );
+    let stdout = stdout_of(&output);
+    let stderr = stderr_of(&output);
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{stdout}\n\nstderr:\n{stderr}"
+    );
+    assert!(stderr.is_empty(), "stderr:\n{stderr}");
+    assert!(stdout.contains("agent single agent=mock"));
+    assert!(stdout.contains("model=gpt-4o-mini"));
+    assert!(stdout.contains("input=hello"));
+}
+
+#[test]
 fn e2e_cli_agent_interactive_mode_from_env_script() {
-    let output = Command::new(env!("CARGO_BIN_EXE_axiom_apps"))
-        .env("AXIOM_AGENT_ID", "mock")
-        .env("AXIOM_ALLOW_MOCK_AGENT", "1")
-        .env("AXIOM_AGENT_SCRIPT", "hello|status|exit")
+    let output = Command::new(env!("CARGO_BIN_EXE_axonrunner_apps"))
+        .env("AXONRUNNER_AGENT_ID", "mock")
+        .env("AXONRUNNER_ALLOW_MOCK_AGENT", "1")
+        .env("AXONRUNNER_AGENT_SCRIPT", "hello|status|exit")
         .args(["agent", "--cwd=/tmp", "--model=gpt-4o"])
         .output()
-        .expect("axiom_apps binary should run");
+        .expect("axonrunner_apps binary should run");
     let stdout = stdout_of(&output);
     let stderr = stderr_of(&output);
 
@@ -346,9 +428,12 @@ fn e2e_cli_status_includes_runtime_daemon_and_channel_summary() {
     let output = run_cli_with_env(
         &["status"],
         &[
-            ("AXIOM_RUNTIME_PROVIDER_MODEL", "status-e2e-model"),
-            ("AXIOM_DAEMON_HEALTH_PATH", path_str(&health_path)),
-            ("AXIOM_CHANNEL_STORE_PATH", path_str(&channel_store_path)),
+            ("AXONRUNNER_RUNTIME_PROVIDER_MODEL", "status-e2e-model"),
+            ("AXONRUNNER_DAEMON_HEALTH_PATH", path_str(&health_path)),
+            (
+                "AXONRUNNER_CHANNEL_STORE_PATH",
+                path_str(&channel_store_path),
+            ),
         ],
         "status-summary",
     );
@@ -389,9 +474,12 @@ fn e2e_cli_status_reads_daemon_health_from_state_pointer_when_env_missing() {
     let output = run_cli_with_env(
         &["status"],
         &[
-            ("AXIOM_RUNTIME_PROVIDER_MODEL", "status-fallback-model"),
-            ("AXIOM_DAEMON_HEALTH_STATE_PATH", path_str(&state_path)),
-            ("AXIOM_CHANNEL_STORE_PATH", path_str(&channel_store_path)),
+            ("AXONRUNNER_RUNTIME_PROVIDER_MODEL", "status-fallback-model"),
+            ("AXONRUNNER_DAEMON_HEALTH_STATE_PATH", path_str(&state_path)),
+            (
+                "AXONRUNNER_CHANNEL_STORE_PATH",
+                path_str(&channel_store_path),
+            ),
         ],
         "status-fallback",
     );
@@ -428,8 +516,8 @@ fn e2e_cli_doctor_reports_deterministic_summary() {
     let output = run_cli_with_env(
         &["--profile=dev", "--endpoint=http://doctor.local", "doctor"],
         &[
-            ("AXIOM_DAEMON_HEALTH_PATH", path_str(&health_path)),
-            ("AXIOM_RUNTIME_PROVIDER_MODEL", "doctor-e2e-model"),
+            ("AXONRUNNER_DAEMON_HEALTH_PATH", path_str(&health_path)),
+            ("AXONRUNNER_RUNTIME_PROVIDER_MODEL", "doctor-e2e-model"),
         ],
         "doctor-summary",
     );
@@ -459,7 +547,7 @@ fn e2e_cli_doctor_reports_deterministic_summary() {
     assert!(stdout.contains("doctor check=memory_adapter level=info detail=enabled=true"));
     assert!(stdout.contains("doctor check=tool_adapter level=info detail=enabled=true"));
     assert!(stdout.contains(&format!(
-        "doctor check=daemon_health level=pass detail=status=ok env=AXIOM_DAEMON_HEALTH_PATH path={} tick=7 state=running state_detail=item=sync attempt=1 reason=- in_flight=sync in_flight_attempt=1 queue_depth=0 completed=3 failed=0",
+        "doctor check=daemon_health level=pass detail=status=ok env=AXONRUNNER_DAEMON_HEALTH_PATH path={} tick=7 state=running state_detail=item=sync attempt=1 reason=- in_flight=sync in_flight_attempt=1 queue_depth=0 completed=3 failed=0",
         path_str(&health_path)
     )));
 
@@ -470,11 +558,11 @@ fn e2e_cli_doctor_reports_deterministic_summary() {
 fn e2e_cli_cron_add_list_remove_flow() {
     let store_path = unique_path("cron-store", "db");
 
-    let add = Command::new(env!("CARGO_BIN_EXE_axiom_apps"))
-        .env("AXIOM_CRON_STORE_PATH", &store_path)
+    let add = Command::new(env!("CARGO_BIN_EXE_axonrunner_apps"))
+        .env("AXONRUNNER_CRON_STORE_PATH", &store_path)
         .args(["cron", "add", "*/5 * * * *", "echo", "hello"])
         .output()
-        .expect("axiom_apps binary should run");
+        .expect("axonrunner_apps binary should run");
     let add_stdout = stdout_of(&add);
     let add_stderr = stderr_of(&add);
     assert!(
@@ -487,11 +575,11 @@ fn e2e_cli_cron_add_list_remove_flow() {
     assert!(add_stdout.contains("cmd=echo hello"));
     let id = parse_cron_id(&add_stdout).expect("added cron id should be present");
 
-    let list = Command::new(env!("CARGO_BIN_EXE_axiom_apps"))
-        .env("AXIOM_CRON_STORE_PATH", &store_path)
+    let list = Command::new(env!("CARGO_BIN_EXE_axonrunner_apps"))
+        .env("AXONRUNNER_CRON_STORE_PATH", &store_path)
         .args(["cron", "list"])
         .output()
-        .expect("axiom_apps binary should run");
+        .expect("axonrunner_apps binary should run");
     let list_stdout = stdout_of(&list);
     let list_stderr = stderr_of(&list);
     assert!(
@@ -504,11 +592,11 @@ fn e2e_cli_cron_add_list_remove_flow() {
     assert!(list_stdout.contains("expr=*/5 * * * *"));
     assert!(list_stdout.contains("cmd=echo hello"));
 
-    let remove = Command::new(env!("CARGO_BIN_EXE_axiom_apps"))
-        .env("AXIOM_CRON_STORE_PATH", &store_path)
+    let remove = Command::new(env!("CARGO_BIN_EXE_axonrunner_apps"))
+        .env("AXONRUNNER_CRON_STORE_PATH", &store_path)
         .args(["cron", "remove", &id])
         .output()
-        .expect("axiom_apps binary should run");
+        .expect("axonrunner_apps binary should run");
     let remove_stdout = stdout_of(&remove);
     let remove_stderr = stderr_of(&remove);
     assert!(
@@ -518,11 +606,11 @@ fn e2e_cli_cron_add_list_remove_flow() {
     assert!(remove_stderr.is_empty(), "stderr:\n{remove_stderr}");
     assert!(remove_stdout.contains(&format!("cron removed id={id} remaining=0")));
 
-    let list_after = Command::new(env!("CARGO_BIN_EXE_axiom_apps"))
-        .env("AXIOM_CRON_STORE_PATH", &store_path)
+    let list_after = Command::new(env!("CARGO_BIN_EXE_axonrunner_apps"))
+        .env("AXONRUNNER_CRON_STORE_PATH", &store_path)
         .args(["cron", "list"])
         .output()
-        .expect("axiom_apps binary should run");
+        .expect("axonrunner_apps binary should run");
     let list_after_stdout = stdout_of(&list_after);
     let list_after_stderr = stderr_of(&list_after);
     assert!(
@@ -539,11 +627,11 @@ fn e2e_cli_cron_add_list_remove_flow() {
 fn e2e_cli_service_lifecycle_smoke_flow() {
     let state_path = unique_path("service-state", "db");
 
-    let install = Command::new(env!("CARGO_BIN_EXE_axiom_apps"))
-        .env("AXIOM_SERVICE_STATE_PATH", &state_path)
+    let install = Command::new(env!("CARGO_BIN_EXE_axonrunner_apps"))
+        .env("AXONRUNNER_SERVICE_STATE_PATH", &state_path)
         .args(["service", "install"])
         .output()
-        .expect("axiom_apps binary should run");
+        .expect("axonrunner_apps binary should run");
     let install_stdout = stdout_of(&install);
     let install_stderr = stderr_of(&install);
     assert!(
@@ -554,11 +642,11 @@ fn e2e_cli_service_lifecycle_smoke_flow() {
     assert!(install_stdout.contains("service installed=true"));
     assert!(install_stdout.contains("running=false"));
 
-    let start = Command::new(env!("CARGO_BIN_EXE_axiom_apps"))
-        .env("AXIOM_SERVICE_STATE_PATH", &state_path)
+    let start = Command::new(env!("CARGO_BIN_EXE_axonrunner_apps"))
+        .env("AXONRUNNER_SERVICE_STATE_PATH", &state_path)
         .args(["service", "start"])
         .output()
-        .expect("axiom_apps binary should run");
+        .expect("axonrunner_apps binary should run");
     let start_stdout = stdout_of(&start);
     let start_stderr = stderr_of(&start);
     assert!(
@@ -569,11 +657,11 @@ fn e2e_cli_service_lifecycle_smoke_flow() {
     assert!(start_stdout.contains("service started=true"));
     assert!(start_stdout.contains("running=true"));
 
-    let status = Command::new(env!("CARGO_BIN_EXE_axiom_apps"))
-        .env("AXIOM_SERVICE_STATE_PATH", &state_path)
+    let status = Command::new(env!("CARGO_BIN_EXE_axonrunner_apps"))
+        .env("AXONRUNNER_SERVICE_STATE_PATH", &state_path)
         .args(["service", "status"])
         .output()
-        .expect("axiom_apps binary should run");
+        .expect("axonrunner_apps binary should run");
     let status_stdout = stdout_of(&status);
     let status_stderr = stderr_of(&status);
     assert!(
@@ -584,11 +672,11 @@ fn e2e_cli_service_lifecycle_smoke_flow() {
     assert!(status_stdout.contains("service status installed=true"));
     assert!(status_stdout.contains("running=true"));
 
-    let stop = Command::new(env!("CARGO_BIN_EXE_axiom_apps"))
-        .env("AXIOM_SERVICE_STATE_PATH", &state_path)
+    let stop = Command::new(env!("CARGO_BIN_EXE_axonrunner_apps"))
+        .env("AXONRUNNER_SERVICE_STATE_PATH", &state_path)
         .args(["service", "stop"])
         .output()
-        .expect("axiom_apps binary should run");
+        .expect("axonrunner_apps binary should run");
     let stop_stdout = stdout_of(&stop);
     let stop_stderr = stderr_of(&stop);
     assert!(
@@ -599,11 +687,11 @@ fn e2e_cli_service_lifecycle_smoke_flow() {
     assert!(stop_stdout.contains("service stopped=true"));
     assert!(stop_stdout.contains("running=false"));
 
-    let uninstall = Command::new(env!("CARGO_BIN_EXE_axiom_apps"))
-        .env("AXIOM_SERVICE_STATE_PATH", &state_path)
+    let uninstall = Command::new(env!("CARGO_BIN_EXE_axonrunner_apps"))
+        .env("AXONRUNNER_SERVICE_STATE_PATH", &state_path)
         .args(["service", "uninstall"])
         .output()
-        .expect("axiom_apps binary should run");
+        .expect("axonrunner_apps binary should run");
     let uninstall_stdout = stdout_of(&uninstall);
     let uninstall_stderr = stderr_of(&uninstall);
     assert!(
@@ -619,11 +707,11 @@ fn e2e_cli_service_lifecycle_smoke_flow() {
 #[test]
 fn e2e_cli_service_start_before_install_fails() {
     let state_path = unique_path("service-start-before-install", "db");
-    let output = Command::new(env!("CARGO_BIN_EXE_axiom_apps"))
-        .env("AXIOM_SERVICE_STATE_PATH", &state_path)
+    let output = Command::new(env!("CARGO_BIN_EXE_axonrunner_apps"))
+        .env("AXONRUNNER_SERVICE_STATE_PATH", &state_path)
         .args(["service", "start"])
         .output()
-        .expect("axiom_apps binary should run");
+        .expect("axonrunner_apps binary should run");
     let stdout = stdout_of(&output);
     let stderr = stderr_of(&output);
 
@@ -645,11 +733,16 @@ fn e2e_cli_service_start_before_install_fails() {
 fn e2e_cli_channel_add_start_doctor_remove_flow() {
     let store_path = unique_path("channel-store", "db");
 
-    let add = Command::new(env!("CARGO_BIN_EXE_axiom_apps"))
-        .env("AXIOM_CHANNEL_STORE_PATH", &store_path)
-        .args(["channel", "add", "telegram", "bot_token=abc"])
+    let add = Command::new(env!("CARGO_BIN_EXE_axonrunner_apps"))
+        .env("AXONRUNNER_CHANNEL_STORE_PATH", &store_path)
+        .args([
+            "channel",
+            "add",
+            "telegram",
+            "bot_token=abc,allowed_users=1001",
+        ])
         .output()
-        .expect("axiom_apps binary should run");
+        .expect("axonrunner_apps binary should run");
     let add_stdout = stdout_of(&add);
     let add_stderr = stderr_of(&add);
     assert!(
@@ -659,11 +752,11 @@ fn e2e_cli_channel_add_start_doctor_remove_flow() {
     assert!(add_stderr.is_empty(), "stderr:\n{add_stderr}");
     assert!(add_stdout.contains("channel added name=telegram type=telegram"));
 
-    let list = Command::new(env!("CARGO_BIN_EXE_axiom_apps"))
-        .env("AXIOM_CHANNEL_STORE_PATH", &store_path)
+    let list = Command::new(env!("CARGO_BIN_EXE_axonrunner_apps"))
+        .env("AXONRUNNER_CHANNEL_STORE_PATH", &store_path)
         .args(["channel", "list"])
         .output()
-        .expect("axiom_apps binary should run");
+        .expect("axonrunner_apps binary should run");
     let list_stdout = stdout_of(&list);
     let list_stderr = stderr_of(&list);
     assert!(
@@ -674,11 +767,11 @@ fn e2e_cli_channel_add_start_doctor_remove_flow() {
     assert!(list_stdout.contains("channel list count=1 running=0"));
     assert!(list_stdout.contains("channel entry name=telegram type=telegram running=false"));
 
-    let start = Command::new(env!("CARGO_BIN_EXE_axiom_apps"))
-        .env("AXIOM_CHANNEL_STORE_PATH", &store_path)
+    let start = Command::new(env!("CARGO_BIN_EXE_axonrunner_apps"))
+        .env("AXONRUNNER_CHANNEL_STORE_PATH", &store_path)
         .args(["channel", "start"])
         .output()
-        .expect("axiom_apps binary should run");
+        .expect("axonrunner_apps binary should run");
     let start_stdout = stdout_of(&start);
     let start_stderr = stderr_of(&start);
     assert!(
@@ -686,13 +779,13 @@ fn e2e_cli_channel_add_start_doctor_remove_flow() {
         "stdout:\n{start_stdout}\n\nstderr:\n{start_stderr}"
     );
     assert!(start_stderr.is_empty(), "stderr:\n{start_stderr}");
-    assert!(start_stdout.contains("channel start started=1 running=1"));
+    assert!(start_stdout.contains("channel start started=1 running=1 failed=0"));
 
-    let doctor = Command::new(env!("CARGO_BIN_EXE_axiom_apps"))
-        .env("AXIOM_CHANNEL_STORE_PATH", &store_path)
+    let doctor = Command::new(env!("CARGO_BIN_EXE_axonrunner_apps"))
+        .env("AXONRUNNER_CHANNEL_STORE_PATH", &store_path)
         .args(["channel", "doctor"])
         .output()
-        .expect("axiom_apps binary should run");
+        .expect("axonrunner_apps binary should run");
     let doctor_stdout = stdout_of(&doctor);
     let doctor_stderr = stderr_of(&doctor);
     assert!(
@@ -703,11 +796,11 @@ fn e2e_cli_channel_add_start_doctor_remove_flow() {
     assert!(doctor_stdout.contains("channel doctor count=1 healthy=1 unhealthy=0"));
     assert!(doctor_stdout.contains("channel check name=telegram type=telegram status=ok"));
 
-    let remove = Command::new(env!("CARGO_BIN_EXE_axiom_apps"))
-        .env("AXIOM_CHANNEL_STORE_PATH", &store_path)
+    let remove = Command::new(env!("CARGO_BIN_EXE_axonrunner_apps"))
+        .env("AXONRUNNER_CHANNEL_STORE_PATH", &store_path)
         .args(["channel", "remove", "telegram"])
         .output()
-        .expect("axiom_apps binary should run");
+        .expect("axonrunner_apps binary should run");
     let remove_stdout = stdout_of(&remove);
     let remove_stderr = stderr_of(&remove);
     assert!(
@@ -717,11 +810,11 @@ fn e2e_cli_channel_add_start_doctor_remove_flow() {
     assert!(remove_stderr.is_empty(), "stderr:\n{remove_stderr}");
     assert!(remove_stdout.contains("channel removed name=telegram remaining=0"));
 
-    let list_after = Command::new(env!("CARGO_BIN_EXE_axiom_apps"))
-        .env("AXIOM_CHANNEL_STORE_PATH", &store_path)
+    let list_after = Command::new(env!("CARGO_BIN_EXE_axonrunner_apps"))
+        .env("AXONRUNNER_CHANNEL_STORE_PATH", &store_path)
         .args(["channel", "list"])
         .output()
-        .expect("axiom_apps binary should run");
+        .expect("axonrunner_apps binary should run");
     let list_after_stdout = stdout_of(&list_after);
     let list_after_stderr = stderr_of(&list_after);
     assert!(
@@ -737,11 +830,11 @@ fn e2e_cli_channel_add_start_doctor_remove_flow() {
 #[test]
 fn e2e_cli_channel_remove_missing_fails() {
     let store_path = unique_path("channel-remove-missing", "db");
-    let output = Command::new(env!("CARGO_BIN_EXE_axiom_apps"))
-        .env("AXIOM_CHANNEL_STORE_PATH", &store_path)
+    let output = Command::new(env!("CARGO_BIN_EXE_axonrunner_apps"))
+        .env("AXONRUNNER_CHANNEL_STORE_PATH", &store_path)
         .args(["channel", "remove", "unknown"])
         .output()
-        .expect("axiom_apps binary should run");
+        .expect("axonrunner_apps binary should run");
     let stdout = stdout_of(&output);
     let stderr = stderr_of(&output);
 
@@ -764,11 +857,11 @@ fn e2e_cli_channel_add_accepts_matrix_whatsapp_irc_types() {
     let store_path = unique_path("channel-extended-types", "db");
 
     for channel_type in ["matrix", "whatsapp", "irc"] {
-        let output = Command::new(env!("CARGO_BIN_EXE_axiom_apps"))
-            .env("AXIOM_CHANNEL_STORE_PATH", &store_path)
+        let output = Command::new(env!("CARGO_BIN_EXE_axonrunner_apps"))
+            .env("AXONRUNNER_CHANNEL_STORE_PATH", &store_path)
             .args(["channel", "add", channel_type, "token=demo"])
             .output()
-            .expect("axiom_apps binary should run");
+            .expect("axonrunner_apps binary should run");
         let stdout = stdout_of(&output);
         let stderr = stderr_of(&output);
 
@@ -781,6 +874,74 @@ fn e2e_cli_channel_add_accepts_matrix_whatsapp_irc_types() {
             "channel added name={channel_type} type={channel_type}"
         )));
     }
+
+    let _ = fs::remove_file(store_path);
+}
+
+#[test]
+fn e2e_cli_channel_start_fails_with_invalid_startup_probe() {
+    let store_path = unique_path("channel-start-probe-fail", "db");
+
+    let add = Command::new(env!("CARGO_BIN_EXE_axonrunner_apps"))
+        .env("AXONRUNNER_CHANNEL_STORE_PATH", &store_path)
+        .args(["channel", "add", "slack", "channel_id=C12345"])
+        .output()
+        .expect("axonrunner_apps binary should run");
+    assert!(add.status.success(), "stderr:\n{}", stderr_of(&add));
+
+    let start = Command::new(env!("CARGO_BIN_EXE_axonrunner_apps"))
+        .env("AXONRUNNER_CHANNEL_STORE_PATH", &store_path)
+        .args(["channel", "start"])
+        .output()
+        .expect("axonrunner_apps binary should run");
+    let stdout = stdout_of(&start);
+    let stderr = stderr_of(&start);
+
+    assert_eq!(
+        start.status.code(),
+        Some(2),
+        "stdout:\n{stdout}\n\nstderr:\n{stderr}"
+    );
+    assert!(stdout.contains("channel start started=0 running=0 failed=1"));
+    assert!(stdout.contains("channel start failure name=slack type=slack"));
+    assert!(
+        stderr.contains("channel start failed unhealthy=1"),
+        "stderr:\n{stderr}"
+    );
+
+    let _ = fs::remove_file(store_path);
+}
+
+#[test]
+fn e2e_cli_channel_doctor_fails_with_unhealthy_channel() {
+    let store_path = unique_path("channel-doctor-probe-fail", "db");
+
+    let add = Command::new(env!("CARGO_BIN_EXE_axonrunner_apps"))
+        .env("AXONRUNNER_CHANNEL_STORE_PATH", &store_path)
+        .args(["channel", "add", "discord", "guild_id=1234"])
+        .output()
+        .expect("axonrunner_apps binary should run");
+    assert!(add.status.success(), "stderr:\n{}", stderr_of(&add));
+
+    let doctor = Command::new(env!("CARGO_BIN_EXE_axonrunner_apps"))
+        .env("AXONRUNNER_CHANNEL_STORE_PATH", &store_path)
+        .args(["channel", "doctor"])
+        .output()
+        .expect("axonrunner_apps binary should run");
+    let stdout = stdout_of(&doctor);
+    let stderr = stderr_of(&doctor);
+
+    assert_eq!(
+        doctor.status.code(),
+        Some(2),
+        "stdout:\n{stdout}\n\nstderr:\n{stderr}"
+    );
+    assert!(stdout.contains("channel doctor count=1 healthy=0 unhealthy=1"));
+    assert!(stdout.contains("channel check name=discord type=discord status=unhealthy"));
+    assert!(
+        stderr.contains("channel doctor failed unhealthy=1"),
+        "stderr:\n{stderr}"
+    );
 
     let _ = fs::remove_file(store_path);
 }
@@ -845,6 +1006,79 @@ fn e2e_cli_integrations_info_supports_case_insensitive_and_status_variants() {
     assert!(github_stdout.contains("integrations info name=github"));
     assert!(github_stdout.contains("category=productivity"));
     assert!(github_stdout.contains("status=coming_soon"));
+
+    let discord = run_cli(&["integrations", "info", "discord"]);
+    let discord_stdout = stdout_of(&discord);
+    let discord_stderr = stderr_of(&discord);
+    assert!(
+        discord.status.success(),
+        "stdout:\n{discord_stdout}\n\nstderr:\n{discord_stderr}"
+    );
+    assert!(discord_stderr.is_empty(), "stderr:\n{discord_stderr}");
+    assert!(discord_stdout.contains("integrations info name=discord"));
+    assert!(discord_stdout.contains("category=chat"));
+    assert!(discord_stdout.contains("status=partial"));
+
+    let slack = run_cli(&["integrations", "info", "slack"]);
+    let slack_stdout = stdout_of(&slack);
+    let slack_stderr = stderr_of(&slack);
+    assert!(
+        slack.status.success(),
+        "stdout:\n{slack_stdout}\n\nstderr:\n{slack_stderr}"
+    );
+    assert!(slack_stderr.is_empty(), "stderr:\n{slack_stderr}");
+    assert!(slack_stdout.contains("integrations info name=slack"));
+    assert!(slack_stdout.contains("category=chat"));
+    assert!(slack_stdout.contains("status=partial"));
+
+    let whatsapp = run_cli(&["integrations", "info", "whatsapp"]);
+    let whatsapp_stdout = stdout_of(&whatsapp);
+    let whatsapp_stderr = stderr_of(&whatsapp);
+    assert!(
+        whatsapp.status.success(),
+        "stdout:\n{whatsapp_stdout}\n\nstderr:\n{whatsapp_stderr}"
+    );
+    assert!(whatsapp_stderr.is_empty(), "stderr:\n{whatsapp_stderr}");
+    assert!(whatsapp_stdout.contains("integrations info name=whatsapp"));
+    assert!(whatsapp_stdout.contains("category=chat"));
+    assert!(whatsapp_stdout.contains("status=partial"));
+}
+
+#[test]
+fn e2e_cli_integrations_list_syncs_executable_statuses() {
+    let output = run_cli(&["integrations", "list"]);
+    let stdout = stdout_of(&output);
+    let stderr = stderr_of(&output);
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{stdout}\n\nstderr:\n{stderr}"
+    );
+    assert!(stderr.is_empty(), "stderr:\n{stderr}");
+
+    let listed_count = stdout
+        .lines()
+        .filter(|line| line.starts_with("integrations list name="))
+        .count();
+    assert_eq!(listed_count, 23, "stdout:\n{stdout}");
+
+    assert!(stdout.contains("integrations list name=openai category=ai_model status=active"));
+    assert!(stdout.contains("integrations list name=discord category=chat status=partial"));
+    assert!(stdout.contains("integrations list name=slack category=chat status=partial"));
+    assert!(stdout.contains("integrations list name=whatsapp category=chat status=partial"));
+    assert!(
+        stdout.contains("integrations list name=openrouter category=ai_model status=available")
+    );
+    assert!(stdout.contains("integrations list name=anthropic category=ai_model status=available"));
+    assert!(
+        stdout.contains("integrations list name=deepseek category=ai_model status=coming_soon")
+    );
+    assert!(
+        stdout.contains(
+            "integrations list name=openai-compatible category=ai_model status=coming_soon"
+        )
+    );
+    assert!(stdout.contains("integrations list name=browser category=platform status=available"));
 }
 
 #[test]
@@ -856,11 +1090,11 @@ fn e2e_cli_skills_list_install_remove_local_flow() {
     fs::write(source_skill.join("SKILL.md"), "# Demo skill\n\nRun task\n")
         .expect("skill markdown should be writable");
 
-    let install = Command::new(env!("CARGO_BIN_EXE_axiom_apps"))
-        .env("AXIOM_SKILLS_DIR", &skills_dir)
+    let install = Command::new(env!("CARGO_BIN_EXE_axonrunner_apps"))
+        .env("AXONRUNNER_SKILLS_DIR", &skills_dir)
         .args(["skills", "install", path_str(&source_skill)])
         .output()
-        .expect("axiom_apps binary should run");
+        .expect("axonrunner_apps binary should run");
     let install_stdout = stdout_of(&install);
     let install_stderr = stderr_of(&install);
     assert!(
@@ -874,11 +1108,11 @@ fn e2e_cli_skills_list_install_remove_local_flow() {
         "stdout:\n{install_stdout}"
     );
 
-    let list = Command::new(env!("CARGO_BIN_EXE_axiom_apps"))
-        .env("AXIOM_SKILLS_DIR", &skills_dir)
+    let list = Command::new(env!("CARGO_BIN_EXE_axonrunner_apps"))
+        .env("AXONRUNNER_SKILLS_DIR", &skills_dir)
         .args(["skills", "list"])
         .output()
-        .expect("axiom_apps binary should run");
+        .expect("axonrunner_apps binary should run");
     let list_stdout = stdout_of(&list);
     let list_stderr = stderr_of(&list);
     assert!(
@@ -890,11 +1124,11 @@ fn e2e_cli_skills_list_install_remove_local_flow() {
     assert!(list_stdout.contains("skills entry name=demo_skill"));
     assert!(list_stdout.contains("description=Demo skill"));
 
-    let remove = Command::new(env!("CARGO_BIN_EXE_axiom_apps"))
-        .env("AXIOM_SKILLS_DIR", &skills_dir)
+    let remove = Command::new(env!("CARGO_BIN_EXE_axonrunner_apps"))
+        .env("AXONRUNNER_SKILLS_DIR", &skills_dir)
         .args(["skills", "remove", "demo_skill"])
         .output()
-        .expect("axiom_apps binary should run");
+        .expect("axonrunner_apps binary should run");
     let remove_stdout = stdout_of(&remove);
     let remove_stderr = stderr_of(&remove);
     assert!(
@@ -904,11 +1138,11 @@ fn e2e_cli_skills_list_install_remove_local_flow() {
     assert!(remove_stderr.is_empty(), "stderr:\n{remove_stderr}");
     assert!(remove_stdout.contains("skills removed name=demo_skill removed=true"));
 
-    let list_after = Command::new(env!("CARGO_BIN_EXE_axiom_apps"))
-        .env("AXIOM_SKILLS_DIR", &skills_dir)
+    let list_after = Command::new(env!("CARGO_BIN_EXE_axonrunner_apps"))
+        .env("AXONRUNNER_SKILLS_DIR", &skills_dir)
         .args(["skills", "list"])
         .output()
-        .expect("axiom_apps binary should run");
+        .expect("axonrunner_apps binary should run");
     let list_after_stdout = stdout_of(&list_after);
     let list_after_stderr = stderr_of(&list_after);
     assert!(
@@ -925,11 +1159,11 @@ fn e2e_cli_skills_list_install_remove_local_flow() {
 #[test]
 fn e2e_cli_skills_remove_path_traversal_fails() {
     let skills_dir = unique_path("skills-remove-invalid", "dir");
-    let output = Command::new(env!("CARGO_BIN_EXE_axiom_apps"))
-        .env("AXIOM_SKILLS_DIR", &skills_dir)
+    let output = Command::new(env!("CARGO_BIN_EXE_axonrunner_apps"))
+        .env("AXONRUNNER_SKILLS_DIR", &skills_dir)
         .args(["skills", "remove", "../escape"])
         .output()
-        .expect("axiom_apps binary should run");
+        .expect("axonrunner_apps binary should run");
     let stdout = stdout_of(&output);
     let stderr = stderr_of(&output);
 
@@ -984,13 +1218,13 @@ fn e2e_cli_write_composes_provider_memory_and_tool() {
     let memory_path = unique_path("compose-memory", "md");
     let workspace = unique_path("compose-workspace", "dir");
 
-    let output = Command::new(env!("CARGO_BIN_EXE_axiom_apps"))
-        .env("AXIOM_RUNTIME_MEMORY_PATH", &memory_path)
-        .env("AXIOM_RUNTIME_TOOL_WORKSPACE", &workspace)
-        .env("AXIOM_RUNTIME_TOOL_LOG_PATH", "runtime.log")
+    let output = Command::new(env!("CARGO_BIN_EXE_axonrunner_apps"))
+        .env("AXONRUNNER_RUNTIME_MEMORY_PATH", &memory_path)
+        .env("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", &workspace)
+        .env("AXONRUNNER_RUNTIME_TOOL_LOG_PATH", "runtime.log")
         .args(["--actor=system", "write", "alpha", "42"])
         .output()
-        .expect("axiom_apps binary should run");
+        .expect("axonrunner_apps binary should run");
 
     let stdout = stdout_of(&output);
     let stderr = stderr_of(&output);
@@ -1015,6 +1249,47 @@ fn e2e_cli_write_composes_provider_memory_and_tool() {
     let log = fs::read_to_string(&log_path).expect("tool log should exist");
     assert!(log.contains("intent=cli-1 kind=write key=alpha"));
     assert!(log.contains("provider=intent=cli-1 kind=write key=alpha value=42"));
+
+    let _ = fs::remove_file(memory_path);
+    let _ = fs::remove_file(log_path);
+    let _ = fs::remove_dir_all(workspace);
+}
+
+#[test]
+fn e2e_cli_write_accepts_legacy_runtime_env_aliases() {
+    let memory_path = unique_path("legacy-compose-memory", "md");
+    let workspace = unique_path("legacy-compose-workspace", "dir");
+    let memory_path_str = path_str(&memory_path).to_string();
+    let workspace_str = path_str(&workspace).to_string();
+
+    let output = run_cli_with_env(
+        &["--actor=system", "write", "alpha", "42"],
+        &[
+            ("AXIOM_RUNTIME_MEMORY_PATH", memory_path_str.as_str()),
+            ("AXIOM_RUNTIME_TOOL_WORKSPACE", workspace_str.as_str()),
+            ("AXIOM_RUNTIME_TOOL_LOG_PATH", "legacy-runtime.log"),
+        ],
+        "legacy-runtime-env",
+    );
+    let stdout = stdout_of(&output);
+    let stderr = stderr_of(&output);
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{stdout}\n\nstderr:\n{stderr}"
+    );
+    assert!(stderr.is_empty(), "stderr:\n{stderr}");
+
+    let reader = MarkdownMemoryAdapter::new(memory_path.clone()).expect("memory file should load");
+    let record = reader
+        .get("alpha")
+        .expect("memory read should succeed")
+        .expect("alpha should be persisted");
+    assert_eq!(record.value, "42");
+
+    let log_path = workspace.join("legacy-runtime.log");
+    let log = fs::read_to_string(&log_path).expect("tool log should exist");
+    assert!(log.contains("intent=cli-1 kind=write key=alpha"));
 
     let _ = fs::remove_file(memory_path);
     let _ = fs::remove_file(log_path);

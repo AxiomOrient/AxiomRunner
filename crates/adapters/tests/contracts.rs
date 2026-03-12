@@ -5,8 +5,8 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use axiom_adapters::runtime::{NativeRuntimeAdapter, RuntimeRequest};
-use axiom_adapters::{
+use axonrunner_adapters::runtime::{NativeRuntimeAdapter, RuntimeRequest};
+use axonrunner_adapters::{
     AdapterError, AdapterFuture, AdapterHealth, AdapterResult, ChannelAdapter, ChannelMessage,
     ChannelSendReceipt, MemoryAdapter, MemoryEntry, ProviderAdapter, ProviderRequest,
     ProviderResponse, RuntimeAdapter, RuntimeState, RuntimeTick, ToolAdapter, ToolCall, ToolOutput,
@@ -381,7 +381,7 @@ fn unique_path(label: &str, extension: &str) -> PathBuf {
         .unwrap_or(Duration::from_secs(0))
         .as_nanos();
     std::env::temp_dir().join(format!(
-        "axiom-contracts-{label}-{}-{tick}.{extension}",
+        "axonrunner-contracts-{label}-{}-{tick}.{extension}",
         std::process::id()
     ))
 }

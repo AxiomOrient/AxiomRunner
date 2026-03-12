@@ -28,6 +28,6 @@ jobs:
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           COMPOSIO_API_KEY: ${{ secrets.COMPOSIO_API_KEY }}
-          AXIOM_RUN_AXIOMME_LIVE: ${{ vars.AXIOM_RUN_AXIOMME_LIVE }}
-          AXIOM_RUN_DELEGATE_LIVE: ${{ vars.AXIOM_RUN_DELEGATE_LIVE }}
+          AXONRUNNER_RUN_AXIOMME_LIVE: ${{ vars.AXONRUNNER_RUN_AXIOMME_LIVE }}
+          AXONRUNNER_RUN_DELEGATE_LIVE: ${{ vars.AXONRUNNER_RUN_DELEGATE_LIVE }}
         run: bash scripts/run_ignored_live_tests.sh

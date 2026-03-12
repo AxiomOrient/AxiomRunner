@@ -1,7 +1,8 @@
 use crate::error::{AdapterError, AdapterResult};
 
 pub(crate) const DEFAULT_ERROR_BODY_PREVIEW_BYTES: usize = 200;
-const ROUTED_TOPIC_PREFIX: &str = "axiom://channel/";
+const ROUTED_TOPIC_PREFIX: &str = "axonrunner://channel/";
+const LEGACY_ROUTED_TOPIC_PREFIX: &str = "axiom://channel/";
 
 pub(crate) fn normalize_token(raw: String, field: &'static str) -> AdapterResult<String> {
     let token = raw.trim();
@@ -104,13 +105,17 @@ pub(crate) fn encode_routed_topic(adapter: &str, route: &str) -> String {
 }
 
 pub(crate) fn decode_routed_topic(topic: &str, adapter: &str) -> Option<String> {
-    let prefix = format!("{ROUTED_TOPIC_PREFIX}{adapter}/");
-    let route = topic.strip_prefix(prefix.as_str())?.trim();
-    if route.is_empty() {
-        None
-    } else {
-        Some(route.to_string())
+    for base_prefix in [ROUTED_TOPIC_PREFIX, LEGACY_ROUTED_TOPIC_PREFIX] {
+        let prefix = format!("{base_prefix}{adapter}/");
+        if let Some(route) = topic.strip_prefix(prefix.as_str()) {
+            let route = route.trim();
+            if route.is_empty() {
+                return None;
+            }
+            return Some(route.to_string());
+        }
     }
+    None
 }
 
 pub(crate) fn resolve_route_topic(topic: &str, adapter: &str) -> String {
@@ -149,7 +154,7 @@ mod tests {
     #[test]
     fn routed_topic_roundtrip_encode_decode() {
         let topic = encode_routed_topic("telegram", "12345");
-        assert_eq!(topic, "axiom://channel/telegram/12345");
+        assert_eq!(topic, "axonrunner://channel/telegram/12345");
         assert_eq!(
             decode_routed_topic(topic.as_str(), "telegram"),
             Some(String::from("12345"))
@@ -158,11 +163,16 @@ mod tests {
 
     #[test]
     fn resolve_route_topic_supports_legacy_and_canonical() {
-        let canonical = "axiom://channel/matrix/!room:example.org";
+        let canonical = "axonrunner://channel/matrix/!room:example.org";
+        let legacy_canonical = "axiom://channel/matrix/!room:example.org";
         let legacy = "!room:example.org";
 
         assert_eq!(
             resolve_route_topic(canonical, "matrix"),
+            String::from("!room:example.org")
+        );
+        assert_eq!(
+            resolve_route_topic(legacy_canonical, "matrix"),
             String::from("!room:example.org")
         );
         assert_eq!(

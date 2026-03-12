@@ -23,6 +23,7 @@ pub mod error;
 #[path = "memory.rs"]
 pub mod memory;
 pub mod memory_axiomme;
+pub mod provider_anthropic;
 pub mod provider_openai;
 pub mod provider_registry;
 pub mod runtime;
@@ -41,18 +42,18 @@ pub use channel_irc::{IrcChannelAdapter, IrcConfig};
 pub use channel_matrix::{MatrixChannelAdapter, MatrixConfig};
 pub use channel_registry::{
     ChannelKind, ChannelRegistryEntry, DEFAULT_CHANNEL_ID, build_contract_channel,
-    channel_registry, resolve_channel_adapter_id, resolve_channel_id,
+    channel_is_compiled, channel_registry, resolve_channel_adapter_id, resolve_channel_id,
 };
 #[cfg(feature = "channel-slack")]
 pub use channel_slack::{SlackChannelAdapter, SlackConfig};
 pub use channel_telegram::{TelegramChannelAdapter, TelegramConfig};
 #[cfg(feature = "channel-whatsapp")]
 pub use channel_whatsapp::{WhatsAppChannelAdapter, WhatsAppConfig};
-pub use context_axiomme::AxiommeContextAdapter;
+pub use context_axiomme::{AxiommeContextAdapter, AxiomsyncContextAdapter};
 pub use contracts::*;
 pub use error::*;
 pub use memory::{build_contract_context, build_contract_memory};
-pub use memory_axiomme::AxiommeMemoryAdapter;
+pub use memory_axiomme::{AxiommeMemoryAdapter, AxiomsyncMemoryAdapter};
 pub use provider_registry::{
     DEFAULT_PROVIDER_ID, ProviderRegistryEntry, build_contract_provider, provider_registry,
     resolve_provider_adapter_id, resolve_provider_id,

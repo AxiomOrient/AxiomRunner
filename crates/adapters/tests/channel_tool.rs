@@ -3,7 +3,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use axiom_adapters::{channel, tool};
+use axonrunner_adapters::{channel, tool};
 
 struct TempWorkspace {
     path: PathBuf,
@@ -16,7 +16,7 @@ impl TempWorkspace {
             .expect("system clock should be after UNIX_EPOCH")
             .as_nanos();
         let path = std::env::temp_dir().join(format!(
-            "axiom_adapters_channel_tool_{label}_{}_{}",
+            "axonrunner_adapters_channel_tool_{label}_{}_{}",
             std::process::id(),
             timestamp
         ));
@@ -286,7 +286,7 @@ fn channel_tool_workspace_escape_is_blocked_for_read_and_write() {
         .parent()
         .expect("workspace should have parent")
         .join(format!(
-            "axiom_adapters_channel_tool_outside_{}_{}",
+            "axonrunner_adapters_channel_tool_outside_{}_{}",
             std::process::id(),
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)

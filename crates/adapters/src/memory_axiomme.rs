@@ -1,17 +1,19 @@
 use std::io::Write as IoWrite;
 use std::path::PathBuf;
 
-use axiomme_core::{AxiomError, AxiomMe};
+use axiomme_core::{AxiomError, AxiomMe as AxiomSync};
 
 use crate::contracts::{AdapterHealth, MemoryAdapter, MemoryEntry};
 use crate::error::{AdapterError, AdapterResult, RetryClass};
 use crate::memory::now_millis;
 
-/// MemoryAdapter backed by AxiomMe — stores key/value pairs as flat markdown
-/// files under `axiom://agent/memory/<key>` in the AxiomMe context root.
-pub struct AxiommeMemoryAdapter {
-    client: AxiomMe,
+/// MemoryAdapter backed by AxiomSync — stores key/value pairs as flat markdown
+/// files under `axonrunner://agent/memory/<key>` in the AxiomSync context root.
+pub struct AxiomsyncMemoryAdapter {
+    client: AxiomSync,
 }
+
+pub type AxiommeMemoryAdapter = AxiomsyncMemoryAdapter;
 
 struct TempPathCleanup {
     path: PathBuf,
@@ -33,23 +35,28 @@ impl Drop for TempPathCleanup {
     }
 }
 
-impl AxiommeMemoryAdapter {
-    const MEMORY_URI: &'static str = "axiom://agent/memory";
+impl AxiomsyncMemoryAdapter {
+    const MEMORY_URI: &'static str = "axonrunner://agent/memory";
+    const LEGACY_MEMORY_URI: &'static str = "axiom://agent/memory";
 
-    /// Initialize (or open) an AxiomMe context rooted at `root_dir`.
+    /// Initialize (or open) an AxiomSync context rooted at `root_dir`.
     ///
     /// `root_dir` will be created if it does not exist.
     pub fn new(root_dir: impl Into<PathBuf>) -> Result<Self, String> {
         let root = root_dir.into();
-        let client = AxiomMe::new(&root).map_err(|e| format!("AxiomMe::new failed: {e}"))?;
+        let client = AxiomSync::new(&root).map_err(|e| format!("AxiomSync::new failed: {e}"))?;
         client
             .initialize()
-            .map_err(|e| format!("AxiomMe::initialize failed: {e}"))?;
+            .map_err(|e| format!("AxiomSync::initialize failed: {e}"))?;
         Ok(Self { client })
     }
 
     fn uri_for(key: &str) -> String {
         format!("{}/{}.md", Self::MEMORY_URI, key)
+    }
+
+    fn legacy_uri_for(key: &str) -> String {
+        format!("{}/{}.md", Self::LEGACY_MEMORY_URI, key)
     }
 
     fn key_from_uri(uri: &str) -> Option<String> {
@@ -69,17 +76,62 @@ impl AxiommeMemoryAdapter {
     }
 
     fn indexed_memory_values(&self) -> std::collections::HashMap<String, String> {
-        let prefix = format!("{}/", Self::MEMORY_URI);
         self.client
             .state
             .list_search_documents()
             .map(|docs| {
                 docs.into_iter()
-                    .filter(|doc| doc.uri.starts_with(prefix.as_str()))
+                    .filter(|doc| {
+                        doc.uri
+                            .starts_with(format!("{}/", Self::MEMORY_URI).as_str())
+                            || doc
+                                .uri
+                                .starts_with(format!("{}/", Self::LEGACY_MEMORY_URI).as_str())
+                    })
                     .map(|doc| (doc.uri, doc.content))
                     .collect()
             })
             .unwrap_or_default()
+    }
+
+    fn list_documents_at(&self, uri: &str) -> AdapterResult<Vec<(String, bool)>> {
+        match self.client.ls(uri, true, true) {
+            Ok(entries) => Ok(entries
+                .into_iter()
+                .map(|entry| (entry.uri, entry.is_dir))
+                .collect()),
+            Err(AxiomError::NotFound(_)) => Ok(Vec::new()),
+            Err(error) => Err(AdapterError::failed(
+                "axiomsync.list",
+                error.to_string(),
+                RetryClass::NonRetryable,
+            )),
+        }
+    }
+
+    fn recall_documents_at(
+        &self,
+        query: &str,
+        scope_uri: &str,
+        limit: usize,
+    ) -> AdapterResult<Vec<String>> {
+        let limit_opt = if limit == 0 { None } else { Some(limit) };
+        match self
+            .client
+            .find(query, Some(scope_uri), limit_opt, None, None)
+        {
+            Ok(result) => Ok(result
+                .query_results
+                .into_iter()
+                .map(|hit| hit.uri)
+                .collect()),
+            Err(AxiomError::NotFound(_)) => Ok(Vec::new()),
+            Err(error) => Err(AdapterError::failed(
+                "axiomsync.recall",
+                error.to_string(),
+                RetryClass::NonRetryable,
+            )),
+        }
     }
 
     fn value_for_uri(
@@ -94,17 +146,19 @@ impl AxiommeMemoryAdapter {
     }
 }
 
-impl MemoryAdapter for AxiommeMemoryAdapter {
+impl MemoryAdapter for AxiomsyncMemoryAdapter {
     fn id(&self) -> &str {
-        "axiomme"
+        "axiomsync"
     }
 
     fn health(&self) -> AdapterHealth {
-        match self.client.ls(Self::MEMORY_URI, false, true) {
-            Ok(_) => AdapterHealth::Healthy,
-            Err(AxiomError::NotFound(_)) => AdapterHealth::Healthy,
-            Err(_) => AdapterHealth::Degraded,
+        for scope in [Self::MEMORY_URI, Self::LEGACY_MEMORY_URI] {
+            match self.client.ls(scope, false, true) {
+                Ok(_) | Err(AxiomError::NotFound(_)) => return AdapterHealth::Healthy,
+                Err(_) => continue,
+            }
         }
+        AdapterHealth::Degraded
     }
 
     fn store(&self, key: &str, value: &str) -> AdapterResult<()> {
@@ -116,21 +170,21 @@ impl MemoryAdapter for AxiommeMemoryAdapter {
             .subsec_nanos();
         let tid = format!("{:?}", std::thread::current().id()).replace(['(', ')'], "");
         let tmp_path = std::env::temp_dir().join(format!(
-            "axiomme_store_{}_{ts}_{tid}.md",
+            "axiomsync_store_{}_{ts}_{tid}.md",
             key.replace('/', "_")
         ));
         let tmp_path = TempPathCleanup::new(tmp_path);
         {
             let mut f = std::fs::File::create(tmp_path.path()).map_err(|e| {
                 AdapterError::failed(
-                    "axiomme.store.tmpfile",
+                    "axiomsync.store.tmpfile",
                     e.to_string(),
                     RetryClass::NonRetryable,
                 )
             })?;
             f.write_all(value.as_bytes()).map_err(|e| {
                 AdapterError::failed(
-                    "axiomme.store.write",
+                    "axiomsync.store.write",
                     e.to_string(),
                     RetryClass::NonRetryable,
                 )
@@ -142,125 +196,109 @@ impl MemoryAdapter for AxiommeMemoryAdapter {
         self.client
             .add_resource(&tmp_str, Some(&uri), None, None, true, None)
             .map_err(|e| {
-                AdapterError::failed("axiomme.store.add", e.to_string(), RetryClass::Retryable)
+                AdapterError::failed("axiomsync.store.add", e.to_string(), RetryClass::Retryable)
             })?;
         Ok(())
     }
 
     fn get(&self, key: &str) -> AdapterResult<Option<MemoryEntry>> {
-        let uri = Self::uri_for(key);
-        match self.client.read(&uri) {
-            Ok(content) => Ok(Some(MemoryEntry {
-                key: key.to_string(),
-                value: content,
-                updated_at: now_millis(),
-            })),
-            Err(AxiomError::NotFound(_)) => Ok(None),
-            Err(e) => Err(AdapterError::failed(
-                "axiomme.get",
-                e.to_string(),
-                RetryClass::NonRetryable,
-            )),
+        for uri in [Self::uri_for(key), Self::legacy_uri_for(key)] {
+            match self.client.read(&uri) {
+                Ok(content) => {
+                    return Ok(Some(MemoryEntry {
+                        key: key.to_string(),
+                        value: content,
+                        updated_at: now_millis(),
+                    }));
+                }
+                Err(AxiomError::NotFound(_)) => continue,
+                Err(error) => {
+                    return Err(AdapterError::failed(
+                        "axiomsync.get",
+                        error.to_string(),
+                        RetryClass::NonRetryable,
+                    ));
+                }
+            }
         }
+        Ok(None)
     }
 
     fn list(&self) -> AdapterResult<Vec<MemoryEntry>> {
-        let entries = match self.client.ls(Self::MEMORY_URI, true, true) {
-            Ok(entries) => entries,
-            Err(AxiomError::NotFound(_)) => return Ok(Vec::new()),
-            Err(e) => {
-                return Err(AdapterError::failed(
-                    "axiomme.list",
-                    e.to_string(),
-                    RetryClass::NonRetryable,
-                ));
-            }
-        };
-
         let indexed_values = self.indexed_memory_values();
-        let memory_entries = entries
+        let mut deduped = std::collections::BTreeMap::new();
+        for entry in self
+            .list_documents_at(Self::MEMORY_URI)?
             .into_iter()
-            .filter(|entry| !entry.is_dir)
-            .filter_map(|entry| {
-                let key = Self::key_from_uri(&entry.uri)?;
-                let value = self.value_for_uri(&entry.uri, &indexed_values);
-                Some(MemoryEntry {
-                    key,
-                    value,
-                    updated_at: 0,
-                })
-            })
-            .collect();
+            .chain(self.list_documents_at(Self::LEGACY_MEMORY_URI)?)
+        {
+            let (uri, is_dir) = entry;
+            if is_dir {
+                continue;
+            }
+            let Some(key) = Self::key_from_uri(&uri) else {
+                continue;
+            };
+            deduped.entry(key.clone()).or_insert_with(|| MemoryEntry {
+                key,
+                value: self.value_for_uri(&uri, &indexed_values),
+                updated_at: 0,
+            });
+        }
 
-        Ok(memory_entries)
+        Ok(deduped.into_values().collect())
     }
 
     fn recall(&self, query: &str, limit: usize) -> AdapterResult<Vec<MemoryEntry>> {
-        let limit_opt = if limit == 0 { None } else { Some(limit) };
-        let result = match self
-            .client
-            .find(query, Some(Self::MEMORY_URI), limit_opt, None, None)
-        {
-            Ok(r) => r,
-            Err(AxiomError::NotFound(_)) => return Ok(Vec::new()),
-            Err(e) => {
-                return Err(AdapterError::failed(
-                    "axiomme.recall",
-                    e.to_string(),
-                    RetryClass::NonRetryable,
-                ));
-            }
-        };
-
         let indexed_values = self.indexed_memory_values();
-        let entries = result
-            .query_results
-            .into_iter()
-            .filter_map(|hit| {
-                let key = Self::key_from_uri(&hit.uri)?;
-                let value = self.value_for_uri(&hit.uri, &indexed_values);
-                Some(MemoryEntry {
-                    key,
-                    value,
-                    updated_at: 0,
-                })
-            })
-            .collect();
+        let mut hits = self.recall_documents_at(query, Self::MEMORY_URI, limit)?;
+        if limit == 0 || hits.len() < limit {
+            let legacy_limit = if limit == 0 {
+                0
+            } else {
+                limit.saturating_sub(hits.len())
+            };
+            hits.extend(self.recall_documents_at(query, Self::LEGACY_MEMORY_URI, legacy_limit)?);
+        }
 
-        Ok(entries)
+        let mut deduped = std::collections::BTreeMap::new();
+        for uri in hits {
+            let Some(key) = Self::key_from_uri(&uri) else {
+                continue;
+            };
+            deduped.entry(key.clone()).or_insert_with(|| MemoryEntry {
+                key,
+                value: self.value_for_uri(&uri, &indexed_values),
+                updated_at: 0,
+            });
+            if limit != 0 && deduped.len() >= limit {
+                break;
+            }
+        }
+
+        Ok(deduped.into_values().collect())
     }
 
     fn delete(&self, key: &str) -> AdapterResult<bool> {
-        let uri = Self::uri_for(key);
-        match self.client.rm(&uri, false) {
-            Ok(()) => Ok(true),
-            Err(AxiomError::NotFound(_)) => Ok(false),
-            Err(e) => Err(AdapterError::failed(
-                "axiomme.delete",
-                e.to_string(),
-                RetryClass::NonRetryable,
-            )),
+        let mut deleted = false;
+        for uri in [Self::uri_for(key), Self::legacy_uri_for(key)] {
+            match self.client.rm(&uri, false) {
+                Ok(()) => deleted = true,
+                Err(AxiomError::NotFound(_)) => {}
+                Err(error) => {
+                    return Err(AdapterError::failed(
+                        "axiomsync.delete",
+                        error.to_string(),
+                        RetryClass::NonRetryable,
+                    ));
+                }
+            }
         }
+        Ok(deleted)
     }
 
     fn count(&self) -> AdapterResult<usize> {
-        let entries = match self.client.ls(Self::MEMORY_URI, true, true) {
-            Ok(entries) => entries,
-            Err(AxiomError::NotFound(_)) => return Ok(0),
-            Err(e) => {
-                return Err(AdapterError::failed(
-                    "axiomme.count",
-                    e.to_string(),
-                    RetryClass::NonRetryable,
-                ));
-            }
-        };
-
-        Ok(entries
-            .into_iter()
-            .filter(|entry| !entry.is_dir)
-            .filter(|entry| Self::key_from_uri(&entry.uri).is_some())
-            .count())
+        Ok(self.list()?.len())
     }
 }
 
@@ -268,27 +306,30 @@ impl MemoryAdapter for AxiommeMemoryAdapter {
 mod tests {
     use super::*;
 
+    const LIVE_ENV: &str = "AXONRUNNER_RUN_AXIOMSYNC_LIVE";
+    const LEGACY_LIVE_ENV: &str = "AXONRUNNER_RUN_AXIOMME_LIVE";
+
     fn test_dir(suffix: &str) -> PathBuf {
-        std::env::temp_dir().join(format!("axiomme_adapter_test_{suffix}"))
+        std::env::temp_dir().join(format!("axiomsync_adapter_test_{suffix}"))
     }
 
     #[test]
     fn new_initializes_without_error() {
         let dir = test_dir("init");
         std::fs::create_dir_all(&dir).unwrap();
-        let result = AxiommeMemoryAdapter::new(&dir);
+        let result = AxiomsyncMemoryAdapter::new(&dir);
         std::fs::remove_dir_all(&dir).ok();
         assert!(result.is_ok(), "init failed: {:?}", result.err());
     }
 
     #[test]
-    fn id_returns_axiomme() {
+    fn id_returns_axiomsync() {
         let dir = test_dir("id");
         std::fs::create_dir_all(&dir).unwrap();
-        let adapter_result = AxiommeMemoryAdapter::new(&dir);
+        let adapter_result = AxiomsyncMemoryAdapter::new(&dir);
         std::fs::remove_dir_all(&dir).ok();
         if let Ok(adapter) = adapter_result {
-            assert_eq!(adapter.id(), "axiomme");
+            assert_eq!(adapter.id(), "axiomsync");
         } else {
             panic!("adapter init failed");
         }
@@ -297,7 +338,7 @@ mod tests {
     #[test]
     fn key_from_uri_strips_md_suffix() {
         assert_eq!(
-            AxiommeMemoryAdapter::key_from_uri("axiom://agent/memory/hello.md"),
+            AxiomsyncMemoryAdapter::key_from_uri("axonrunner://agent/memory/hello.md"),
             Some("hello".to_string())
         );
     }
@@ -305,7 +346,7 @@ mod tests {
     #[test]
     fn key_from_uri_returns_none_for_empty_segment() {
         assert_eq!(
-            AxiommeMemoryAdapter::key_from_uri("axiom://agent/memory/"),
+            AxiomsyncMemoryAdapter::key_from_uri("axonrunner://agent/memory/"),
             None
         );
     }
@@ -313,25 +354,23 @@ mod tests {
     #[test]
     fn uri_for_produces_expected_path() {
         assert_eq!(
-            AxiommeMemoryAdapter::uri_for("some_key"),
-            "axiom://agent/memory/some_key.md"
+            AxiomsyncMemoryAdapter::uri_for("some_key"),
+            "axonrunner://agent/memory/some_key.md"
         );
     }
 
     /// Full round-trip: store → get → delete.
-    /// Requires a working AxiomMe setup; may be slow due to semantic processing.
+    /// Requires a working AxiomSync setup; may be slow due to semantic processing.
     #[test]
     #[ignore]
     fn store_get_delete_roundtrip() {
-        if std::env::var_os("AXIOM_RUN_AXIOMME_LIVE").is_none() {
-            eprintln!(
-                "skipping store_get_delete_roundtrip: set AXIOM_RUN_AXIOMME_LIVE=1 to enable"
-            );
+        if std::env::var_os(LIVE_ENV).is_none() && std::env::var_os(LEGACY_LIVE_ENV).is_none() {
+            eprintln!("skipping store_get_delete_roundtrip: set {LIVE_ENV}=1 to enable");
             return;
         }
         let dir = test_dir("roundtrip");
         std::fs::create_dir_all(&dir).unwrap();
-        let adapter = AxiommeMemoryAdapter::new(&dir).expect("adapter init");
+        let adapter = AxiomsyncMemoryAdapter::new(&dir).expect("adapter init");
         adapter.store("test_key", "hello world").expect("store");
         let entry = adapter.get("test_key").expect("get");
         assert!(entry.is_some(), "entry should exist after store");

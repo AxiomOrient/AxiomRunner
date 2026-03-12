@@ -1,4 +1,4 @@
-use axiom_core::ExecutionMode;
+use axonrunner_core::ExecutionMode;
 
 pub fn mode_name(mode: ExecutionMode) -> &'static str {
     match mode {

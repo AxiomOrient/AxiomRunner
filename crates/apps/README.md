@@ -1,6 +1,6 @@
-# axiom_apps
+# axonrunner_apps
 
-Axiom AI 프로젝트의 핵심 **컴포지션 및 실행 애플리케이션(Composition & Execution Application)** 크레이트입니다.  
+AxonRunner 프로젝트의 핵심 **컴포지션 및 실행 애플리케이션(Composition & Execution Application)** 크레이트입니다.  
 이 크레이트는 다른 핵심 크레이트들(`core`, `adapters`, `schema`)의 요소들을 결합하여, 사용자가 실제로 구동하고 상호작용할 수 있는 엔드포인트(CLI, Daemon, Gateway)를 제공하는 역할을 담당합니다.
 
 ## 시스템 내 역할 (Architectural Role)

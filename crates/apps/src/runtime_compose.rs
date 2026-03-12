@@ -1,16 +1,16 @@
 use crate::async_runtime_host::global_async_runtime_host;
 use crate::cli_command::IntentTemplate;
+use crate::env_util::{prefer_existing_path, read_env_trimmed};
 use crate::identity_bootstrap::{BootstrapContext, BootstrapLoadConfig, load_bootstrap_context};
 use crate::parse_util::parse_tools_list;
-use axiom_adapters::contracts::ContextAdapter;
-use axiom_adapters::tool::{ToolPolicy, WorkspaceTool};
-use axiom_adapters::{
+use axonrunner_adapters::contracts::ContextAdapter;
+use axonrunner_adapters::tool::{ToolPolicy, WorkspaceTool};
+use axonrunner_adapters::{
     ChannelAdapter, MemoryAdapter, ProviderAdapter, ProviderRequest, build_contract_channel,
     build_contract_memory, build_contract_provider,
 };
-use axiom_adapters::{DEFAULT_PROVIDER_ID, resolve_provider_id};
-use axiom_core::DecisionOutcome;
-use std::env;
+use axonrunner_adapters::{provider_registry, resolve_provider_id};
+use axonrunner_core::DecisionOutcome;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -21,18 +21,18 @@ use self::plan::{
     MemoryPlan, ProviderPlan, RuntimeComposePlan, ToolPlan, build_runtime_compose_plan,
 };
 
-const ENV_RUNTIME_MEMORY_PATH: &str = "AXIOM_RUNTIME_MEMORY_PATH";
-const ENV_RUNTIME_TOOL_WORKSPACE: &str = "AXIOM_RUNTIME_TOOL_WORKSPACE";
-const ENV_RUNTIME_TOOL_LOG_PATH: &str = "AXIOM_RUNTIME_TOOL_LOG_PATH";
-const ENV_RUNTIME_PROVIDER: &str = "AXIOM_RUNTIME_PROVIDER";
-const ENV_RUNTIME_PROVIDER_MODEL: &str = "AXIOM_RUNTIME_PROVIDER_MODEL";
-const ENV_RUNTIME_BOOTSTRAP_ROOT: &str = "AXIOM_RUNTIME_BOOTSTRAP_ROOT";
-const ENV_RUNTIME_MAX_TOKENS: &str = "AXIOM_RUNTIME_MAX_TOKENS";
-const ENV_RUNTIME_CHANNEL: &str = "AXIOM_RUNTIME_CHANNEL";
-const ENV_RUNTIME_TOOLS: &str = "AXIOM_RUNTIME_TOOLS";
-const ENV_RUNTIME_CONTEXT_ROOT: &str = "AXIOM_CONTEXT_ROOT";
+const ENV_RUNTIME_MEMORY_PATH: &str = "AXONRUNNER_RUNTIME_MEMORY_PATH";
+const ENV_RUNTIME_TOOL_WORKSPACE: &str = "AXONRUNNER_RUNTIME_TOOL_WORKSPACE";
+const ENV_RUNTIME_TOOL_LOG_PATH: &str = "AXONRUNNER_RUNTIME_TOOL_LOG_PATH";
+const ENV_RUNTIME_PROVIDER: &str = "AXONRUNNER_RUNTIME_PROVIDER";
+const ENV_RUNTIME_PROVIDER_MODEL: &str = "AXONRUNNER_RUNTIME_PROVIDER_MODEL";
+const ENV_RUNTIME_BOOTSTRAP_ROOT: &str = "AXONRUNNER_RUNTIME_BOOTSTRAP_ROOT";
+const ENV_RUNTIME_MAX_TOKENS: &str = "AXONRUNNER_RUNTIME_MAX_TOKENS";
+const ENV_RUNTIME_CHANNEL: &str = "AXONRUNNER_RUNTIME_CHANNEL";
+const ENV_RUNTIME_TOOLS: &str = "AXONRUNNER_RUNTIME_TOOLS";
+const ENV_RUNTIME_CONTEXT_ROOT: &str = "AXONRUNNER_CONTEXT_ROOT";
 
-const DEFAULT_TOOL_LOG_PATH: &str = ".axiom/runtime-compose.log";
+const DEFAULT_TOOL_LOG_PATH: &str = ".axonrunner/runtime-compose.log";
 const DEFAULT_MAX_TOKENS: usize = 4096;
 const TOOL_WRITE_LIMIT_BYTES: usize = 16 * 1024;
 
@@ -47,7 +47,7 @@ pub struct RuntimeComposeConfig {
     pub bootstrap_root: Option<PathBuf>,
     pub channel_id: Option<String>,
     pub tool_ids: Vec<String>,
-    /// Root directory for AxiomMe context store. None = RAG disabled.
+    /// Root directory for AxiomSync context store. None = RAG disabled.
     pub context_root: Option<PathBuf>,
 }
 
@@ -122,17 +122,17 @@ impl RuntimeComposeConfig {
         let tool_ids = env_string(ENV_RUNTIME_TOOLS)
             .map(|raw| parse_tools_list(&raw))
             .filter(|v| !v.is_empty())
-            .unwrap_or_else(|| vec![axiom_adapters::DEFAULT_TOOL_ID.to_owned()]);
+            .unwrap_or_else(|| vec![axonrunner_adapters::DEFAULT_TOOL_ID.to_owned()]);
 
         let memory_path = env_path(ENV_RUNTIME_MEMORY_PATH).or_else(|| {
-            std::env::var("HOME")
-                .ok()
-                .map(|h| PathBuf::from(h).join(".axiom").join("memory.db"))
+            std::env::var("HOME").ok().map(|h| {
+                prefer_existing_path(PathBuf::from(h).join(".axonrunner").join("memory.db"))
+            })
         });
         let tool_workspace = env_path(ENV_RUNTIME_TOOL_WORKSPACE).or_else(|| {
-            std::env::var("HOME")
-                .ok()
-                .map(|h| PathBuf::from(h).join(".axiom").join("workspace"))
+            std::env::var("HOME").ok().map(|h| {
+                prefer_existing_path(PathBuf::from(h).join(".axonrunner").join("workspace"))
+            })
         });
 
         Self {
@@ -145,10 +145,7 @@ impl RuntimeComposeConfig {
             bootstrap_root: env_path(ENV_RUNTIME_BOOTSTRAP_ROOT),
             channel_id: env_string(ENV_RUNTIME_CHANNEL),
             tool_ids,
-            context_root: std::env::var(ENV_RUNTIME_CONTEXT_ROOT)
-                .ok()
-                .filter(|s| !s.trim().is_empty())
-                .map(PathBuf::from),
+            context_root: env_path(ENV_RUNTIME_CONTEXT_ROOT),
         }
     }
 }
@@ -206,19 +203,21 @@ fn try_init_component<T>(
 }
 
 impl RuntimeComposeState {
-    pub fn new(mut config: RuntimeComposeConfig) -> Self {
-        let selected_provider = match resolve_provider_id(&config.provider_id) {
-            Some(id) => {
-                config.provider_id = id.to_owned();
-                id
-            }
-            None => {
-                config.provider_id = DEFAULT_PROVIDER_ID.to_owned();
-                DEFAULT_PROVIDER_ID
-            }
-        };
+    pub fn new(mut config: RuntimeComposeConfig) -> Result<Self, String> {
+        let selected_provider = resolve_provider_id(&config.provider_id).ok_or_else(|| {
+            let supported = provider_registry()
+                .iter()
+                .map(|entry| entry.id)
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!(
+                "unknown runtime provider '{}'. set AXONRUNNER_RUNTIME_PROVIDER to one of: {supported}",
+                config.provider_id.trim()
+            )
+        })?;
+        config.provider_id = selected_provider.to_owned();
 
-        // ~/.axiom/ 디렉토리가 없으면 미리 생성 (sqlite/workspace 둘 다 필요)
+        // ~/.axonrunner/ 디렉토리가 없으면 미리 생성 (sqlite/workspace 둘 다 필요)
         if let Some(path) = &config.memory_path
             && let Some(parent) = path.parent()
         {
@@ -248,11 +247,10 @@ impl RuntimeComposeState {
                 )
             }));
 
-        let provider = Arc::from(
-            build_contract_provider(selected_provider)
-                .or_else(|_| build_contract_provider(DEFAULT_PROVIDER_ID))
-                .expect("default provider must be in registry"),
-        );
+        let provider =
+            Arc::from(build_contract_provider(selected_provider).map_err(|error| {
+                format!("provider init failed for '{selected_provider}': {error}")
+            })?);
         let (bootstrap_context, bootstrap_init) = match config.bootstrap_root.as_deref() {
             Some(root) => match load_bootstrap_context(root, &BootstrapLoadConfig::default()) {
                 Some(context) => (
@@ -279,7 +277,7 @@ impl RuntimeComposeState {
             }));
 
         let context = config.context_root.as_ref().and_then(|root| {
-            match axiom_adapters::AxiommeContextAdapter::new(root) {
+            match axonrunner_adapters::AxiomsyncContextAdapter::new(root) {
                 Ok(adapter) => Some(Box::new(adapter) as Box<dyn ContextAdapter>),
                 Err(e) => {
                     eprintln!("context adapter init failed (RAG disabled): {e}");
@@ -288,7 +286,7 @@ impl RuntimeComposeState {
             }
         });
 
-        Self {
+        Ok(Self {
             config,
             memory,
             memory_init,
@@ -300,7 +298,7 @@ impl RuntimeComposeState {
             channel,
             channel_init,
             context,
-        }
+        })
     }
 
     pub fn apply_template(
@@ -486,7 +484,7 @@ fn append_tool_file_line(
     path: String,
     line: String,
 ) -> Result<(), String> {
-    tool.execute(axiom_adapters::tool::ToolRequest::FileWrite {
+    tool.execute(axonrunner_adapters::tool::ToolRequest::FileWrite {
         path: &path,
         contents: &line,
         append: true,
@@ -505,10 +503,7 @@ fn env_path(key: &str) -> Option<PathBuf> {
 }
 
 fn env_string(key: &str) -> Option<String> {
-    env::var(key)
-        .ok()
-        .map(|raw| raw.trim().to_owned())
-        .filter(|raw| !raw.is_empty())
+    read_env_trimmed(key).ok().flatten()
 }
 
 #[cfg(test)]
@@ -516,8 +511,8 @@ mod tests {
     use super::plan::{MemoryPlan, build_runtime_compose_plan};
     use super::{RuntimeComposeConfig, RuntimeComposeState, RuntimeComposeStep};
     use crate::cli_command::IntentTemplate;
-    use axiom_adapters::{MemoryAdapter, memory::MarkdownMemoryAdapter};
-    use axiom_core::DecisionOutcome;
+    use axonrunner_adapters::{MemoryAdapter, memory::MarkdownMemoryAdapter};
+    use axonrunner_core::DecisionOutcome;
     use std::fs;
     use std::path::PathBuf;
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -528,7 +523,7 @@ mod tests {
             .unwrap_or(Duration::from_secs(0))
             .as_nanos();
         std::env::temp_dir().join(format!(
-            "axiom-runtime-compose-{label}-{}-{tick}.{extension}",
+            "axonrunner-runtime-compose-{label}-{}-{tick}.{extension}",
             std::process::id()
         ))
     }
@@ -593,9 +588,10 @@ mod tests {
             max_tokens: 4096,
             bootstrap_root: None,
             channel_id: None,
-            tool_ids: vec![axiom_adapters::DEFAULT_TOOL_ID.to_owned()],
+            tool_ids: vec![axonrunner_adapters::DEFAULT_TOOL_ID.to_owned()],
             context_root: None,
-        });
+        })
+        .expect("runtime compose state should initialize");
 
         let execution = state.apply_template(
             &IntentTemplate::Write {
@@ -638,9 +634,10 @@ mod tests {
             max_tokens: 4096,
             bootstrap_root: None,
             channel_id: None,
-            tool_ids: vec![axiom_adapters::DEFAULT_TOOL_ID.to_owned()],
+            tool_ids: vec![axonrunner_adapters::DEFAULT_TOOL_ID.to_owned()],
             context_root: None,
-        });
+        })
+        .expect("runtime compose state should initialize");
 
         let execution = state.apply_template(
             &IntentTemplate::Write {
@@ -685,9 +682,10 @@ mod tests {
             max_tokens: 4096,
             bootstrap_root: Some(bootstrap_root.clone()),
             channel_id: None,
-            tool_ids: vec![axiom_adapters::DEFAULT_TOOL_ID.to_owned()],
+            tool_ids: vec![axonrunner_adapters::DEFAULT_TOOL_ID.to_owned()],
             context_root: None,
-        });
+        })
+        .expect("runtime compose state should initialize");
 
         let execution = state.apply_template(
             &IntentTemplate::Write {
@@ -725,9 +723,10 @@ mod tests {
             max_tokens: 4096,
             bootstrap_root: None,
             channel_id: None,
-            tool_ids: vec![axiom_adapters::DEFAULT_TOOL_ID.to_owned()],
+            tool_ids: vec![axonrunner_adapters::DEFAULT_TOOL_ID.to_owned()],
             context_root: None,
-        });
+        })
+        .expect("runtime compose state should initialize");
 
         let health = state.health();
         assert_eq!(health.provider_model, "status-model");
@@ -769,9 +768,10 @@ mod tests {
             max_tokens: 4096,
             bootstrap_root: None,
             channel_id: None,
-            tool_ids: vec![axiom_adapters::DEFAULT_TOOL_ID.to_owned()],
+            tool_ids: vec![axonrunner_adapters::DEFAULT_TOOL_ID.to_owned()],
             context_root: None,
-        });
+        })
+        .expect("runtime compose state should initialize");
 
         let execution = state.apply_template(
             &IntentTemplate::Write {
@@ -816,9 +816,10 @@ mod tests {
             max_tokens: 4096,
             bootstrap_root: Some(bootstrap_root.clone()),
             channel_id: None,
-            tool_ids: vec![axiom_adapters::DEFAULT_TOOL_ID.to_owned()],
+            tool_ids: vec![axonrunner_adapters::DEFAULT_TOOL_ID.to_owned()],
             context_root: None,
-        });
+        })
+        .expect("runtime compose state should initialize");
 
         let health = state.health();
         assert_eq!(health.provider_id, "mock-local");
@@ -837,5 +838,65 @@ mod tests {
         let _ = fs::remove_dir_all(memory_dir);
         let _ = fs::remove_file(tool_file);
         let _ = fs::remove_dir_all(bootstrap_root);
+    }
+
+    #[test]
+    fn runtime_compose_rejects_unknown_provider() {
+        let err = match RuntimeComposeState::new(RuntimeComposeConfig {
+            memory_path: None,
+            tool_workspace: None,
+            tool_log_path: String::from("runtime.log"),
+            provider_id: String::from("unknown-provider"),
+            provider_model: String::from("unknown-provider"),
+            max_tokens: 4096,
+            bootstrap_root: None,
+            channel_id: None,
+            tool_ids: vec![axonrunner_adapters::DEFAULT_TOOL_ID.to_owned()],
+            context_root: None,
+        }) {
+            Ok(_) => panic!("unknown provider should fail fast"),
+            Err(err) => err,
+        };
+
+        assert!(
+            err.contains("unknown runtime provider"),
+            "error should mention unknown runtime provider, got: {err}"
+        );
+        assert!(
+            err.contains("AXONRUNNER_RUNTIME_PROVIDER"),
+            "error should guide runtime provider env var, got: {err}"
+        );
+    }
+
+    #[test]
+    fn runtime_compose_does_not_fallback_when_selected_provider_fails_init() {
+        if std::env::var("OPENAI_API_KEY").is_ok() {
+            return;
+        }
+
+        let err = match RuntimeComposeState::new(RuntimeComposeConfig {
+            memory_path: None,
+            tool_workspace: None,
+            tool_log_path: String::from("runtime.log"),
+            provider_id: String::from("openai"),
+            provider_model: String::from("openai"),
+            max_tokens: 4096,
+            bootstrap_root: None,
+            channel_id: None,
+            tool_ids: vec![axonrunner_adapters::DEFAULT_TOOL_ID.to_owned()],
+            context_root: None,
+        }) {
+            Ok(_) => panic!("openai without API key should fail without fallback"),
+            Err(err) => err,
+        };
+
+        assert!(
+            err.contains("provider init failed"),
+            "error should mention provider init failure, got: {err}"
+        );
+        assert!(
+            err.contains("OPENAI_API_KEY"),
+            "error should propagate missing key detail, got: {err}"
+        );
     }
 }

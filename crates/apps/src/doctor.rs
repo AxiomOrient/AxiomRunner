@@ -1,7 +1,7 @@
 use crate::display::mode_name;
-use axiom_core::ExecutionMode;
+use axonrunner_core::ExecutionMode;
 
-pub const DAEMON_HEALTH_ENV: &str = "AXIOM_DAEMON_HEALTH_PATH";
+pub const DAEMON_HEALTH_ENV: &str = "AXONRUNNER_DAEMON_HEALTH_PATH";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DoctorContextInput<'a> {
@@ -325,7 +325,7 @@ mod tests {
         DoctorContextInput, DoctorInput, DoctorRuntimeInput, build_doctor_report,
         parse_daemon_health,
     };
-    use axiom_core::ExecutionMode;
+    use axonrunner_core::ExecutionMode;
 
     fn sample_snapshot() -> DaemonHealthSnapshot {
         DaemonHealthSnapshot {

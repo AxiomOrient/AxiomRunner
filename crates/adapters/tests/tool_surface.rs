@@ -1,12 +1,16 @@
 use std::collections::BTreeMap;
 use std::future::Future;
+use std::io::{Read, Write};
+use std::net::TcpListener;
+use std::thread;
 
-use axiom_adapters::ToolCall;
-use axiom_adapters::error::AdapterError;
-use axiom_adapters::tool::{
+use axonrunner_adapters::error::AdapterError;
+use axonrunner_adapters::tool::{
     DEFAULT_TOOL_ID, ToolRegistryKind, build_contract_tool, resolve_tool_adapter_id,
     resolve_tool_id, tool_registry,
 };
+use axonrunner_adapters::tool_browser::{BrowserToolAdapter, BrowserToolConfig};
+use axonrunner_adapters::{ToolAdapter, ToolCall};
 
 fn args(entries: &[(&str, &str)]) -> BTreeMap<String, String> {
     let mut map = BTreeMap::new();
@@ -22,6 +26,28 @@ fn block_on<T>(future: impl Future<Output = T>) -> T {
         .build()
         .expect("test runtime should initialize")
         .block_on(future)
+}
+
+fn spawn_test_html_server(body: &'static str) -> (String, thread::JoinHandle<()>) {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).expect("listener should bind");
+    let addr = listener
+        .local_addr()
+        .expect("listener should have local addr");
+    let endpoint = format!("http://{addr}");
+    let handle = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("server should accept one request");
+        let mut request_buf = [0u8; 2048];
+        let _ = stream.read(&mut request_buf);
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        stream
+            .write_all(response.as_bytes())
+            .expect("server should write response");
+    });
+    (endpoint, handle)
 }
 
 #[test]
@@ -118,23 +144,71 @@ fn memory_tool_rejects_invalid_inputs() {
 }
 
 #[test]
-fn browser_tool_opens_allowed_url_and_tracks_current() {
-    let tool = build_contract_tool("browser").expect("browser tool should build");
+fn browser_tool_opens_fetches_and_tracks_current() {
+    let (endpoint, handle) = spawn_test_html_server(
+        "<html><head><title>AxonRunner Browser Test</title></head><body>AxonRunner docs and axonrunner guide</body></html>",
+    );
+    let tool = BrowserToolAdapter::new(BrowserToolConfig {
+        allowed_hosts: vec![String::from("127.0.0.1")],
+        require_https: false,
+        ..BrowserToolConfig::default()
+    });
 
-    let opened = block_on(tool.execute(ToolCall::new(
-        "browser.open",
-        args(&[("url", "https://example.com/docs")]),
-    )))
-    .expect("open should succeed for allowed host");
-    assert!(opened.content.contains("browser.open"));
-    assert!(opened.content.contains("host=example.com"));
+    let mut open_args = BTreeMap::new();
+    open_args.insert(String::from("url"), format!("{endpoint}/docs"));
+    let opened = block_on(tool.execute(ToolCall::new("browser.open", open_args)))
+        .expect("open should fetch page");
+    assert!(
+        opened.content.contains("browser.open"),
+        "{}",
+        opened.content
+    );
+    assert!(opened.content.contains("status=200"), "{}", opened.content);
+    assert!(
+        opened.content.contains("title=AxonRunner Browser Test"),
+        "{}",
+        opened.content
+    );
 
     let current = block_on(tool.execute(ToolCall::new("browser.current", BTreeMap::new())))
         .expect("current should succeed");
     assert!(
-        current.content.contains("https://example.com/docs"),
+        current.content.contains(&format!("{endpoint}/docs")),
         "content={}",
         current.content
+    );
+    assert!(
+        current.content.contains("status=200"),
+        "{}",
+        current.content
+    );
+
+    let find = block_on(tool.execute(ToolCall::new(
+        "browser.find",
+        args(&[("query", "axonrunner")]),
+    )))
+    .expect("find should work on loaded page");
+    assert!(find.content.contains("hits=3"), "{}", find.content);
+
+    handle.join().expect("server thread should complete");
+}
+
+#[test]
+fn browser_tool_find_requires_loaded_page() {
+    let tool = BrowserToolAdapter::new(BrowserToolConfig {
+        allowed_hosts: vec![String::from("example.com")],
+        require_https: true,
+        ..BrowserToolConfig::default()
+    });
+
+    let err = block_on(tool.execute(ToolCall::new(
+        "browser.find",
+        args(&[("query", "anything")]),
+    )))
+    .expect_err("find should fail without a loaded page");
+    assert_eq!(
+        err,
+        AdapterError::invalid_input("browser.current", "no page is currently loaded")
     );
 }
 

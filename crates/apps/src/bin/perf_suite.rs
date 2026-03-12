@@ -4,6 +4,8 @@
 mod agent_loop;
 #[path = "../channel_serve.rs"]
 mod channel_serve;
+#[path = "../env_util.rs"]
+mod env_util;
 #[path = "../estop.rs"]
 mod estop;
 #[path = "../parse_util.rs"]

@@ -10,8 +10,8 @@ bash scripts/run_release_approval_gate.sh
 
 이 스크립트는 다음 3개 항목을 한 번에 검증합니다.
 
-- `security_gate_debug` (`cargo test -q -p axiom_apps --test release_security_gate`)
-- `security_gate_release` (`cargo test -q --release -p axiom_apps --test release_security_gate`)
+- `security_gate_debug` (`cargo test -q -p axonrunner_apps --test release_security_gate`)
+- `security_gate_release` (`cargo test -q --release -p axonrunner_apps --test release_security_gate`)
 - `perf_gate` (`scripts/run_benchmarks.sh`)
 
 ### 합격 기준
@@ -77,6 +77,32 @@ jq -e '
   (.errors | length == 0)
 ' target/release-readiness/report.json
 ```
+
+## 2.5) 릴리즈 리허설/롤백 게이트 (Transition + Rollback)
+
+전환 리허설과 롤백 복구를 단독으로 검증하려면 아래를 실행합니다.
+
+```bash
+bash scripts/run_release_rehearsal_gate.sh
+```
+
+합격 기준:
+
+```bash
+jq -e '
+  .suite == "release_rehearsal_gate_v1" and
+  .transition_gates == "pass" and
+  .h4_sample_contract == "pass" and
+  .passed == true and
+  (.errors | length == 0)
+' target/release-rehearsal-gate/report.json
+```
+
+필수 아티팩트:
+- `target/release-rehearsal-gate/report.json`
+- `target/release-rehearsal-gate/transition_gates.log`
+- `target/release-rehearsal-gate/h4_sample_contract.log`
+- `target/transition-gates/h4_sample_report.json`
 
 ## 3) Fast Local Dry Run
 

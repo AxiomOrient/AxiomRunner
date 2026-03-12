@@ -5,9 +5,9 @@ use crate::time_util::unix_now_seconds;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-const ENV_CRON_STORE_PATH: &str = "AXIOM_CRON_STORE_PATH";
-const DEFAULT_CRON_STORE_PATH: &str = ".axiom/cron/jobs.db";
-const CRON_STORE_FORMAT: &str = "format=axiom-cron-v1";
+const ENV_CRON_STORE_PATH: &str = "AXONRUNNER_CRON_STORE_PATH";
+const DEFAULT_CRON_STORE_PATH: &str = ".axonrunner/cron/jobs.db";
+const CRON_STORE_FORMAT: &str = "format=axonrunner-cron-v1";
 const MAX_NEXT_RUN_SCAN_MINUTES: u64 = 60 * 24 * 366 * 10;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -613,7 +613,7 @@ mod tests {
             .unwrap_or(Duration::from_secs(0))
             .as_nanos();
         std::env::temp_dir().join(format!(
-            "axiom-cron-{label}-{}-{tick}.{extension}",
+            "axonrunner-cron-{label}-{}-{tick}.{extension}",
             std::process::id()
         ))
     }

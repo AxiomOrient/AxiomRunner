@@ -1,8 +1,9 @@
 #![forbid(unsafe_code)]
 
-extern crate self as axiom_apps;
+extern crate self as axonrunner_apps;
 
 mod channel;
+mod channel_runtime;
 mod cli;
 mod cli_args;
 mod cli_runtime;
@@ -70,6 +71,7 @@ fn run() -> Result<(), String> {
         .map_err(|err| format!("release gate blocked startup: {err}"))?;
     let command = parse_command(&startup.command_tokens)?;
 
-    let mut runtime = CliRuntime::new(startup.actor_id, &config);
+    let mut runtime = CliRuntime::new(startup.actor_id, &config)
+        .map_err(|err| format!("runtime initialization error: {err}"))?;
     execute_command(&mut runtime, &config, command)
 }

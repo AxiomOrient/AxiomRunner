@@ -3,11 +3,11 @@ use crate::time_util::unix_now_seconds;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-const ENV_ONBOARD_STATE_PATH: &str = "AXIOM_ONBOARD_STATE_PATH";
-const ENV_ONBOARD_WORKSPACE_PATH: &str = "AXIOM_ONBOARD_WORKSPACE_PATH";
-const DEFAULT_ONBOARD_STATE_PATH: &str = ".axiom/onboard/state.db";
-const DEFAULT_ONBOARD_WORKSPACE_PATH: &str = ".axiom/workspace";
-const ONBOARD_STATE_FORMAT: &str = "format=axiom-onboard-v1";
+const ENV_ONBOARD_STATE_PATH: &str = "AXONRUNNER_ONBOARD_STATE_PATH";
+const ENV_ONBOARD_WORKSPACE_PATH: &str = "AXONRUNNER_ONBOARD_WORKSPACE_PATH";
+const DEFAULT_ONBOARD_STATE_PATH: &str = ".axonrunner/onboard/state.db";
+const DEFAULT_ONBOARD_WORKSPACE_PATH: &str = ".axonrunner/workspace";
+const ONBOARD_STATE_FORMAT: &str = "format=axonrunner-onboard-v1";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OnboardMemory {
@@ -268,7 +268,7 @@ mod tests {
             .unwrap_or(Duration::from_secs(0))
             .as_nanos();
         std::env::temp_dir().join(format!(
-            "axiom-onboard-{label}-{}-{tick}.{extension}",
+            "axonrunner-onboard-{label}-{}-{tick}.{extension}",
             std::process::id()
         ))
     }
@@ -279,7 +279,7 @@ mod tests {
             .unwrap_or(Duration::from_secs(0))
             .as_nanos();
         std::env::temp_dir().join(format!(
-            "axiom-onboard-{label}-{}-{tick}",
+            "axonrunner-onboard-{label}-{}-{tick}",
             std::process::id()
         ))
     }

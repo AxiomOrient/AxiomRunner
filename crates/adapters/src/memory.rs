@@ -16,7 +16,7 @@ pub use memory_hybrid::{
 pub use memory_markdown::MarkdownMemoryAdapter;
 pub use memory_sqlite::SqliteMemoryAdapter;
 
-use crate::memory_axiomme::AxiommeMemoryAdapter;
+use crate::memory_axiomme::AxiomsyncMemoryAdapter;
 
 pub(crate) type MemoryResult<T> = Result<T, MemoryError>;
 
@@ -34,11 +34,13 @@ pub fn build_contract_memory(
         "sqlite" | "sqlite3" => SqliteMemoryAdapter::new(path)
             .map(|adapter| Box::new(adapter) as Box<dyn crate::contracts::MemoryAdapter>)
             .map_err(|error| format!("failed to initialize sqlite memory adapter: {error}")),
-        "axiomme" | "axiomme-core" => AxiommeMemoryAdapter::new(path)
-            .map(|adapter| Box::new(adapter) as Box<dyn crate::contracts::MemoryAdapter>)
-            .map_err(|error| format!("axiomme init: {error}")),
+        "axiomsync" | "axiomsync-core" | "axiomme" | "axiomme-core" => {
+            AxiomsyncMemoryAdapter::new(path)
+                .map(|adapter| Box::new(adapter) as Box<dyn crate::contracts::MemoryAdapter>)
+                .map_err(|error| format!("axiomsync init: {error}"))
+        }
         _ => Err(format!(
-            "unsupported memory backend '{backend}'. supported backends: markdown, sqlite, axiomme"
+            "unsupported memory backend '{backend}'. supported backends: markdown, sqlite, axiomsync"
         )),
     }
 }
@@ -159,15 +161,15 @@ pub(crate) fn sort_entries(entries: &mut [crate::contracts::MemoryEntry]) {
 
 /// Build a ContextAdapter by backend name.
 ///
-/// O(1) construction; initialization cost depends on backend (AxiomMe opens
+/// O(1) construction; initialization cost depends on backend (AxiomSync opens
 /// or creates the context root on disk).
 pub fn build_contract_context(
     backend: &str,
     root: impl Into<std::path::PathBuf>,
 ) -> Result<Box<dyn crate::contracts::ContextAdapter>, String> {
     match backend.trim() {
-        "axiomme" | "axiomme-core" => {
-            let adapter = crate::context_axiomme::AxiommeContextAdapter::new(root)?;
+        "axiomsync" | "axiomsync-core" | "axiomme" | "axiomme-core" => {
+            let adapter = crate::context_axiomme::AxiomsyncContextAdapter::new(root)?;
             Ok(Box::new(adapter))
         }
         other => Err(format!("unknown context backend: '{other}'")),

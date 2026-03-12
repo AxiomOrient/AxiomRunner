@@ -1,11 +1,12 @@
-use std::env;
 use std::future::Future;
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
-const ENV_ASYNC_HOST_WORKER_THREADS: &str = "AXIOM_ASYNC_HOST_WORKER_THREADS";
-const ENV_ASYNC_HOST_MAX_IN_FLIGHT: &str = "AXIOM_ASYNC_HOST_MAX_IN_FLIGHT";
-const ENV_ASYNC_HOST_TIMEOUT_MS: &str = "AXIOM_ASYNC_HOST_TIMEOUT_MS";
+use crate::env_util::read_env_trimmed;
+
+const ENV_ASYNC_HOST_WORKER_THREADS: &str = "AXONRUNNER_ASYNC_HOST_WORKER_THREADS";
+const ENV_ASYNC_HOST_MAX_IN_FLIGHT: &str = "AXONRUNNER_ASYNC_HOST_MAX_IN_FLIGHT";
+const ENV_ASYNC_HOST_TIMEOUT_MS: &str = "AXONRUNNER_ASYNC_HOST_TIMEOUT_MS";
 
 const DEFAULT_ASYNC_HOST_WORKER_THREADS: usize = 2;
 const DEFAULT_ASYNC_HOST_MAX_IN_FLIGHT: usize = 8;
@@ -88,16 +89,18 @@ pub fn global_async_runtime_host() -> &'static AsyncRuntimeHost {
 }
 
 fn env_usize(key: &str, default: usize) -> usize {
-    env::var(key)
+    read_env_trimmed(key)
         .ok()
+        .flatten()
         .and_then(|raw| raw.trim().parse::<usize>().ok())
         .filter(|&value| value > 0)
         .unwrap_or(default)
 }
 
 fn env_u64(key: &str) -> Option<u64> {
-    env::var(key)
+    read_env_trimmed(key)
         .ok()
+        .flatten()
         .and_then(|raw| raw.trim().parse::<u64>().ok())
         .filter(|&value| value > 0)
 }

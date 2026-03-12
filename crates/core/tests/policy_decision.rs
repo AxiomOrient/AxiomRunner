@@ -1,5 +1,5 @@
-use axiom_core::policy::{MAX_KEY_LEN, MAX_VALUE_LEN};
-use axiom_core::{AgentState, ExecutionMode, Intent, PolicyCode, evaluate_policy};
+use axonrunner_core::policy::{MAX_KEY_LEN, MAX_VALUE_LEN};
+use axonrunner_core::{AgentState, ExecutionMode, Intent, PolicyCode, evaluate_policy};
 
 fn assert_verdict(
     state: &AgentState,

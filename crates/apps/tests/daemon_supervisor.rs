@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 use std::time::Duration;
 
-use axiom_apps::daemon::{
+use axonrunner_apps::daemon::{
     SupervisorComponentKind, SupervisorComponentSpec, SupervisorComponentStatus, SupervisorError,
     SupervisorSleeper, run_supervisor_cycle,
 };

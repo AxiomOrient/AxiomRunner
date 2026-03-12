@@ -1,4 +1,5 @@
 use crate::async_http_bridge::AsyncHttpBridge;
+use crate::channel_registry::read_env_trimmed;
 use crate::channel_validate;
 use crate::contracts::{
     AdapterFuture, AdapterHealth, ChannelAdapter, ChannelMessage, ChannelSendReceipt,
@@ -44,10 +45,10 @@ impl SlackConfig {
     }
 
     /// Create a webhook-only config from an environment variable.
-    /// `AXIOM_CHANNEL_SLACK_WEBHOOK` holds the full Slack Incoming Webhook URL.
+    /// `AXONRUNNER_CHANNEL_SLACK_WEBHOOK` holds the full Slack Incoming Webhook URL.
     /// bot_token is set to a placeholder when only the webhook path is needed.
     pub fn from_env() -> AdapterResult<Self> {
-        let webhook_url = std::env::var("AXIOM_CHANNEL_SLACK_WEBHOOK").ok();
+        let webhook_url = read_env_trimmed("AXONRUNNER_CHANNEL_SLACK_WEBHOOK");
         Ok(Self {
             bot_token: "webhook-only".to_string(),
             channel_id: None,

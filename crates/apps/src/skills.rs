@@ -5,8 +5,8 @@ use std::process::Command;
 use crate::env_util::resolve_env_path;
 use crate::skills_registry::{DEFAULT_REGISTRY_URL, find_in_registry};
 
-const ENV_SKILLS_DIR: &str = "AXIOM_SKILLS_DIR";
-const DEFAULT_SKILLS_DIR: &str = ".axiom/skills";
+const ENV_SKILLS_DIR: &str = "AXONRUNNER_SKILLS_DIR";
+const DEFAULT_SKILLS_DIR: &str = ".axonrunner/skills";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SkillEntry {
@@ -417,7 +417,7 @@ mod tests {
             .unwrap_or(Duration::from_secs(0))
             .as_nanos();
         std::env::temp_dir().join(format!(
-            "axiom-skills-{label}-{}-{tick}",
+            "axonrunner-skills-{label}-{}-{tick}",
             std::process::id()
         ))
     }
@@ -505,7 +505,7 @@ mod tests {
         let dir = unique_dir("missing-source");
         let error = execute_skills_action_at(
             SkillsAction::Install {
-                source: String::from("/tmp/axiom-skills-this-path-should-not-exist"),
+                source: String::from("/tmp/axonrunner-skills-this-path-should-not-exist"),
             },
             &dir,
         )
@@ -521,7 +521,7 @@ mod tests {
     }
     #[test]
     fn install_skill_rejects_unknown_registry_name() {
-        let dir = std::env::temp_dir().join("axiom_test_skills_registry");
+        let dir = std::env::temp_dir().join("axonrunner_test_skills_registry");
         let result = execute_skills_action_at(
             SkillsAction::Install {
                 source: String::from("nonexistent-skill-xyz123"),

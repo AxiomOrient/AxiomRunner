@@ -1,8 +1,8 @@
-# Axiom AI - Adapters Crate 분석 리포트
+# AxonRunner - Adapters Crate 분석 리포트
 
 ## 1. 개요
 
-`crates/adapters`는 Axiom AI의 핵심 비즈니스 로직(Core, Apps)을 외부 시스템(LLM, 채널, 메모리 DB, 툴 등)과 연결하는 어댑터 패턴의 구현체입니다. `contracts.rs`에 정의된 핵심 트레이트를 기반으로 다양한 프로바이더의 구체적 구현을 제공하며, 각 기능별로 세분화된 모듈 구조를 가집니다.
+`crates/adapters`는 AxonRunner의 핵심 비즈니스 로직(Core, Apps)을 외부 시스템(LLM, 채널, 메모리 DB, 툴 등)과 연결하는 어댑터 패턴의 구현체입니다. `contracts.rs`에 정의된 핵심 트레이트를 기반으로 다양한 프로바이더의 구체적 구현을 제공하며, 각 기능별로 세분화된 모듈 구조를 가집니다.
 
 ## 2. 파일 및 모듈 분석
 
@@ -26,7 +26,7 @@
 - **분석**:
   - **SQLite**: 빠른 로컬 RDBMS 기반의 키-밸류 저장소입니다.
   - **Markdown**: 마크다운 파일 기반의 기억 저장소로 사람이 직접 읽고 수정할 수 있는 형태를 지원합니다 (투명성 확보).
-  - **AxiomMe**: Context & Memory의 시맨틱 검색(Semantic Search)과 세션 관리를 수행하는 고도화된 메모리 백엔드입니다.
+  - **AxiomSync**: Context & Memory의 시맨틱 검색(Semantic Search)과 세션 관리를 수행하는 고도화된 메모리 백엔드입니다.
 - **`memory_hybrid.rs`**: Sqlite나 다른 메모리를 조합하거나, 백그라운드 Retention(보존/만료) 정책을 처리하는 로직을 포함하고 있습니다 (`run_sqlite_retention_job`).
 
 ### 2.4 툴 및 프로바이더 어댑터 (Tools & Providers)

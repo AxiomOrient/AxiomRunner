@@ -4,14 +4,14 @@ use std::process::{Command, Output};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const SANITIZED_ENV_KEYS: &[&str] = &[
-    "AXIOM_RUNTIME_MEMORY_PATH",
-    "AXIOM_RUNTIME_TOOL_WORKSPACE",
-    "AXIOM_CHANNEL_STORE_PATH",
-    "AXIOM_DAEMON_HEALTH_PATH",
-    "AXIOM_DAEMON_HEALTH_STATE_PATH",
-    "AXIOM_SERVICE_STATE_PATH",
-    "AXIOM_ONBOARD_STATE_PATH",
-    "AXIOM_ONBOARD_WORKSPACE_PATH",
+    "AXONRUNNER_RUNTIME_MEMORY_PATH",
+    "AXONRUNNER_RUNTIME_TOOL_WORKSPACE",
+    "AXONRUNNER_CHANNEL_STORE_PATH",
+    "AXONRUNNER_DAEMON_HEALTH_PATH",
+    "AXONRUNNER_DAEMON_HEALTH_STATE_PATH",
+    "AXONRUNNER_SERVICE_STATE_PATH",
+    "AXONRUNNER_ONBOARD_STATE_PATH",
+    "AXONRUNNER_ONBOARD_WORKSPACE_PATH",
 ];
 
 fn isolated_cli_home(label: &str) -> std::path::PathBuf {
@@ -21,7 +21,7 @@ fn isolated_cli_home(label: &str) -> std::path::PathBuf {
         .expect("clock should be after epoch")
         .as_nanos();
     path.push(format!(
-        "axiom_apps_test_home_{}_{}_{}",
+        "axonrunner_apps_test_home_{}_{}_{}",
         label,
         std::process::id(),
         nonce
@@ -32,7 +32,7 @@ fn isolated_cli_home(label: &str) -> std::path::PathBuf {
 
 fn run_with_isolated_env(args: &[&str], env: &[(&str, &str)], label: &str) -> Output {
     let home = isolated_cli_home(label);
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_axiom_apps"));
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_axonrunner_apps"));
     cmd.env("HOME", &home).args(args);
     for key in SANITIZED_ENV_KEYS {
         cmd.env_remove(key);
@@ -40,7 +40,7 @@ fn run_with_isolated_env(args: &[&str], env: &[(&str, &str)], label: &str) -> Ou
     for (key, value) in env {
         cmd.env(key, value);
     }
-    let output = cmd.output().expect("axiom_apps binary should run");
+    let output = cmd.output().expect("axonrunner_apps binary should run");
     let _ = std::fs::remove_dir_all(&home);
     output
 }
@@ -68,7 +68,7 @@ pub fn write_temp_config(label: &str, contents: &str) -> std::path::PathBuf {
         .expect("clock should be after epoch")
         .as_nanos();
     path.push(format!(
-        "axiom_apps_{}_{}_{}.cfg",
+        "axonrunner_apps_{}_{}_{}.cfg",
         label,
         std::process::id(),
         nonce

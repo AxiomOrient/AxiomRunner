@@ -1,6 +1,6 @@
 use crate::display::mode_name;
 use crate::doctor::{DAEMON_HEALTH_ENV, DaemonHealthInput};
-use axiom_core::ExecutionMode;
+use axonrunner_core::ExecutionMode;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StateStatusInput {
@@ -217,7 +217,7 @@ mod tests {
         render_status_lines,
     };
     use crate::doctor::{DaemonHealthInput, DaemonHealthSnapshot};
-    use axiom_core::ExecutionMode;
+    use axonrunner_core::ExecutionMode;
 
     #[test]
     fn status_render_includes_runtime_daemon_and_channels_summary() {
@@ -256,7 +256,7 @@ mod tests {
         );
         assert_eq!(
             lines[2],
-            "status daemon state=missing env=AXIOM_DAEMON_HEALTH_PATH"
+            "status daemon state=missing env=AXONRUNNER_DAEMON_HEALTH_PATH"
         );
         assert_eq!(lines[3], "status channels total=4 running=2");
     }

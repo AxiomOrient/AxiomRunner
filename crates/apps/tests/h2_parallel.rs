@@ -16,7 +16,7 @@ fn h2_parallel() {
     let output = Command::new(env!("CARGO_BIN_EXE_h2_verify"))
         .args([
             "--apps-bin",
-            env!("CARGO_BIN_EXE_axiom_apps"),
+            env!("CARGO_BIN_EXE_axonrunner_apps"),
             "--allowed-diff",
             "0",
         ])

@@ -1,4 +1,5 @@
 use crate::async_http_bridge::AsyncHttpBridge;
+use crate::channel_registry::read_env_trimmed;
 use crate::channel_validate;
 use crate::contracts::{
     AdapterFuture, AdapterHealth, ChannelAdapter, ChannelMessage, ChannelSendReceipt,
@@ -176,7 +177,7 @@ impl MatrixChannelAdapter {
     /// Create a live adapter that calls the Matrix Client-Server API.
     ///
     /// Returns an error when `config.room_id` is missing.
-    /// If `AXIOM_RUNTIME_TOOL_WORKSPACE` is set, `next_batch` is persisted to
+    /// If `AXONRUNNER_RUNTIME_TOOL_WORKSPACE` is set, `next_batch` is persisted to
     /// `{workspace}/matrix_batch_{sanitized_room_id}.txt` and restored on restart.
     pub fn live(config: MatrixConfig) -> Result<Self, String> {
         let room_id = match &config.room_id {
@@ -200,13 +201,10 @@ impl MatrixChannelAdapter {
         .map_err(|e| format!("matrix http client init failed: {e}"))?;
 
         // Resolve batch persistence path from workspace env var.
-        let batch_path = std::env::var("AXIOM_RUNTIME_TOOL_WORKSPACE")
-            .ok()
-            .filter(|s| !s.trim().is_empty())
-            .map(|workspace| {
-                let safe = sanitize_room_id_for_filename(&room_id);
-                std::path::PathBuf::from(workspace).join(format!("matrix_batch_{safe}.txt"))
-            });
+        let batch_path = read_env_trimmed("AXONRUNNER_RUNTIME_TOOL_WORKSPACE").map(|workspace| {
+            let safe = sanitize_room_id_for_filename(&room_id);
+            std::path::PathBuf::from(workspace).join(format!("matrix_batch_{safe}.txt"))
+        });
 
         // Restore next_batch from file if available.
         let next_batch = load_batch_token(batch_path.as_deref());

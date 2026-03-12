@@ -1,4 +1,4 @@
-use axiom_infra::{InfraError, RetryClass};
+use axonrunner_infra::{InfraError, RetryClass};
 
 #[test]
 fn retryable_errors_map_to_retryable_class() {

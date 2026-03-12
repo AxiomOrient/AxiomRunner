@@ -1,4 +1,5 @@
 use crate::async_http_bridge::AsyncHttpBridge;
+use crate::channel_registry::read_env_trimmed;
 use crate::channel_validate;
 use crate::contracts::{
     AdapterFuture, AdapterHealth, ChannelAdapter, ChannelMessage, ChannelSendReceipt,
@@ -69,7 +70,7 @@ pub struct TelegramChannelAdapter {
     config: TelegramConfig,
     transport: TelegramTransport,
     /// Path to persist next_offset across restarts.
-    /// Set from AXIOM_RUNTIME_TOOL_WORKSPACE env var during live construction.
+    /// Set from AXONRUNNER_RUNTIME_TOOL_WORKSPACE env var during live construction.
     /// None in offline/test mode.
     offset_path: Option<std::path::PathBuf>,
 }
@@ -104,7 +105,7 @@ impl TelegramChannelAdapter {
     /// Create a live adapter that calls the Telegram Bot API.
     /// Panics if called within a tokio runtime (use spawn_blocking to avoid this).
     ///
-    /// If `AXIOM_RUNTIME_TOOL_WORKSPACE` is set, next_offset is persisted to
+    /// If `AXONRUNNER_RUNTIME_TOOL_WORKSPACE` is set, next_offset is persisted to
     /// `{workspace}/telegram_offset_{channel_name}.txt` and restored on restart.
     pub fn live(config: TelegramConfig) -> Result<Self, String> {
         let http = AsyncHttpBridge::with_timeouts(
@@ -114,12 +115,9 @@ impl TelegramChannelAdapter {
         .map_err(|e| format!("telegram http client init failed: {e}"))?;
 
         // Resolve offset persistence path from workspace env var.
-        let offset_path = std::env::var("AXIOM_RUNTIME_TOOL_WORKSPACE")
-            .ok()
-            .filter(|s| !s.trim().is_empty())
-            .map(|workspace| {
-                std::path::PathBuf::from(workspace).join("telegram_offset_channel.telegram.txt")
-            });
+        let offset_path = read_env_trimmed("AXONRUNNER_RUNTIME_TOOL_WORKSPACE").map(|workspace| {
+            std::path::PathBuf::from(workspace).join("telegram_offset_channel.telegram.txt")
+        });
 
         // Restore next_offset from file if available.
         let next_offset = Self::load_offset(offset_path.as_deref());

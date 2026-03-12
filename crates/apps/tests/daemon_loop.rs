@@ -3,7 +3,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use axiom_apps::daemon::{
+use axonrunner_apps::daemon::{
     DaemonConfig, DaemonLoop, DaemonState, ItemOutcome, RetryClass, Sleeper, StopReason, WorkError,
     WorkExecutor, WorkItem,
 };
@@ -46,7 +46,7 @@ fn health_path(test_name: &str) -> PathBuf {
         .unwrap_or_default()
         .as_nanos();
     std::env::temp_dir().join(format!(
-        "axiom-daemon-{test_name}-{}-{stamp}.health",
+        "axonrunner-daemon-{test_name}-{}-{stamp}.health",
         std::process::id()
     ))
 }

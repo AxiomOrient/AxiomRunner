@@ -61,7 +61,7 @@ Execution knobs:
 
 - `BENCH_PROFILE` (`release` or `debug`, default `release`)
 - `BENCH_BINARY` (optional explicit binary path; skips cargo build)
-- `BENCH_CARGO_PACKAGE` (default `axiom_apps`)
+- `BENCH_CARGO_PACKAGE` (default `axonrunner_apps`)
 - `BENCH_CARGO_BIN` (default `perf_suite`)
 - `BENCH_RECORDS` (default `10000`)
 - `BENCH_ITERATIONS` (default `40`)

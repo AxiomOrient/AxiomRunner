@@ -1,12 +1,12 @@
 use crate::channel_serve::run_channel_serve_loop;
 use crate::perf_suite_report::{BenchmarkConfig, BenchmarkTargetResult};
-use axiom_adapters::contracts::{
+use axonrunner_adapters::contracts::{
     AdapterFuture, AdapterHealth, AgentAdapter, AgentRequest, AgentResponse, ChannelAdapter,
     ChannelMessage, ChannelSendReceipt,
 };
-use axiom_adapters::error::AdapterResult;
-use axiom_apps::gateway;
-use axiom_core::{
+use axonrunner_adapters::error::AdapterResult;
+use axonrunner_apps::gateway;
+use axonrunner_core::{
     AgentState, DomainEvent, Effect, Intent, build_policy_audit, decide, evaluate_policy, reduce,
 };
 use std::collections::VecDeque;

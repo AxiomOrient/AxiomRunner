@@ -1,11 +1,13 @@
 use totp_rs::{Algorithm, Secret, TOTP};
 
+use crate::env_util::read_env_trimmed;
+
 pub struct OtpGate {
     totp: TOTP,
 }
 
 impl OtpGate {
-    /// Create from a base32-encoded secret string (e.g. from AXIOM_OTP_SECRET env var).
+    /// Create from a base32-encoded secret string (e.g. from AXONRUNNER_OTP_SECRET env var).
     pub fn new(secret_base32: &str) -> Result<Self, String> {
         let secret = Secret::Encoded(secret_base32.to_string())
             .to_bytes()
@@ -15,10 +17,11 @@ impl OtpGate {
         Ok(Self { totp })
     }
 
-    /// Load from AXIOM_OTP_SECRET env var. Returns None if the env var is not set (OTP disabled).
+    /// Load from AXONRUNNER_OTP_SECRET env var. Returns None if the env var is not set (OTP disabled).
     pub fn load_from_env() -> Option<Result<Self, String>> {
-        std::env::var("AXIOM_OTP_SECRET")
+        read_env_trimmed("AXONRUNNER_OTP_SECRET")
             .ok()
+            .flatten()
             .map(|s| Self::new(&s))
     }
 
@@ -52,7 +55,7 @@ mod tests {
     #[test]
     fn new_invalid_secret_returns_err() {
         // Verifies that a malformed secret yields an error, covering the same
-        // branch that load_from_env exposes when AXIOM_OTP_SECRET is bad.
+        // branch that load_from_env exposes when AXONRUNNER_OTP_SECRET is bad.
         let result = OtpGate::new("!!!invalid!!!");
         assert!(result.is_err());
         if let Err(msg) = result {

@@ -1,16 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-suite="renewal_readiness"
-report_dir="target/release-readiness"
+suite="release_rehearsal_gate_v1"
+report_dir="target/release-rehearsal-gate"
 report_file="${report_dir}/report.json"
 
-release_gate_debug="fail"
-release_gate_release="fail"
-adapter_contract="fail"
-cli_contract="fail"
 transition_gates="fail"
-benchmarks="fail"
+h4_sample_contract="fail"
 failed=0
 declare -a errors=()
 
@@ -54,7 +50,7 @@ write_report() {
 
   local json
   json="$(cat <<JSON
-{"suite":"${suite}","release_gate_debug":"${release_gate_debug}","release_gate_release":"${release_gate_release}","adapter_contract":"${adapter_contract}","cli_contract":"${cli_contract}","transition_gates":"${transition_gates}","benchmarks":"${benchmarks}","passed":${passed},"errors":${errors_json}}
+{"suite":"${suite}","transition_gates":"${transition_gates}","h4_sample_contract":"${h4_sample_contract}","passed":${passed},"errors":${errors_json}}
 JSON
 )"
 
@@ -74,12 +70,25 @@ trap on_exit EXIT
 if [ ! -f Cargo.toml ]; then
   append_error "run from repository root with Cargo.toml"
 else
-  run_step release_gate_debug cargo test -q -p axonrunner_apps --test release_security_gate
-  run_step release_gate_release cargo test -q --release -p axonrunner_apps --test release_security_gate
-  run_step adapter_contract cargo test -q -p axonrunner_adapters --tests
-  run_step cli_contract cargo test -q -p axonrunner_apps e2e_cli
   run_step transition_gates bash scripts/run_transition_gates.sh
-  run_step benchmarks bash scripts/run_benchmarks.sh
+  run_step h4_sample_contract perl -MJSON::PP -e '
+      use strict;
+      use warnings;
+      my ($path) = @ARGV;
+      open my $fh, "<", $path or die "open failed: $!";
+      local $/;
+      my $doc = JSON::PP::decode_json(<$fh>);
+      die "suite mismatch\n" unless ($doc->{suite} // "") eq "h4_transition_rehearsal_v1";
+      die "h2 gate not pass\n" unless ($doc->{h2_gate} // "") eq "pass";
+      die "rollback not recovered\n" unless ($doc->{rollback_recovered});
+      die "data loss detected\n" unless (($doc->{data_loss_files} // 1) == 0);
+      die "rehearsal not passed\n" unless ($doc->{passed});
+      my $elapsed = $doc->{rollback_elapsed_ms};
+      my $slo = $doc->{rollback_slo_ms};
+      die "rollback_elapsed_ms missing\n" unless defined $elapsed && $elapsed =~ /\A[0-9]+\z/;
+      die "rollback_slo_ms missing\n" unless defined $slo && $slo =~ /\A[0-9]+\z/;
+      die "rollback slo violated\n" if $elapsed > $slo;
+    ' target/transition-gates/h4_sample_report.json
 fi
 
 if [ "${failed}" -ne 0 ]; then

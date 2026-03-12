@@ -1,7 +1,7 @@
-use axiom_apps::metrics::{
+use axonrunner_apps::metrics::{
     MetricsSnapshot, record_copy_bytes, record_lock_wait_ns, record_queue_depth,
 };
-use axiom_apps::metrics_http;
+use axonrunner_apps::metrics_http;
 use std::collections::VecDeque;
 use std::env;
 use std::fs;
@@ -11,9 +11,10 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use crate::env_util::read_env_trimmed;
 use crate::estop::EStop;
-use axiom_adapters::AxiommeContextAdapter;
-use axiom_adapters::contracts::ContextAdapter;
+use axonrunner_adapters::AxiomsyncContextAdapter;
+use axonrunner_adapters::contracts::ContextAdapter;
 
 mod supervisor;
 mod types;
@@ -21,13 +22,13 @@ mod types;
 pub use supervisor::*;
 pub use types::*;
 
-const ENV_DAEMON_WORK_ITEMS: &str = "AXIOM_DAEMON_WORK_ITEMS";
-const ENV_DAEMON_HEALTH_PATH: &str = "AXIOM_DAEMON_HEALTH_PATH";
-const ENV_DAEMON_HEALTH_STATE_PATH: &str = "AXIOM_DAEMON_HEALTH_STATE_PATH";
-const ENV_DAEMON_MAX_TICKS: &str = "AXIOM_DAEMON_MAX_TICKS";
-const ENV_DAEMON_IDLE_SECS: &str = "AXIOM_DAEMON_IDLE_SECS";
-const ENV_DAEMON_CHANNEL: &str = "AXIOM_RUNTIME_CHANNEL";
-const ENV_DAEMON_SUPERVISOR_INTERVAL_TICKS: &str = "AXIOM_DAEMON_SUPERVISOR_INTERVAL_TICKS";
+const ENV_DAEMON_WORK_ITEMS: &str = "AXONRUNNER_DAEMON_WORK_ITEMS";
+const ENV_DAEMON_HEALTH_PATH: &str = "AXONRUNNER_DAEMON_HEALTH_PATH";
+const ENV_DAEMON_HEALTH_STATE_PATH: &str = "AXONRUNNER_DAEMON_HEALTH_STATE_PATH";
+const ENV_DAEMON_MAX_TICKS: &str = "AXONRUNNER_DAEMON_MAX_TICKS";
+const ENV_DAEMON_IDLE_SECS: &str = "AXONRUNNER_DAEMON_IDLE_SECS";
+const ENV_DAEMON_CHANNEL: &str = crate::channel_runtime::ENV_RUNTIME_CHANNEL;
+const ENV_DAEMON_SUPERVISOR_INTERVAL_TICKS: &str = "AXONRUNNER_DAEMON_SUPERVISOR_INTERVAL_TICKS";
 const DEFAULT_DAEMON_WORK_ITEM: &str = "startup-check";
 const DEFAULT_DAEMON_MAX_TICKS: u64 = 32;
 const DEFAULT_DAEMON_SUPERVISOR_INTERVAL_TICKS: u64 = 1;
@@ -52,13 +53,19 @@ pub struct DaemonRunSummary {
 pub fn run(profile: &str, endpoint: &str) {
     println!("daemon started profile={} endpoint={}", profile, endpoint);
 
-    // Start the Prometheus metrics HTTP server if AXIOM_METRICS_PORT is set.
+    // Start the Prometheus metrics HTTP server if AXONRUNNER_METRICS_PORT is set.
     let metrics_arc: Arc<Mutex<MetricsSnapshot>> = Arc::new(Mutex::new(MetricsSnapshot::default()));
     if let Some(port) = metrics_http::metrics_port_from_env() {
         metrics_http::spawn_metrics_server(port, Arc::clone(&metrics_arc));
     }
 
-    let run_input = build_daemon_run_input(profile, endpoint);
+    let run_input = match build_daemon_run_input(profile, endpoint) {
+        Ok(input) => input,
+        Err(error) => {
+            eprintln!("daemon configuration error: {error}");
+            return;
+        }
+    };
     let health_state_path = health_state_path(profile, endpoint);
     if let Err(error) = persist_health_state_path(&health_state_path, &run_input.health_path) {
         eprintln!(
@@ -112,17 +119,18 @@ pub fn execute_daemon_run(input: DaemonRunInput) -> io::Result<DaemonRunSummary>
     // Spawn channel polling thread if channel_id is configured.
     let estop = Arc::new(EStop::new());
     let channel_thread = if let Some(ref channel_id) = input.channel_id {
-        match axiom_adapters::build_contract_channel(channel_id) {
-            Ok(mut channel) => match axiom_adapters::build_contract_agent("") {
+        match axonrunner_adapters::build_contract_channel(channel_id) {
+            Ok(mut channel) => match axonrunner_adapters::build_contract_agent("") {
                 Ok(agent) => {
                     let estop_clone = Arc::clone(&estop);
-                    let agent: Arc<dyn axiom_adapters::contracts::AgentAdapter> = Arc::from(agent);
+                    let agent: Arc<dyn axonrunner_adapters::contracts::AgentAdapter> =
+                        Arc::from(agent);
                     let rag_context: Option<Arc<dyn ContextAdapter>> =
-                        std::env::var("AXIOM_CONTEXT_ROOT")
+                        read_env_trimmed("AXONRUNNER_CONTEXT_ROOT")
                             .ok()
-                            .filter(|s| !s.trim().is_empty())
+                            .flatten()
                             .and_then(|root| {
-                                AxiommeContextAdapter::new(std::path::Path::new(root.trim()))
+                                AxiomsyncContextAdapter::new(std::path::Path::new(root.trim()))
                             .map(|a| Arc::new(a) as Arc<dyn ContextAdapter>)
                             .map_err(|e| {
                                 eprintln!(
@@ -164,8 +172,9 @@ pub fn execute_daemon_run(input: DaemonRunInput) -> io::Result<DaemonRunSummary>
     let mut executor = SuccessExecutor;
     let mut sleeper = NoopSleeper;
     let max_ticks = input.max_ticks;
-    let supervisor_interval_ticks = env::var(ENV_DAEMON_SUPERVISOR_INTERVAL_TICKS)
+    let supervisor_interval_ticks = read_env_trimmed(ENV_DAEMON_SUPERVISOR_INTERVAL_TICKS)
         .ok()
+        .flatten()
         .and_then(|raw| raw.trim().parse::<u64>().ok())
         .filter(|ticks| *ticks > 0)
         .unwrap_or(DEFAULT_DAEMON_SUPERVISOR_INTERVAL_TICKS);
@@ -176,18 +185,20 @@ pub fn execute_daemon_run(input: DaemonRunInput) -> io::Result<DaemonRunSummary>
         match component.kind {
             SupervisorComponentKind::Gateway => {
                 // Attempt a TCP connection to the metrics port when
-                // AXIOM_METRICS_PORT is configured.  A successful connect
+                // AXONRUNNER_METRICS_PORT is configured.  A successful connect
                 // (or immediate RST) proves the port is bound.  If the env
                 // var is absent the gateway check is treated as a pass.
                 //
-                // Timeout is configurable via AXIOM_SUPERVISOR_GATEWAY_TIMEOUT_MS
+                // Timeout is configurable via AXONRUNNER_SUPERVISOR_GATEWAY_TIMEOUT_MS
                 // (default 500 ms).
-                let timeout_ms = env::var("AXIOM_SUPERVISOR_GATEWAY_TIMEOUT_MS")
+                let timeout_ms = read_env_trimmed("AXONRUNNER_SUPERVISOR_GATEWAY_TIMEOUT_MS")
                     .ok()
+                    .flatten()
                     .and_then(|v| v.trim().parse::<u64>().ok())
                     .unwrap_or(500);
-                match env::var(axiom_apps::metrics_http::ENV_METRICS_PORT)
+                match read_env_trimmed(axonrunner_apps::metrics_http::ENV_METRICS_PORT)
                     .ok()
+                    .flatten()
                     .and_then(|raw| raw.trim().parse::<u16>().ok())
                     .filter(|&p| p > 0)
                 {
@@ -208,38 +219,15 @@ pub fn execute_daemon_run(input: DaemonRunInput) -> io::Result<DaemonRunSummary>
                 }
             }
             SupervisorComponentKind::Channels => {
-                // Channel presence is optional; an unconfigured channel is not
-                // an error.  When configured, the name must be a known channel
-                // type.
-                const VALID_CHANNELS: &[&str] =
-                    &["telegram", "discord", "slack", "irc", "matrix", "whatsapp"];
-                match env::var(ENV_DAEMON_CHANNEL)
-                    .ok()
-                    .filter(|s| !s.trim().is_empty())
-                {
-                    None => Ok(()),
-                    Some(name) => {
-                        let name = name.trim().to_lowercase();
-                        if VALID_CHANNELS.contains(&name.as_str()) {
-                            Ok(())
-                        } else {
-                            Err(SupervisorError::retryable(format!(
-                                "unknown channel type '{}'; valid: {}",
-                                name,
-                                VALID_CHANNELS.join(", ")
-                            )))
-                        }
-                    }
-                }
+                crate::channel_runtime::resolve_optional_runtime_channel_id_from_env()
+                    .map(|_| ())
+                    .map_err(SupervisorError::retryable)
             }
             SupervisorComponentKind::Scheduler => {
                 // A cron expression is optional.  When configured, it must
                 // have at least 5 whitespace-separated fields (standard cron
                 // format: minute hour day month weekday).
-                match env::var("AXIOM_CRON_EXPR")
-                    .ok()
-                    .filter(|s| !s.trim().is_empty())
-                {
+                match read_env_trimmed("AXONRUNNER_CRON_EXPR").ok().flatten() {
                     None => Ok(()),
                     Some(expr) => {
                         let field_count = expr.split_whitespace().count();
@@ -247,7 +235,7 @@ pub fn execute_daemon_run(input: DaemonRunInput) -> io::Result<DaemonRunSummary>
                             Ok(())
                         } else {
                             Err(SupervisorError::retryable(format!(
-                                "invalid AXIOM_CRON_EXPR '{}': expected at least 5 fields, got {}",
+                                "invalid AXONRUNNER_CRON_EXPR '{}': expected at least 5 fields, got {}",
                                 expr.trim(),
                                 field_count
                             )))
@@ -301,9 +289,10 @@ pub fn execute_daemon_run(input: DaemonRunInput) -> io::Result<DaemonRunSummary>
         &mut supervisor_sleeper,
     );
 
-    // If AXIOM_DAEMON_IDLE_SECS is set, keep the process alive (and metrics server
+    // If AXONRUNNER_DAEMON_IDLE_SECS is set, keep the process alive (and metrics server
     // reachable) for that many seconds before exiting.
-    if let Ok(raw) = env::var(ENV_DAEMON_IDLE_SECS)
+    if let Ok(raw) = read_env_trimmed(ENV_DAEMON_IDLE_SECS)
+        && let Some(raw) = raw
         && let Ok(secs) = raw.trim().parse::<u64>()
         && secs > 0
     {
@@ -332,28 +321,39 @@ pub fn execute_daemon_run(input: DaemonRunInput) -> io::Result<DaemonRunSummary>
     })
 }
 
-fn build_daemon_run_input(profile: &str, endpoint: &str) -> DaemonRunInput {
-    let health_path = env::var(ENV_DAEMON_HEALTH_PATH)
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| default_health_path(profile, endpoint));
+fn build_daemon_run_input(profile: &str, endpoint: &str) -> Result<DaemonRunInput, String> {
+    build_daemon_run_input_with_env(profile, endpoint, |key| {
+        read_env_trimmed(key).ok().flatten()
+    })
+}
 
-    let work_items = env::var(ENV_DAEMON_WORK_ITEMS)
-        .ok()
+fn build_daemon_run_input_with_env(
+    profile: &str,
+    endpoint: &str,
+    mut read_env: impl FnMut(&str) -> Option<String>,
+) -> Result<DaemonRunInput, String> {
+    let health_path = read_env(ENV_DAEMON_HEALTH_PATH)
+        .map(PathBuf::from)
+        .unwrap_or_else(|| default_health_path(profile, endpoint));
+
+    let work_items = read_env(ENV_DAEMON_WORK_ITEMS)
         .map(|raw| parse_work_items(&raw))
         .filter(|items| !items.is_empty())
         .unwrap_or_else(|| vec![WorkItem::new(DEFAULT_DAEMON_WORK_ITEM)]);
 
-    let max_ticks = env::var(ENV_DAEMON_MAX_TICKS)
-        .ok()
+    let max_ticks = read_env(ENV_DAEMON_MAX_TICKS)
         .and_then(|raw| parse_max_ticks(&raw))
         .unwrap_or(DEFAULT_DAEMON_MAX_TICKS);
 
-    let channel_id = env::var(ENV_DAEMON_CHANNEL)
-        .ok()
-        .map(|s| s.trim().to_owned())
-        .filter(|s| !s.is_empty());
+    let channel_id = crate::channel_runtime::resolve_optional_runtime_channel_id(|key| {
+        if key == ENV_DAEMON_CHANNEL {
+            read_env(key)
+        } else {
+            None
+        }
+    })?;
 
-    DaemonRunInput {
+    Ok(DaemonRunInput {
         health_path,
         retry_backoff: vec![
             Duration::from_millis(10),
@@ -363,7 +363,7 @@ fn build_daemon_run_input(profile: &str, endpoint: &str) -> DaemonRunInput {
         work_items,
         max_ticks,
         channel_id,
-    }
+    })
 }
 
 fn parse_work_items(raw: &str) -> Vec<WorkItem> {
@@ -384,10 +384,9 @@ pub fn resolve_health_path_from_state(profile: &str, endpoint: &str) -> Option<P
 }
 
 pub fn health_state_path(profile: &str, endpoint: &str) -> PathBuf {
-    env::var(ENV_DAEMON_HEALTH_STATE_PATH)
+    read_env_trimmed(ENV_DAEMON_HEALTH_STATE_PATH)
         .ok()
-        .map(|raw| raw.trim().to_owned())
-        .filter(|raw| !raw.is_empty())
+        .flatten()
         .map(PathBuf::from)
         .unwrap_or_else(|| default_health_state_path(profile, endpoint))
 }
@@ -396,7 +395,9 @@ fn default_health_state_path(profile: &str, endpoint: &str) -> PathBuf {
     let profile = sanitize_token(profile);
     let endpoint = sanitize_token(endpoint);
 
-    env::temp_dir().join(format!("axiom-daemon-{profile}-{endpoint}.health-path"))
+    env::temp_dir().join(format!(
+        "axonrunner-daemon-{profile}-{endpoint}.health-path"
+    ))
 }
 
 fn default_health_path(profile: &str, endpoint: &str) -> PathBuf {
@@ -404,7 +405,9 @@ fn default_health_path(profile: &str, endpoint: &str) -> PathBuf {
     let endpoint = sanitize_token(endpoint);
     let pid = std::process::id();
 
-    env::temp_dir().join(format!("axiom-daemon-{profile}-{endpoint}-{pid}.health"))
+    env::temp_dir().join(format!(
+        "axonrunner-daemon-{profile}-{endpoint}-{pid}.health"
+    ))
 }
 
 fn persist_health_state_path(state_path: &Path, health_path: &Path) -> io::Result<()> {
@@ -781,10 +784,10 @@ fn duration_as_ns(duration: Duration) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::{
-        DEFAULT_DAEMON_MAX_TICKS, DEFAULT_DAEMON_WORK_ITEM, execute_daemon_run, health_state_path,
-        parse_max_ticks, parse_work_items, resolve_health_path_from_state,
+        DEFAULT_DAEMON_MAX_TICKS, DEFAULT_DAEMON_WORK_ITEM, ENV_DAEMON_CHANNEL,
+        build_daemon_run_input, build_daemon_run_input_with_env, execute_daemon_run,
+        health_state_path, parse_max_ticks, parse_work_items, resolve_health_path_from_state,
     };
-    use crate::daemon::build_daemon_run_input;
     use std::fs;
     use std::path::PathBuf;
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -799,7 +802,7 @@ mod tests {
 
     fn unique_health_path(label: &str) -> PathBuf {
         std::env::temp_dir().join(format!(
-            "axiom-daemon-health-{label}-{}.status",
+            "axonrunner-daemon-health-{label}-{}.status",
             unique_token("path")
         ))
     }
@@ -821,7 +824,8 @@ mod tests {
 
     #[test]
     fn build_daemon_run_input_defaults_when_env_absent() {
-        let input = build_daemon_run_input("prod", "http://127.0.0.1:8080");
+        let input = build_daemon_run_input_with_env("prod", "http://127.0.0.1:8080", |_| None)
+            .expect("default daemon input should build");
 
         assert_eq!(input.work_items.len(), 1);
         assert_eq!(input.work_items[0].id, DEFAULT_DAEMON_WORK_ITEM);
@@ -830,8 +834,44 @@ mod tests {
     }
 
     #[test]
+    fn build_daemon_run_input_normalizes_runtime_channel_alias() {
+        let input = build_daemon_run_input_with_env("prod", "http://127.0.0.1:8080", |key| {
+            if key == ENV_DAEMON_CHANNEL {
+                Some(String::from("channel.slack"))
+            } else {
+                None
+            }
+        })
+        .expect("channel alias should resolve");
+
+        assert_eq!(input.channel_id.as_deref(), Some("slack"));
+    }
+
+    #[test]
+    fn build_daemon_run_input_rejects_unknown_runtime_channel() {
+        let error = build_daemon_run_input_with_env("prod", "http://127.0.0.1:8080", |key| {
+            if key == ENV_DAEMON_CHANNEL {
+                Some(String::from("unknown-channel"))
+            } else {
+                None
+            }
+        })
+        .expect_err("unknown channel should fail");
+
+        assert!(
+            error.contains(ENV_DAEMON_CHANNEL),
+            "error should mention runtime channel env key, got: {error}"
+        );
+        assert!(
+            error.contains("supported channels"),
+            "error should include supported channel list, got: {error}"
+        );
+    }
+
+    #[test]
     fn execute_daemon_run_completes_with_success_executor() {
-        let mut input = build_daemon_run_input("prod", "http://127.0.0.1:8080");
+        let mut input = build_daemon_run_input("prod", "http://127.0.0.1:8080")
+            .expect("daemon input should build");
         input.max_ticks = 8;
 
         let summary = execute_daemon_run(input).expect("daemon run should complete");

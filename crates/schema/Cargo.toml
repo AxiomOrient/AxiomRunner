@@ -1,5 +1,5 @@
 [package]
-name = "axiom_schema"
+name = "axonrunner_schema"
 version.workspace = true
 edition.workspace = true
 

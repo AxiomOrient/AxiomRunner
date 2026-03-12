@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [0.1.0] - 2026-02-25
+## [0.0.1] - 2026-02-25
 
 ### Added
 
@@ -30,7 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **IRC** — TCP transport with PING/PONG keep-alive and PRIVMSG parsing
 - **Matrix** — `/_matrix/client/v3/sync` polling with `next_batch` persistence
 - **WhatsApp** — Meta Cloud API send adapter (webhook-only receive)
-- Daemon channel polling thread integration (`AXIOM_RUNTIME_CHANNEL`)
+- Daemon channel polling thread integration (`AXONRUNNER_RUNTIME_CHANNEL`)
 
 #### Memory & Storage
 - SQLite memory backend with WAL mode and connection pooling
@@ -40,21 +40,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Per-key full-text term indexing (`memory_term_index`)
 
 #### Security
-- HMAC-SHA256 request fingerprinting for HTTP gateway (`AXIOM_GATEWAY_SECRET`)
+- HMAC-SHA256 request fingerprinting for HTTP gateway (`AXONRUNNER_GATEWAY_SECRET`)
 - Constant-time XOR comparison to prevent timing attacks
-- TOTP/OTP gate for CLI agent access (`AXIOM_OTP_SECRET`, SHA1, 30s window)
+- TOTP/OTP gate for CLI agent access (`AXONRUNNER_OTP_SECRET`, SHA1, 30s window)
 - Shell command allowlist + metacharacter detection (no `sh -c` injection)
 - Token masking in error logs (Telegram, Composio, OpenAI)
 
 #### Operations & Observability
-- Prometheus metrics HTTP server (`AXIOM_METRICS_PORT`)
-  - `axiom_queue_current_depth`, `axiom_queue_peak_depth` (gauge)
-  - `axiom_lock_wait_count`, `axiom_lock_wait_ns_total` (counter)
-  - `axiom_copy_in_bytes_total`, `axiom_copy_out_bytes_total` (counter)
+- Prometheus metrics HTTP server (`AXONRUNNER_METRICS_PORT`)
+  - `axonrunner_queue_current_depth`, `axonrunner_queue_peak_depth` (gauge)
+  - `axonrunner_lock_wait_count`, `axonrunner_lock_wait_ns_total` (counter)
+  - `axonrunner_copy_in_bytes_total`, `axonrunner_copy_out_bytes_total` (counter)
 - Daemon mode (`serve --mode=daemon`) with health file and supervisor
 - Gateway mode (`serve --mode=gateway`) for HTTP intent processing
 - `doctor` command with 6 component health checks
-- `AXIOM_DAEMON_IDLE_SECS` for controlled daemon lifetime in test/dev environments
+- `AXONRUNNER_DAEMON_IDLE_SECS` for controlled daemon lifetime in test/dev environments
 
 #### Integrations Catalog (23 entries)
 - **Chat**: Telegram, Discord, Slack, Matrix, WhatsApp, IRC

@@ -1,22 +1,6 @@
-use axiom_core::PolicyCode;
+use axonrunner_core::PolicyCode;
+pub use axonrunner_infra::RetryClass;
 use std::fmt;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RetryClass {
-    Retryable,
-    NonRetryable,
-    PolicyDenied,
-}
-
-impl RetryClass {
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            RetryClass::Retryable => "retryable",
-            RetryClass::NonRetryable => "non_retryable",
-            RetryClass::PolicyDenied => "policy_denied",
-        }
-    }
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AdapterErrorKind {

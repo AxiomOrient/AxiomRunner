@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 
-use axiom_apps::heartbeat::{
+use axonrunner_apps::heartbeat::{
     HeartbeatConfig, HeartbeatExecutor, HeartbeatLoop, HeartbeatReplay, HeartbeatStopReason,
     parse_heartbeat_tasks,
 };
