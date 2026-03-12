@@ -2,40 +2,17 @@
 
 extern crate self as axonrunner_apps;
 
-mod channel;
-mod channel_runtime;
-mod cli;
 mod cli_args;
 mod cli_runtime;
 mod config_loader;
-mod cron;
 mod dev_guard;
-mod doctor;
 mod env_util;
-mod hex_util;
-mod identity_bootstrap;
-mod integrations;
-mod onboard;
-mod otp_gate;
 mod runtime_compose;
-mod service;
-mod skills;
-mod skills_registry;
 mod status;
-mod time_util;
 
-pub mod agent_loop;
 pub mod async_runtime_host;
-pub mod channel_serve;
 pub mod cli_command;
-pub mod daemon;
 pub mod display;
-pub mod estop;
-pub mod gateway;
-pub mod gateway_signature;
-pub mod heartbeat;
-pub mod metrics;
-pub mod metrics_http;
 pub mod parse_util;
 
 use crate::cli_args::parse_startup_args;

@@ -7,22 +7,13 @@ edition.workspace = true
 name = "axonrunner_adapters"
 path = "src/lib.rs"
 
-[features]
-channel-discord = []
-channel-slack = []
-channel-irc = []
-channel-matrix = []
-channel-whatsapp = []
-
 [lints]
 workspace = true
 
 [dependencies]
 axonrunner_core = { path = "../core" }
-axonrunner_infra = { path = "../infra" }
+codex_runtime = { package = "codex-runtime", version = "0.4.0" }
 rusqlite = { version = "0.32.1", features = ["bundled"] }
-coclai = { path = "../../../coclai/crates/coclai" }
 tokio = { version = "1", features = ["rt-multi-thread"] }
 reqwest = { version = "0.12", features = ["blocking", "json", "rustls-tls"], default-features = false }
 serde_json = "1"
-axiomme-core = { git = "https://github.com/AxiomOrient/AxiomSync", rev = "8d2e66ee57217d6a61c800547127684327510855" }

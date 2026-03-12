@@ -1,4 +1,3 @@
-use crate::async_http_bridge::AsyncHttpBridge;
 use crate::contracts::{
     AdapterFuture, AdapterHealth, ProviderAdapter, ProviderRequest, ProviderResponse,
 };
@@ -11,15 +10,7 @@ pub struct OpenAiCompatProvider {
     id_str: &'static str,
     api_key: String,
     base_url: String,
-    http: AsyncHttpBridge,
-}
-
-fn build_http_client() -> AsyncHttpBridge {
-    AsyncHttpBridge::with_timeouts(
-        std::time::Duration::from_secs(HTTP_CONNECT_TIMEOUT_SECS),
-        std::time::Duration::from_secs(HTTP_REQUEST_TIMEOUT_SECS),
-    )
-    .unwrap_or_default()
+    http: reqwest::blocking::Client,
 }
 
 impl OpenAiCompatProvider {
@@ -28,11 +19,17 @@ impl OpenAiCompatProvider {
         api_key: impl Into<String>,
         base_url: impl Into<String>,
     ) -> Self {
+        let http = reqwest::blocking::Client::builder()
+            .connect_timeout(std::time::Duration::from_secs(HTTP_CONNECT_TIMEOUT_SECS))
+            .timeout(std::time::Duration::from_secs(HTTP_REQUEST_TIMEOUT_SECS))
+            .build()
+            .unwrap_or_else(|_| reqwest::blocking::Client::new());
+
         Self {
             id_str,
             api_key: api_key.into(),
             base_url: base_url.into(),
-            http: build_http_client(),
+            http,
         }
     }
 }
@@ -64,39 +61,36 @@ impl ProviderAdapter for OpenAiCompatProvider {
                 "max_tokens": request.max_tokens
             });
 
-            // SECURITY: base_url may contain embedded credentials in some deployments,
-            // and the Authorization header carries the API key. Use classify_reqwest_error
-            // to avoid including URL or header contents in error messages.
-            let auth_header = format!("Bearer {}", self.api_key);
+            let url = format!("{}/chat/completions", self.base_url);
             let response = self
                 .http
-                .post_json(
-                    &format!("{}/chat/completions", self.base_url),
-                    &[
-                        ("Authorization", auth_header.as_str()),
-                        ("Content-Type", "application/json"),
-                    ],
-                    &body,
-                )
-                .map_err(|e| {
+                .post(&url)
+                .header("Authorization", format!("Bearer {}", self.api_key))
+                .header("Content-Type", "application/json")
+                .json(&body)
+                .send()
+                .map_err(|error| {
                     AdapterError::failed(
                         "http_send",
-                        classify_reqwest_error(&e),
+                        classify_reqwest_error(&error),
                         RetryClass::Retryable,
                     )
                 })?;
 
-            if !response.status.is_success() {
-                let status = response.status.as_u16();
+            if !response.status().is_success() {
                 return Err(AdapterError::failed(
                     "http_response",
-                    format!("status {status}"),
+                    format!("status {}", response.status().as_u16()),
                     RetryClass::NonRetryable,
                 ));
             }
 
-            let json: serde_json::Value = serde_json::from_str(&response.body).map_err(|e| {
-                AdapterError::failed("response_parse", e.to_string(), RetryClass::NonRetryable)
+            let json: serde_json::Value = response.json().map_err(|error| {
+                AdapterError::failed(
+                    "response_parse",
+                    error.to_string(),
+                    RetryClass::NonRetryable,
+                )
             })?;
 
             let content = json["choices"][0]["message"]["content"]
@@ -159,29 +153,7 @@ mod tests {
 
     #[test]
     fn openai_compat_id_matches_constructor() {
-        let provider =
-            OpenAiCompatProvider::new("openrouter", "key", "https://openrouter.ai/api/v1");
-        assert_eq!(provider.id(), "openrouter");
-    }
-
-    /// classify_reqwest_error returns &'static str — base_url and Bearer token cannot leak.
-    #[test]
-    fn classify_reqwest_error_returns_static_str() {
-        let _: fn(&reqwest::Error) -> &'static str = classify_reqwest_error;
-    }
-
-    /// Requires OPENAI_API_KEY env var. Run with: cargo test -- --ignored
-    #[test]
-    #[ignore]
-    fn openai_live_complete() {
-        let Ok(api_key) = std::env::var("OPENAI_API_KEY") else {
-            eprintln!("skipping openai_live_complete: OPENAI_API_KEY is not set");
-            return;
-        };
-        let provider = OpenAiCompatProvider::new("openai", api_key, "https://api.openai.com/v1");
-        let response =
-            block_on(provider.complete(ProviderRequest::new("gpt-4o-mini", "say hello", 10)))
-                .expect("live call should succeed");
-        assert!(!response.content.is_empty());
+        let provider = OpenAiCompatProvider::new("openai", "key", "https://api.openai.com/v1");
+        assert_eq!(provider.id(), "openai");
     }
 }

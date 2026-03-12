@@ -21,10 +21,7 @@ use dev_guard::{GuardError, enforce_current_build, enforce_release_gate};
 fn release_security_gate_blocks_dev_profile_in_release() {
     let config = AppConfig {
         profile: String::from("dev"),
-        endpoint: String::from("http://127.0.0.1:8080"),
         provider: String::from("mock-local"),
-        channel: None,
-        tools: None,
     };
 
     let result = enforce_release_gate(&config, true);
@@ -36,10 +33,7 @@ fn release_security_gate_blocks_dev_profile_in_release() {
 fn release_security_gate_ignores_non_dev_profile_in_release() {
     let config = AppConfig {
         profile: String::from("prod"),
-        endpoint: String::from("http://127.0.0.1:8080"),
         provider: String::from("mock-local"),
-        channel: None,
-        tools: None,
     };
 
     let result = enforce_release_gate(&config, true);
@@ -51,10 +45,7 @@ fn release_security_gate_ignores_non_dev_profile_in_release() {
 fn release_security_gate_treats_dev_profile_case_insensitively() {
     let config = AppConfig {
         profile: String::from("DeV"),
-        endpoint: String::from("http://127.0.0.1:8080"),
         provider: String::from("mock-local"),
-        channel: None,
-        tools: None,
     };
 
     let result = enforce_release_gate(&config, true);
@@ -66,10 +57,7 @@ fn release_security_gate_treats_dev_profile_case_insensitively() {
 fn release_security_gate_current_build_contract_preserves_dev_minimal_mode() {
     let config = AppConfig {
         profile: String::from("dev"),
-        endpoint: String::from("http://127.0.0.1:8080"),
         provider: String::from("mock-local"),
-        channel: None,
-        tools: None,
     };
 
     let result = enforce_current_build(&config);

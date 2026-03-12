@@ -48,10 +48,7 @@ mod tests {
     fn dev_config() -> AppConfig {
         AppConfig {
             profile: String::from("dev"),
-            endpoint: String::from("http://127.0.0.1:8080"),
             provider: String::from("mock-local"),
-            channel: None,
-            tools: None,
         }
     }
 
@@ -73,10 +70,7 @@ mod tests {
     fn release_gate_treats_profile_case_insensitively() {
         let config = AppConfig {
             profile: String::from("DeV"),
-            endpoint: String::from("http://127.0.0.1:8080"),
             provider: String::from("mock-local"),
-            channel: None,
-            tools: None,
         };
 
         let result = enforce_release_gate(&config, true);

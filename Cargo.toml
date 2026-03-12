@@ -2,9 +2,7 @@
 members = [
     "crates/apps",
     "crates/core",
-    "crates/adapters",
-    "crates/infra",
-    "crates/schema"
+    "crates/adapters"
 ]
 resolver = "3"
 

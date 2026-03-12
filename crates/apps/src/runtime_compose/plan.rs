@@ -35,7 +35,6 @@ pub(super) fn build_runtime_compose_plan(
     provider_model: &str,
     max_tokens: usize,
     tool_log_path: &str,
-    bootstrap_prompt: Option<&str>,
 ) -> RuntimeComposePlan {
     if outcome == DecisionOutcome::Rejected {
         return RuntimeComposePlan {
@@ -49,10 +48,7 @@ pub(super) fn build_runtime_compose_plan(
         IntentTemplate::Write { key, value } => RuntimeComposePlan {
             provider: Some(ProviderPlan {
                 model: provider_model.to_owned(),
-                prompt: compose_provider_prompt(
-                    format!("intent={intent_id} kind=write key={key} value={value}"),
-                    bootstrap_prompt,
-                ),
+                prompt: format!("intent={intent_id} kind=write key={key} value={value}"),
                 max_tokens,
             }),
             memory: MemoryPlan::Put {
@@ -67,10 +63,7 @@ pub(super) fn build_runtime_compose_plan(
         IntentTemplate::Remove { key } => RuntimeComposePlan {
             provider: Some(ProviderPlan {
                 model: provider_model.to_owned(),
-                prompt: compose_provider_prompt(
-                    format!("intent={intent_id} kind=remove key={key}"),
-                    bootstrap_prompt,
-                ),
+                prompt: format!("intent={intent_id} kind=remove key={key}"),
                 max_tokens,
             }),
             memory: MemoryPlan::Remove { key: key.clone() },
@@ -87,16 +80,4 @@ pub(super) fn build_runtime_compose_plan(
             }
         }
     }
-}
-
-fn compose_provider_prompt(base_prompt: String, bootstrap_prompt: Option<&str>) -> String {
-    let Some(bootstrap_prompt) = bootstrap_prompt else {
-        return base_prompt;
-    };
-
-    if bootstrap_prompt.is_empty() {
-        return base_prompt;
-    }
-
-    format!("{base_prompt}\n\nbootstrap_context:\n{bootstrap_prompt}")
 }

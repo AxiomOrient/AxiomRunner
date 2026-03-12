@@ -1,15 +1,11 @@
 use crate::async_runtime_host::global_async_runtime_host;
 use crate::cli_command::IntentTemplate;
-use crate::env_util::{prefer_existing_path, read_env_trimmed};
-use crate::identity_bootstrap::{BootstrapContext, BootstrapLoadConfig, load_bootstrap_context};
-use crate::parse_util::parse_tools_list;
-use axonrunner_adapters::contracts::ContextAdapter;
+use crate::env_util::read_env_trimmed;
 use axonrunner_adapters::tool::{ToolPolicy, WorkspaceTool};
 use axonrunner_adapters::{
-    ChannelAdapter, MemoryAdapter, ProviderAdapter, ProviderRequest, build_contract_channel,
-    build_contract_memory, build_contract_provider,
+    MemoryAdapter, ProviderAdapter, ProviderRequest, build_contract_memory,
+    build_contract_provider, provider_registry, resolve_provider_id,
 };
-use axonrunner_adapters::{provider_registry, resolve_provider_id};
 use axonrunner_core::DecisionOutcome;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -26,13 +22,9 @@ const ENV_RUNTIME_TOOL_WORKSPACE: &str = "AXONRUNNER_RUNTIME_TOOL_WORKSPACE";
 const ENV_RUNTIME_TOOL_LOG_PATH: &str = "AXONRUNNER_RUNTIME_TOOL_LOG_PATH";
 const ENV_RUNTIME_PROVIDER: &str = "AXONRUNNER_RUNTIME_PROVIDER";
 const ENV_RUNTIME_PROVIDER_MODEL: &str = "AXONRUNNER_RUNTIME_PROVIDER_MODEL";
-const ENV_RUNTIME_BOOTSTRAP_ROOT: &str = "AXONRUNNER_RUNTIME_BOOTSTRAP_ROOT";
 const ENV_RUNTIME_MAX_TOKENS: &str = "AXONRUNNER_RUNTIME_MAX_TOKENS";
-const ENV_RUNTIME_CHANNEL: &str = "AXONRUNNER_RUNTIME_CHANNEL";
-const ENV_RUNTIME_TOOLS: &str = "AXONRUNNER_RUNTIME_TOOLS";
-const ENV_RUNTIME_CONTEXT_ROOT: &str = "AXONRUNNER_CONTEXT_ROOT";
 
-const DEFAULT_TOOL_LOG_PATH: &str = ".axonrunner/runtime-compose.log";
+const DEFAULT_TOOL_LOG_PATH: &str = "runtime.log";
 const DEFAULT_MAX_TOKENS: usize = 4096;
 const TOOL_WRITE_LIMIT_BYTES: usize = 16 * 1024;
 
@@ -44,11 +36,6 @@ pub struct RuntimeComposeConfig {
     pub provider_id: String,
     pub provider_model: String,
     pub max_tokens: usize,
-    pub bootstrap_root: Option<PathBuf>,
-    pub channel_id: Option<String>,
-    pub tool_ids: Vec<String>,
-    /// Root directory for AxiomSync context store. None = RAG disabled.
-    pub context_root: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -57,21 +44,11 @@ pub struct RuntimeComposeHealth {
     pub provider_model: String,
     pub memory: RuntimeComposeComponentHealth,
     pub tool: RuntimeComposeComponentHealth,
-    pub bootstrap: RuntimeComposeBootstrapHealth,
-    pub channel: RuntimeComposeComponentHealth,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeComposeComponentHealth {
     pub enabled: bool,
-    pub state: &'static str,
-    pub detail: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RuntimeComposeBootstrapHealth {
-    pub sections: usize,
-    pub bytes: usize,
     pub state: &'static str,
     pub detail: String,
 }
@@ -107,34 +84,32 @@ impl RuntimeComposeExecution {
 
 impl RuntimeComposeConfig {
     pub fn from_env(default_provider_id: &str) -> Self {
-        let tool_log_path = env_string(ENV_RUNTIME_TOOL_LOG_PATH)
-            .unwrap_or_else(|| DEFAULT_TOOL_LOG_PATH.to_owned());
         let provider_id =
             env_string(ENV_RUNTIME_PROVIDER).unwrap_or_else(|| default_provider_id.to_owned());
         let provider_model =
             env_string(ENV_RUNTIME_PROVIDER_MODEL).unwrap_or_else(|| provider_id.clone());
 
-        let max_tokens = env_string(ENV_RUNTIME_MAX_TOKENS)
-            .and_then(|raw| raw.parse::<usize>().ok())
-            .filter(|&n| n > 0)
-            .unwrap_or(DEFAULT_MAX_TOKENS);
-
-        let tool_ids = env_string(ENV_RUNTIME_TOOLS)
-            .map(|raw| parse_tools_list(&raw))
-            .filter(|v| !v.is_empty())
-            .unwrap_or_else(|| vec![axonrunner_adapters::DEFAULT_TOOL_ID.to_owned()]);
-
         let memory_path = env_path(ENV_RUNTIME_MEMORY_PATH).or_else(|| {
-            std::env::var("HOME").ok().map(|h| {
-                prefer_existing_path(PathBuf::from(h).join(".axonrunner").join("memory.db"))
-            })
+            std::env::var("HOME")
+                .ok()
+                .map(|home| PathBuf::from(home).join(".axonrunner").join("memory.db"))
         });
         let tool_workspace = env_path(ENV_RUNTIME_TOOL_WORKSPACE).or_else(|| {
-            std::env::var("HOME").ok().map(|h| {
-                prefer_existing_path(PathBuf::from(h).join(".axonrunner").join("workspace"))
-            })
+            std::env::var("HOME")
+                .ok()
+                .map(|home| PathBuf::from(home).join(".axonrunner").join("workspace"))
         });
 
+        let tool_log_path = env_string(ENV_RUNTIME_TOOL_LOG_PATH).unwrap_or_else(|| {
+            tool_workspace
+                .as_ref()
+                .map(|workspace| workspace.join(DEFAULT_TOOL_LOG_PATH).display().to_string())
+                .unwrap_or_else(|| DEFAULT_TOOL_LOG_PATH.to_owned())
+        });
+        let max_tokens = env_string(ENV_RUNTIME_MAX_TOKENS)
+            .and_then(|raw| raw.parse::<usize>().ok())
+            .filter(|value| *value > 0)
+            .unwrap_or(DEFAULT_MAX_TOKENS);
         Self {
             memory_path,
             tool_workspace,
@@ -142,10 +117,6 @@ impl RuntimeComposeConfig {
             provider_id,
             provider_model,
             max_tokens,
-            bootstrap_root: env_path(ENV_RUNTIME_BOOTSTRAP_ROOT),
-            channel_id: env_string(ENV_RUNTIME_CHANNEL),
-            tool_ids,
-            context_root: env_path(ENV_RUNTIME_CONTEXT_ROOT),
         }
     }
 }
@@ -160,17 +131,16 @@ enum RuntimeComposeInitState {
 impl RuntimeComposeInitState {
     fn state_name(&self) -> &'static str {
         match self {
-            RuntimeComposeInitState::Disabled => "disabled",
-            RuntimeComposeInitState::Ready(_) => "ready",
-            RuntimeComposeInitState::Failed(_) => "failed",
+            Self::Disabled => "disabled",
+            Self::Ready(_) => "ready",
+            Self::Failed(_) => "failed",
         }
     }
 
     fn detail(&self) -> String {
         match self {
-            RuntimeComposeInitState::Disabled => String::from("not_configured"),
-            RuntimeComposeInitState::Ready(detail) => detail.clone(),
-            RuntimeComposeInitState::Failed(detail) => detail.clone(),
+            Self::Disabled => String::from("not_configured"),
+            Self::Ready(detail) | Self::Failed(detail) => detail.clone(),
         }
     }
 }
@@ -182,21 +152,16 @@ pub struct RuntimeComposeState {
     provider: Arc<dyn ProviderAdapter>,
     tool: Option<Arc<WorkspaceTool>>,
     tool_init: RuntimeComposeInitState,
-    bootstrap_context: Option<BootstrapContext>,
-    bootstrap_init: RuntimeComposeInitState,
-    channel: Option<Box<dyn ChannelAdapter>>,
-    channel_init: RuntimeComposeInitState,
-    context: Option<Box<dyn ContextAdapter>>,
 }
 
 fn try_init_component<T>(
     option: Option<(String, Result<T, String>)>,
 ) -> (Option<T>, RuntimeComposeInitState) {
     match option {
-        Some((detail, Ok(t))) => (Some(t), RuntimeComposeInitState::Ready(detail)),
-        Some((detail, Err(e))) => (
+        Some((detail, Ok(value))) => (Some(value), RuntimeComposeInitState::Ready(detail)),
+        Some((detail, Err(error))) => (
             None,
-            RuntimeComposeInitState::Failed(format!("{detail} error={e}")),
+            RuntimeComposeInitState::Failed(format!("{detail} error={error}")),
         ),
         None => (None, RuntimeComposeInitState::Disabled),
     }
@@ -204,7 +169,7 @@ fn try_init_component<T>(
 
 impl RuntimeComposeState {
     pub fn new(mut config: RuntimeComposeConfig) -> Result<Self, String> {
-        let selected_provider = resolve_provider_id(&config.provider_id).ok_or_else(|| {
+        let provider_id = resolve_provider_id(&config.provider_id).ok_or_else(|| {
             let supported = provider_registry()
                 .iter()
                 .map(|entry| entry.id)
@@ -215,20 +180,19 @@ impl RuntimeComposeState {
                 config.provider_id.trim()
             )
         })?;
-        config.provider_id = selected_provider.to_owned();
+        config.provider_id = provider_id.to_owned();
 
-        // ~/.axonrunner/ 디렉토리가 없으면 미리 생성 (sqlite/workspace 둘 다 필요)
         if let Some(path) = &config.memory_path
             && let Some(parent) = path.parent()
         {
-            let _ = std::fs::create_dir_all(parent);
+            let _ = fs::create_dir_all(parent);
         }
         if let Some(workspace) = &config.tool_workspace {
-            let _ = std::fs::create_dir_all(workspace);
+            let _ = fs::create_dir_all(workspace);
         }
 
         let (memory, memory_init) = try_init_component(config.memory_path.as_ref().map(|path| {
-            let backend = if path.extension().and_then(|e| e.to_str()) == Some("db") {
+            let backend = if path.extension().and_then(|ext| ext.to_str()) == Some("db") {
                 "sqlite"
             } else {
                 "markdown"
@@ -247,44 +211,10 @@ impl RuntimeComposeState {
                 )
             }));
 
-        let provider =
-            Arc::from(build_contract_provider(selected_provider).map_err(|error| {
-                format!("provider init failed for '{selected_provider}': {error}")
-            })?);
-        let (bootstrap_context, bootstrap_init) = match config.bootstrap_root.as_deref() {
-            Some(root) => match load_bootstrap_context(root, &BootstrapLoadConfig::default()) {
-                Some(context) => (
-                    Some(context),
-                    RuntimeComposeInitState::Ready(format!("root={}", root.display())),
-                ),
-                None => (
-                    None,
-                    RuntimeComposeInitState::Failed(format!(
-                        "root={} no bootstrap content",
-                        root.display()
-                    )),
-                ),
-            },
-            None => (None, RuntimeComposeInitState::Disabled),
-        };
-
-        let (channel, channel_init) =
-            try_init_component(config.channel_id.as_deref().map(|channel_name| {
-                (
-                    format!("channel={channel_name}"),
-                    build_contract_channel(channel_name),
-                )
-            }));
-
-        let context = config.context_root.as_ref().and_then(|root| {
-            match axonrunner_adapters::AxiomsyncContextAdapter::new(root) {
-                Ok(adapter) => Some(Box::new(adapter) as Box<dyn ContextAdapter>),
-                Err(e) => {
-                    eprintln!("context adapter init failed (RAG disabled): {e}");
-                    None
-                }
-            }
-        });
+        let provider = Arc::from(
+            build_contract_provider(provider_id)
+                .map_err(|error| format!("provider init failed for '{provider_id}': {error}"))?,
+        );
 
         Ok(Self {
             config,
@@ -293,11 +223,6 @@ impl RuntimeComposeState {
             provider,
             tool: tool.map(Arc::new),
             tool_init,
-            bootstrap_context,
-            bootstrap_init,
-            channel,
-            channel_init,
-            context,
         })
     }
 
@@ -307,22 +232,14 @@ impl RuntimeComposeState {
         intent_id: &str,
         outcome: DecisionOutcome,
     ) -> RuntimeComposeExecution {
-        let plan = build_runtime_compose_plan(
+        self.apply_plan(build_runtime_compose_plan(
             template,
             intent_id,
             outcome,
             &self.config.provider_model,
             self.config.max_tokens,
             &self.config.tool_log_path,
-            self.bootstrap_context
-                .as_ref()
-                .map(|context| context.rendered.as_str()),
-        );
-        self.apply_plan(plan)
-    }
-
-    pub fn context(&self) -> Option<&dyn ContextAdapter> {
-        self.context.as_ref().map(|b| b.as_ref())
+        ))
     }
 
     pub fn clear(&mut self) -> Result<usize, String> {
@@ -333,8 +250,8 @@ impl RuntimeComposeState {
         let entries = memory
             .list()
             .map_err(|error| format!("list memory records failed: {error}"))?;
-
         let mut removed = 0usize;
+
         for entry in entries {
             let deleted = memory
                 .delete(&entry.key)
@@ -343,6 +260,7 @@ impl RuntimeComposeState {
                 removed = removed.saturating_add(1);
             }
         }
+
         Ok(removed)
     }
 
@@ -359,25 +277,6 @@ impl RuntimeComposeState {
                 enabled: self.tool.is_some(),
                 state: self.tool_init.state_name(),
                 detail: self.tool_init.detail(),
-            },
-            bootstrap: RuntimeComposeBootstrapHealth {
-                sections: self
-                    .bootstrap_context
-                    .as_ref()
-                    .map(|context| context.sections.len())
-                    .unwrap_or(0),
-                bytes: self
-                    .bootstrap_context
-                    .as_ref()
-                    .map(|context| context.total_content_bytes)
-                    .unwrap_or(0),
-                state: self.bootstrap_init.state_name(),
-                detail: self.bootstrap_init.detail(),
-            },
-            channel: RuntimeComposeComponentHealth {
-                enabled: self.channel.is_some(),
-                state: self.channel_init.state_name(),
-                detail: self.channel_init.detail(),
             },
         }
     }
@@ -402,7 +301,7 @@ impl RuntimeComposeState {
         let request = ProviderRequest::new(plan.model, plan.prompt, plan.max_tokens);
         match complete_provider_request(provider, request) {
             Ok(content) => (Some(content), RuntimeComposeStep::Applied),
-            Err(error) => (None, RuntimeComposeStep::Failed(error.to_string())),
+            Err(error) => (None, RuntimeComposeStep::Failed(error)),
         }
     }
 
@@ -413,18 +312,14 @@ impl RuntimeComposeState {
 
         match plan {
             MemoryPlan::None => RuntimeComposeStep::Skipped,
-            MemoryPlan::Put { key, value } => {
-                if let Err(error) = memory.store(&key, &value) {
-                    return RuntimeComposeStep::Failed(error.to_string());
-                }
-                RuntimeComposeStep::Applied
-            }
-            MemoryPlan::Remove { key } => {
-                if let Err(error) = memory.delete(&key) {
-                    return RuntimeComposeStep::Failed(error.to_string());
-                }
-                RuntimeComposeStep::Applied
-            }
+            MemoryPlan::Put { key, value } => match memory.store(&key, &value) {
+                Ok(()) => RuntimeComposeStep::Applied,
+                Err(error) => RuntimeComposeStep::Failed(error.to_string()),
+            },
+            MemoryPlan::Remove { key } => match memory.delete(&key) {
+                Ok(_) => RuntimeComposeStep::Applied,
+                Err(error) => RuntimeComposeStep::Failed(error.to_string()),
+            },
         }
     }
 
@@ -433,37 +328,42 @@ impl RuntimeComposeState {
         plan: Option<ToolPlan>,
         provider_output: Option<&str>,
     ) -> RuntimeComposeStep {
-        let Some(tool) = self.tool.as_ref() else {
-            return RuntimeComposeStep::Skipped;
-        };
         let Some(plan) = plan else {
             return RuntimeComposeStep::Skipped;
         };
+        let Some(tool) = self.tool.as_ref() else {
+            return RuntimeComposeStep::Skipped;
+        };
 
-        let line = build_tool_line(&plan.line_prefix, provider_output);
-        let tool = Arc::clone(tool);
-        let path = plan.path;
-        if let Err(error) = append_tool_file_line(tool, path, line) {
-            return RuntimeComposeStep::Failed(error);
+        let line = format!(
+            "{} provider={}\n",
+            plan.line_prefix,
+            provider_output.unwrap_or("<none>")
+        );
+        match tool.execute(axonrunner_adapters::tool::ToolRequest::FileWrite {
+            path: &plan.path,
+            contents: &line,
+            append: true,
+        }) {
+            Ok(_) => RuntimeComposeStep::Applied,
+            Err(error) => {
+                RuntimeComposeStep::Failed(format!("runtime_compose.tool.file_write: {error}"))
+            }
         }
-        RuntimeComposeStep::Applied
     }
 }
 
 fn build_tool_adapter(workspace: &Path) -> Result<WorkspaceTool, String> {
     fs::create_dir_all(workspace)
         .map_err(|error| format!("create workspace '{}' failed: {error}", workspace.display()))?;
-    let policy = ToolPolicy {
-        allow_shell: false,
-        allow_file_read: false,
-        allow_file_write: true,
-        max_shell_command_bytes: 0,
-        max_file_read_bytes: 0,
-        max_file_write_bytes: TOOL_WRITE_LIMIT_BYTES,
-    };
 
-    WorkspaceTool::new(workspace, policy)
-        .map_err(|error| format!("tool adapter init failed: {error}"))
+    WorkspaceTool::new(
+        workspace,
+        ToolPolicy {
+            max_file_write_bytes: TOOL_WRITE_LIMIT_BYTES,
+        },
+    )
+    .map_err(|error| format!("tool adapter init failed: {error}"))
 }
 
 fn complete_provider_request(
@@ -479,424 +379,10 @@ fn complete_provider_request(
     })
 }
 
-fn append_tool_file_line(
-    tool: Arc<WorkspaceTool>,
-    path: String,
-    line: String,
-) -> Result<(), String> {
-    tool.execute(axonrunner_adapters::tool::ToolRequest::FileWrite {
-        path: &path,
-        contents: &line,
-        append: true,
-    })
-    .map(|_| ())
-    .map_err(|error| format!("runtime_compose.tool.file_write: {error}"))
-}
-
-fn build_tool_line(prefix: &str, provider_output: Option<&str>) -> String {
-    let provider_output = provider_output.unwrap_or("<none>");
-    format!("{prefix} provider={provider_output}\n")
-}
-
 fn env_path(key: &str) -> Option<PathBuf> {
     env_string(key).map(PathBuf::from)
 }
 
 fn env_string(key: &str) -> Option<String> {
     read_env_trimmed(key).ok().flatten()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::plan::{MemoryPlan, build_runtime_compose_plan};
-    use super::{RuntimeComposeConfig, RuntimeComposeState, RuntimeComposeStep};
-    use crate::cli_command::IntentTemplate;
-    use axonrunner_adapters::{MemoryAdapter, memory::MarkdownMemoryAdapter};
-    use axonrunner_core::DecisionOutcome;
-    use std::fs;
-    use std::path::PathBuf;
-    use std::time::{Duration, SystemTime, UNIX_EPOCH};
-
-    fn unique_path(label: &str, extension: &str) -> PathBuf {
-        let tick = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or(Duration::from_secs(0))
-            .as_nanos();
-        std::env::temp_dir().join(format!(
-            "axonrunner-runtime-compose-{label}-{}-{tick}.{extension}",
-            std::process::id()
-        ))
-    }
-
-    #[test]
-    fn compose_plan_is_explicit_for_write() {
-        let plan = build_runtime_compose_plan(
-            &IntentTemplate::Write {
-                key: String::from("alpha"),
-                value: String::from("42"),
-            },
-            "cli-1",
-            DecisionOutcome::Accepted,
-            "mock-local",
-            4096,
-            "runtime.log",
-            None,
-        );
-
-        assert!(plan.provider.is_some());
-        assert_eq!(
-            plan.memory,
-            MemoryPlan::Put {
-                key: String::from("alpha"),
-                value: String::from("42")
-            }
-        );
-        assert!(plan.tool.is_some());
-    }
-
-    #[test]
-    fn compose_plan_drops_all_effects_when_rejected() {
-        let plan = build_runtime_compose_plan(
-            &IntentTemplate::Write {
-                key: String::from("alpha"),
-                value: String::from("42"),
-            },
-            "cli-1",
-            DecisionOutcome::Rejected,
-            "mock-local",
-            4096,
-            "runtime.log",
-            None,
-        );
-
-        assert!(plan.provider.is_none());
-        assert_eq!(plan.memory, MemoryPlan::None);
-        assert!(plan.tool.is_none());
-    }
-
-    #[test]
-    fn runtime_compose_executes_provider_memory_and_tool() {
-        let memory_path = unique_path("memory", "md");
-        let workspace = unique_path("workspace", "dir");
-
-        let mut state = RuntimeComposeState::new(RuntimeComposeConfig {
-            memory_path: Some(memory_path.clone()),
-            tool_workspace: Some(workspace.clone()),
-            tool_log_path: String::from("runtime.log"),
-            provider_id: String::from("mock-local"),
-            provider_model: String::from("mock-local"),
-            max_tokens: 4096,
-            bootstrap_root: None,
-            channel_id: None,
-            tool_ids: vec![axonrunner_adapters::DEFAULT_TOOL_ID.to_owned()],
-            context_root: None,
-        })
-        .expect("runtime compose state should initialize");
-
-        let execution = state.apply_template(
-            &IntentTemplate::Write {
-                key: String::from("alpha"),
-                value: String::from("42"),
-            },
-            "cli-1",
-            DecisionOutcome::Accepted,
-        );
-        assert_eq!(execution.provider, RuntimeComposeStep::Applied);
-        assert_eq!(execution.memory, RuntimeComposeStep::Applied);
-        assert_eq!(execution.tool, RuntimeComposeStep::Applied);
-
-        let reader = MarkdownMemoryAdapter::new(memory_path.clone()).expect("memory should open");
-        let record = reader
-            .get("alpha")
-            .expect("memory read should succeed")
-            .expect("record should exist");
-        assert_eq!(record.value, "42");
-
-        let log_path = workspace.join("runtime.log");
-        let log = fs::read_to_string(&log_path).expect("tool log should exist");
-        assert!(log.contains("intent=cli-1 kind=write key=alpha"));
-        assert!(log.contains("provider=intent=cli-1 kind=write key=alpha value=42"));
-
-        let _ = fs::remove_file(memory_path);
-        let _ = fs::remove_file(log_path);
-        let _ = fs::remove_dir(workspace);
-    }
-
-    #[test]
-    fn runtime_compose_uses_selected_registry_provider() {
-        let workspace = unique_path("provider-workspace", "dir");
-        let mut state = RuntimeComposeState::new(RuntimeComposeConfig {
-            memory_path: None,
-            tool_workspace: Some(workspace.clone()),
-            tool_log_path: String::from("runtime.log"),
-            provider_id: String::from("mock-local"),
-            provider_model: String::from("mock-local"),
-            max_tokens: 4096,
-            bootstrap_root: None,
-            channel_id: None,
-            tool_ids: vec![axonrunner_adapters::DEFAULT_TOOL_ID.to_owned()],
-            context_root: None,
-        })
-        .expect("runtime compose state should initialize");
-
-        let execution = state.apply_template(
-            &IntentTemplate::Write {
-                key: String::from("beta"),
-                value: String::from("7"),
-            },
-            "cli-2",
-            DecisionOutcome::Accepted,
-        );
-        assert_eq!(execution.provider, RuntimeComposeStep::Applied);
-        assert_eq!(execution.memory, RuntimeComposeStep::Skipped);
-        assert_eq!(execution.tool, RuntimeComposeStep::Applied);
-
-        let log_path = workspace.join("runtime.log");
-        let log = fs::read_to_string(&log_path).expect("tool log should exist");
-        assert!(
-            log.contains("provider=intent=cli-2 kind=write key=beta value=7"),
-            "log={log}"
-        );
-
-        let _ = fs::remove_file(log_path);
-        let _ = fs::remove_dir_all(workspace);
-    }
-
-    #[test]
-    fn runtime_compose_appends_bootstrap_context_from_workspace_files() {
-        let workspace = unique_path("bootstrap-workspace", "dir");
-        let bootstrap_root = unique_path("bootstrap-root", "dir");
-        fs::create_dir_all(&bootstrap_root).expect("bootstrap root should be created");
-        fs::write(
-            bootstrap_root.join("AGENTS.md"),
-            "Respond with strict, deterministic output.",
-        )
-        .expect("bootstrap file should be writable");
-
-        let mut state = RuntimeComposeState::new(RuntimeComposeConfig {
-            memory_path: None,
-            tool_workspace: Some(workspace.clone()),
-            tool_log_path: String::from("runtime.log"),
-            provider_id: String::from("mock-local"),
-            provider_model: String::from("mock-local"),
-            max_tokens: 4096,
-            bootstrap_root: Some(bootstrap_root.clone()),
-            channel_id: None,
-            tool_ids: vec![axonrunner_adapters::DEFAULT_TOOL_ID.to_owned()],
-            context_root: None,
-        })
-        .expect("runtime compose state should initialize");
-
-        let execution = state.apply_template(
-            &IntentTemplate::Write {
-                key: String::from("gamma"),
-                value: String::from("9"),
-            },
-            "cli-3",
-            DecisionOutcome::Accepted,
-        );
-        assert_eq!(execution.provider, RuntimeComposeStep::Applied);
-        assert_eq!(execution.memory, RuntimeComposeStep::Skipped);
-        assert_eq!(execution.tool, RuntimeComposeStep::Applied);
-
-        let log_path = workspace.join("runtime.log");
-        let log = fs::read_to_string(&log_path).expect("tool log should exist");
-        assert!(log.contains("provider=intent=cli-3 kind=write key=gamma value=9"));
-        assert!(log.contains(
-            "bootstrap_context:\n[AGENTS.md]\nRespond with strict, deterministic output."
-        ));
-
-        let _ = fs::remove_file(log_path);
-        let _ = fs::remove_dir_all(workspace);
-        let _ = fs::remove_dir_all(bootstrap_root);
-    }
-
-    #[test]
-    fn runtime_compose_separates_provider_id_from_model() {
-        let workspace = unique_path("provider-model-split", "dir");
-        let mut state = RuntimeComposeState::new(RuntimeComposeConfig {
-            memory_path: None,
-            tool_workspace: Some(workspace.clone()),
-            tool_log_path: String::from("runtime.log"),
-            provider_id: String::from("mock-local"),
-            provider_model: String::from("status-model"),
-            max_tokens: 4096,
-            bootstrap_root: None,
-            channel_id: None,
-            tool_ids: vec![axonrunner_adapters::DEFAULT_TOOL_ID.to_owned()],
-            context_root: None,
-        })
-        .expect("runtime compose state should initialize");
-
-        let health = state.health();
-        assert_eq!(health.provider_model, "status-model");
-
-        let execution = state.apply_template(
-            &IntentTemplate::Write {
-                key: String::from("delta"),
-                value: String::from("5"),
-            },
-            "cli-4",
-            DecisionOutcome::Accepted,
-        );
-        assert_eq!(execution.provider, RuntimeComposeStep::Applied);
-        assert_eq!(execution.memory, RuntimeComposeStep::Skipped);
-        assert_eq!(execution.tool, RuntimeComposeStep::Applied);
-
-        let log_path = workspace.join("runtime.log");
-        let log = fs::read_to_string(&log_path).expect("tool log should exist");
-        assert!(
-            log.contains("provider=intent=cli-4 kind=write key=delta value=5"),
-            "log={log}"
-        );
-
-        let _ = fs::remove_file(log_path);
-        let _ = fs::remove_dir_all(workspace);
-    }
-
-    #[test]
-    fn runtime_compose_reports_tool_failure_explicitly() {
-        let workspace = unique_path("tool-failure-workspace", "dir");
-        fs::create_dir_all(&workspace).expect("workspace should be created");
-
-        let mut state = RuntimeComposeState::new(RuntimeComposeConfig {
-            memory_path: None,
-            tool_workspace: Some(workspace.clone()),
-            tool_log_path: String::from("../escape.log"),
-            provider_id: String::from("mock-local"),
-            provider_model: String::from("mock-local"),
-            max_tokens: 4096,
-            bootstrap_root: None,
-            channel_id: None,
-            tool_ids: vec![axonrunner_adapters::DEFAULT_TOOL_ID.to_owned()],
-            context_root: None,
-        })
-        .expect("runtime compose state should initialize");
-
-        let execution = state.apply_template(
-            &IntentTemplate::Write {
-                key: String::from("epsilon"),
-                value: String::from("5"),
-            },
-            "cli-5",
-            DecisionOutcome::Accepted,
-        );
-
-        assert_eq!(execution.provider, RuntimeComposeStep::Applied);
-        assert_eq!(execution.memory, RuntimeComposeStep::Skipped);
-        match &execution.tool {
-            RuntimeComposeStep::Failed(message) => {
-                assert!(
-                    message.contains("path escapes workspace boundary"),
-                    "message={message}"
-                );
-            }
-            other => panic!("expected tool failure, got {other:?}"),
-        }
-        assert!(execution.first_failure().is_some());
-
-        let _ = fs::remove_dir_all(workspace);
-    }
-
-    #[test]
-    fn runtime_compose_health_exposes_component_init_failures() {
-        let memory_dir = unique_path("memory-init-failure", "dir");
-        let tool_file = unique_path("tool-init-failure", "txt");
-        let bootstrap_root = unique_path("bootstrap-init-failure", "dir");
-
-        fs::create_dir_all(&memory_dir).expect("memory dir should be creatable");
-        fs::write(&tool_file, "not-a-directory").expect("tool file should be writable");
-
-        let state = RuntimeComposeState::new(RuntimeComposeConfig {
-            memory_path: Some(memory_dir.clone()),
-            tool_workspace: Some(tool_file.clone()),
-            tool_log_path: String::from("runtime.log"),
-            provider_id: String::from("mock-local"),
-            provider_model: String::from("mock-local"),
-            max_tokens: 4096,
-            bootstrap_root: Some(bootstrap_root.clone()),
-            channel_id: None,
-            tool_ids: vec![axonrunner_adapters::DEFAULT_TOOL_ID.to_owned()],
-            context_root: None,
-        })
-        .expect("runtime compose state should initialize");
-
-        let health = state.health();
-        assert_eq!(health.provider_id, "mock-local");
-
-        assert!(!health.memory.enabled);
-        assert_eq!(health.memory.state, "failed");
-        assert!(health.memory.detail.contains("error="));
-
-        assert!(!health.tool.enabled);
-        assert_eq!(health.tool.state, "failed");
-        assert!(health.tool.detail.contains("error="));
-
-        assert_eq!(health.bootstrap.state, "failed");
-        assert!(health.bootstrap.detail.contains("no bootstrap content"));
-
-        let _ = fs::remove_dir_all(memory_dir);
-        let _ = fs::remove_file(tool_file);
-        let _ = fs::remove_dir_all(bootstrap_root);
-    }
-
-    #[test]
-    fn runtime_compose_rejects_unknown_provider() {
-        let err = match RuntimeComposeState::new(RuntimeComposeConfig {
-            memory_path: None,
-            tool_workspace: None,
-            tool_log_path: String::from("runtime.log"),
-            provider_id: String::from("unknown-provider"),
-            provider_model: String::from("unknown-provider"),
-            max_tokens: 4096,
-            bootstrap_root: None,
-            channel_id: None,
-            tool_ids: vec![axonrunner_adapters::DEFAULT_TOOL_ID.to_owned()],
-            context_root: None,
-        }) {
-            Ok(_) => panic!("unknown provider should fail fast"),
-            Err(err) => err,
-        };
-
-        assert!(
-            err.contains("unknown runtime provider"),
-            "error should mention unknown runtime provider, got: {err}"
-        );
-        assert!(
-            err.contains("AXONRUNNER_RUNTIME_PROVIDER"),
-            "error should guide runtime provider env var, got: {err}"
-        );
-    }
-
-    #[test]
-    fn runtime_compose_does_not_fallback_when_selected_provider_fails_init() {
-        if std::env::var("OPENAI_API_KEY").is_ok() {
-            return;
-        }
-
-        let err = match RuntimeComposeState::new(RuntimeComposeConfig {
-            memory_path: None,
-            tool_workspace: None,
-            tool_log_path: String::from("runtime.log"),
-            provider_id: String::from("openai"),
-            provider_model: String::from("openai"),
-            max_tokens: 4096,
-            bootstrap_root: None,
-            channel_id: None,
-            tool_ids: vec![axonrunner_adapters::DEFAULT_TOOL_ID.to_owned()],
-            context_root: None,
-        }) {
-            Ok(_) => panic!("openai without API key should fail without fallback"),
-            Err(err) => err,
-        };
-
-        assert!(
-            err.contains("provider init failed"),
-            "error should mention provider init failure, got: {err}"
-        );
-        assert!(
-            err.contains("OPENAI_API_KEY"),
-            "error should propagate missing key detail, got: {err}"
-        );
-    }
 }

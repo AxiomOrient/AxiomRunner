@@ -1,7 +1,0 @@
-pass	target	records	iterations	warmup	p50_ms_per_operation	p95_ms_per_operation	threshold_p95_ms_per_operation	target_gate	pass_gate	consecutive_passes	report_file
-1	core_reduce_path	10000	40	5	0.000176	0.000257	0.2	pass	pass	1	/Users/axient/repository/AxonRunner/benchmarks/raw/perf_suite_pass1.json
-1	memory_recall_path	10000	40	5	0.000064	0.000066	30	pass	pass	1	/Users/axient/repository/AxonRunner/benchmarks/raw/perf_suite_pass1.json
-1	gateway_validation_request_path	10000	40	5	1.003865	1.054173	10	pass	pass	1	/Users/axient/repository/AxonRunner/benchmarks/raw/perf_suite_pass1.json
-2	core_reduce_path	10000	40	5	0.000148	0.000153	0.2	pass	pass	2	/Users/axient/repository/AxonRunner/benchmarks/raw/perf_suite_pass2.json
-2	memory_recall_path	10000	40	5	0.000064	0.000067	30	pass	pass	2	/Users/axient/repository/AxonRunner/benchmarks/raw/perf_suite_pass2.json
-2	gateway_validation_request_path	10000	40	5	1.003954	1.004668	10	pass	pass	2	/Users/axient/repository/AxonRunner/benchmarks/raw/perf_suite_pass2.json
