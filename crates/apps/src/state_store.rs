@@ -220,8 +220,9 @@ fn parse_snapshot(raw: &str) -> Result<RuntimeStateSnapshot, String> {
         }
 
         if let Some(pending_key) = key.strip_prefix("pending_run.") {
-            let decoded = decode_hex_utf8(value)
-                .ok_or_else(|| format!("invalid pending run field encoding on line {}", index + 1))?;
+            let decoded = decode_hex_utf8(value).ok_or_else(|| {
+                format!("invalid pending run field encoding on line {}", index + 1)
+            })?;
             saw_pending_run = true;
             match pending_key {
                 "run_id" => pending_run.run_id = decoded,
@@ -409,6 +410,7 @@ mod tests {
             },
             next_intent_seq: 3,
             next_run_seq: 3,
+            pending_run: None,
         };
 
         let encoded = serialize_snapshot(&snapshot);

@@ -70,7 +70,10 @@ EOF
 - `run_id`
 - `phase`
 - `outcome`
-- pending approval 또는 budget exhaustion reason
+- normal goal run은 `completed/success`
+- `approval_mode=always` 또는 `approval_mode=on-risk` goal은 default pack 경로에서 `waiting_approval`
+- budget exhaustion이면 `budget_exhausted`
+- reason
 
 ## 5. Replay
 
@@ -115,12 +118,14 @@ compatibility CLI surface:
 
 - `remove_path`: 삭제 전 evidence artifact와 trace/report 설명이 남아야 한다.
 - `run_command`: allowlisted program만 실행되며 command artifact가 남아야 한다.
+- `replace_in_file`: multi-match 치환은 `expected_replacements`가 실제 count와 맞을 때만 허용된다.
+- `search_files`: unreadable file은 `skipped_files`로 보여야 한다.
 - `high` 작업은 이후 approval policy가 붙을 때 기본 심사 대상이 된다.
 
 ## 8. Async Host
 
 - async host는 env 또는 기본값으로 worker/thread budget을 결정한다.
-- init failure가 나면 fallback host가 뜨고, 이 상태는 operator-visible output으로 확인 가능해야 한다.
+- init failure는 fallback runtime으로 숨기지 않고 `doctor`에 `init_mode=failed,error=...`로 드러나야 한다.
 
 ## 9. Single-writer Lock
 

@@ -1,9 +1,6 @@
 #[path = "../src/cli_command.rs"]
 #[allow(dead_code)]
 mod cli_command;
-#[path = "../src/goal_file.rs"]
-#[allow(dead_code)]
-mod goal_file;
 #[path = "../src/config_loader.rs"]
 #[allow(dead_code)]
 mod config_loader;
@@ -13,6 +10,9 @@ mod dev_guard;
 #[path = "../src/env_util.rs"]
 #[allow(dead_code)]
 mod env_util;
+#[path = "../src/goal_file.rs"]
+#[allow(dead_code)]
+mod goal_file;
 #[path = "../src/parse_util.rs"]
 #[allow(dead_code)]
 mod parse_util;
@@ -187,13 +187,22 @@ fn release_security_gate_truth_surface_docs_match_retained_commands() {
         );
     }
 
-    assert!(USAGE.contains("compatibility:"), "cli usage missing compatibility section");
-    assert!(readme.contains("compatibility"), "README missing compatibility section");
+    assert!(
+        USAGE.contains("compatibility:"),
+        "cli usage missing compatibility section"
+    );
+    assert!(
+        readme.contains("compatibility"),
+        "README missing compatibility section"
+    );
     assert!(
         capability_matrix.contains("compatibility"),
         "capability matrix missing compatibility section"
     );
-    assert!(runbook.contains("compatibility"), "runbook missing compatibility section");
+    assert!(
+        runbook.contains("compatibility"),
+        "runbook missing compatibility section"
+    );
 }
 
 #[test]
@@ -246,12 +255,7 @@ fn release_security_gate_transition_docs_lock_autonomous_target_contract() {
         );
     }
 
-    for token in [
-        "current truth",
-        "transition",
-        "review bundle",
-        "AxonRunner",
-    ] {
+    for token in ["current truth", "transition", "review bundle", "AxonRunner"] {
         assert!(
             transition.contains(token),
             "transition index missing token: {token}"

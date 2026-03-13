@@ -235,8 +235,14 @@ fn markdown_memory_performance_smoke_small() {
 
 #[test]
 fn memory_tier_helpers_split_working_and_recall_namespaces() {
-    assert_eq!(tiered_memory_key(MemoryTier::Recall, "last_run/cli-1"), "recall:last_run/cli-1");
-    assert_eq!(detect_memory_tier("recall:last_run/cli-1"), MemoryTier::Recall);
+    assert_eq!(
+        tiered_memory_key(MemoryTier::Recall, "last_run/cli-1"),
+        "recall:last_run/cli-1"
+    );
+    assert_eq!(
+        detect_memory_tier("recall:last_run/cli-1"),
+        MemoryTier::Recall
+    );
     assert_eq!(detect_memory_tier("alpha"), MemoryTier::Working);
 }
 

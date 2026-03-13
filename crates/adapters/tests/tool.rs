@@ -94,12 +94,15 @@ fn workspace_tool_supports_list_read_search_replace_remove_and_run_command() {
         panic!("expected search files result");
     };
     assert_eq!(search.matches.len(), 2);
+    assert_eq!(search.scanned_files, 1);
+    assert_eq!(search.skipped_files, 0);
 
     let replace = tool
         .execute(ToolRequest::ReplaceInFile {
             path: String::from("notes.txt"),
             needle: String::from("beta"),
             replacement: String::from("gamma"),
+            expected_replacements: None,
         })
         .expect("replace should succeed");
     let ToolResult::ReplaceInFile(replace) = replace else {
@@ -293,6 +296,8 @@ fn workspace_tool_list_and_search_respect_gitignore() {
             .iter()
             .any(|m| m.path.ends_with("visible.txt"))
     );
+    assert_eq!(search.scanned_files, 2);
+    assert_eq!(search.skipped_files, 0);
     assert!(
         !search
             .matches
@@ -322,6 +327,8 @@ fn workspace_tool_supports_regex_search_mode() {
         panic!("expected search files result");
     };
     assert_eq!(search.matches.len(), 2);
+    assert_eq!(search.scanned_files, 1);
+    assert_eq!(search.skipped_files, 0);
 
     let invalid = tool.execute(ToolRequest::SearchFiles {
         path: String::from("."),
@@ -382,6 +389,7 @@ fn workspace_tool_replace_preserves_crlf_line_endings() {
         path: String::from("notes.txt"),
         needle: String::from("beta"),
         replacement: String::from("gamma\nzeta"),
+        expected_replacements: None,
     })
     .expect("replace should succeed");
 
@@ -532,9 +540,113 @@ fn workspace_tool_rejects_non_utf8_text_mutation() {
         path: String::from("notes.bin"),
         needle: String::from("alpha"),
         replacement: String::from("beta"),
+        expected_replacements: None,
     });
     assert!(replace.is_err());
 
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn workspace_tool_rejects_ambiguous_replace_targets() {
+    let root = unique_path("replace-ambiguous");
+    fs::create_dir_all(&root).expect("workspace should be created");
+    fs::write(root.join("notes.txt"), "alpha\nalpha\n").expect("fixture should be written");
+
+    let tool = tool(&root);
+    let replace = tool.execute(ToolRequest::ReplaceInFile {
+        path: String::from("notes.txt"),
+        needle: String::from("alpha"),
+        replacement: String::from("beta"),
+        expected_replacements: None,
+    });
+    let error = replace.expect_err("replace should be rejected");
+    assert_eq!(error.retry_class().as_str(), "non_retryable");
+    assert!(error.to_string().contains("tool.ambiguous_replace"));
+
+    let contents = fs::read_to_string(root.join("notes.txt")).expect("file should be readable");
+    assert_eq!(contents, "alpha\nalpha\n");
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn workspace_tool_replace_allows_expected_multi_match_replace() {
+    let root = unique_path("replace-expected");
+    fs::create_dir_all(&root).expect("workspace should be created");
+    fs::write(root.join("notes.txt"), "alpha\nalpha\n").expect("fixture should be written");
+
+    let tool = tool(&root);
+    let replace = tool
+        .execute(ToolRequest::ReplaceInFile {
+            path: String::from("notes.txt"),
+            needle: String::from("alpha"),
+            replacement: String::from("beta"),
+            expected_replacements: Some(2),
+        })
+        .expect("replace should succeed");
+    let ToolResult::ReplaceInFile(replace) = replace else {
+        panic!("expected replace result");
+    };
+    assert_eq!(replace.replacements, 2);
+    let contents = fs::read_to_string(root.join("notes.txt")).expect("file should be readable");
+    assert_eq!(contents, "beta\nbeta\n");
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn workspace_tool_replace_rejects_expected_count_mismatch() {
+    let root = unique_path("replace-count-mismatch");
+    fs::create_dir_all(&root).expect("workspace should be created");
+    fs::write(root.join("notes.txt"), "alpha\nalpha\n").expect("fixture should be written");
+
+    let tool = tool(&root);
+    let replace = tool.execute(ToolRequest::ReplaceInFile {
+        path: String::from("notes.txt"),
+        needle: String::from("alpha"),
+        replacement: String::from("beta"),
+        expected_replacements: Some(1),
+    });
+    let error = replace.expect_err("replace should be rejected");
+    assert_eq!(error.retry_class().as_str(), "non_retryable");
+    assert!(error.to_string().contains("tool.replace_count_mismatch"));
+
+    let contents = fs::read_to_string(root.join("notes.txt")).expect("file should be readable");
+    assert_eq!(contents, "alpha\nalpha\n");
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[cfg(unix)]
+#[test]
+fn workspace_tool_search_reports_unreadable_files_as_skipped() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let root = unique_path("search-skipped");
+    fs::create_dir_all(&root).expect("workspace should be created");
+    fs::write(root.join("visible.txt"), "alpha visible\n").expect("visible file should exist");
+    fs::write(root.join("hidden.txt"), "alpha hidden\n").expect("hidden file should exist");
+    fs::set_permissions(root.join("hidden.txt"), fs::Permissions::from_mode(0))
+        .expect("permissions should change");
+
+    let tool = tool(&root);
+    let search = tool
+        .execute(ToolRequest::SearchFiles {
+            path: String::from("."),
+            needle: String::from("alpha"),
+            mode: SearchMode::Substring,
+        })
+        .expect("search should succeed");
+    let ToolResult::SearchFiles(search) = search else {
+        panic!("expected search files result");
+    };
+    assert_eq!(search.matches.len(), 1);
+    assert_eq!(search.scanned_files, 1);
+    assert_eq!(search.skipped_files, 1);
+
+    fs::set_permissions(root.join("hidden.txt"), fs::Permissions::from_mode(0o644))
+        .expect("permissions should restore");
     let _ = fs::remove_dir_all(root);
 }
 

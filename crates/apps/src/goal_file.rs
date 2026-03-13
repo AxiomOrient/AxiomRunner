@@ -54,7 +54,7 @@ pub fn parse_goal_file(path: &str) -> Result<RunGoal, String> {
         other => {
             return Err(format!(
                 "invalid goal file '{path}': unsupported approval_mode '{other}'"
-            ))
+            ));
         }
     };
 

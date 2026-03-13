@@ -2,52 +2,46 @@
 
 ## Purpose
 
-이 문서는 AxonRunner의 **현재 제품 계약**을 바꾸지 않으면서, 다음 목표가 무엇인지 `docs/` 루트에서 짧게 설명하는 브리지 문서다.
+이 문서는 AxonRunner의 **현재 제품 계약**을 바꾸지 않으면서,
+남은 목표가 무엇인지 `docs/` 루트에서 짧게 설명하는 브리지 문서다.
 
-현재 truth는 여전히 아래 문서가 소유한다.
+현재 truth는 아래 문서가 소유한다.
 
 - `docs/project-charter.md`
 - `docs/CAPABILITY_MATRIX.md`
 - `docs/CODEK_RUNTIME_CONTRACT.md`
 - `docs/RUNBOOK.md`
 
-이 문서는 그 다음 단계에서 무엇으로 전환하려는지 요약한다.
+## Current Product
 
-## Target Product
+현재 제품은 이미 `goal-file` 중심 CLI runtime이다.
 
-다음 목표는 아래 한 문장으로 요약된다.
-
-> 하나의 agent가 하나의 workspace에서 하나의 goal을 끝까지 수행하고, 그 과정과 결과를 trace, replay, report로 설명 가능하게 남기는 제품.
-
-## What Changes From Today
-
-현재 제품은 `intent-spec` 중심 minimal runtime이다.
-
-- `run <intent-spec>`
-- `batch [--reset-state] <intent-spec>...`
-- legacy alias: `read`, `write`, `remove`, `freeze`, `halt`
-
-목표 제품은 `goal/run` 중심 autonomous execution contract를 갖는다.
-
-- `run <goal>`
+- `run <goal-file>`
 - `status [run-id|latest]`
-- `replay <run-id|latest>`
-- `doctor [--json]`
+- `replay [run-id|latest]`
 - `resume [run-id|latest]`
 - `abort [run-id|latest]`
+- compatibility surface: `batch`, `read`, `write`, `remove`, `freeze`, `halt`
 
-즉, 핵심 전환은 “사실 조작 runtime”에서 “목표 완료 agent”로의 이동이다.
+## Next Backlog
+
+큰 전환은 이미 끝났고, 현재 cycle 기준으로 열린 hardening task는 없다.
+이후 작업은 새 backlog에서만 연다.
+
+- richer workflow-pack selection
+- richer verifier schema
+- finer-grained risk classifier
 
 ## Required Product Contract
 
-목표 상태에서는 아래가 public contract로 잠겨야 한다.
+이후 backlog에서도 아래 public contract는 계속 잠겨야 한다.
 
-- goal schema: 무엇을 끝내야 하는가
-- done condition: 언제 완료인가
-- budget: step/time/token 한도
-- approval policy: 언제 사용자 승인이 필요한가
+- goal schema
+- done condition
+- budget
+- approval policy
 - terminal outcomes: `success`, `blocked`, `budget_exhausted`, `approval_required`, `failed`, `aborted`
-- replayable evidence: trace, artifacts, changed paths, verification result
+- replayable evidence
 
 ## Non-Negotiable Principles
 
@@ -60,10 +54,8 @@
 
 ## Transition References
 
-자세한 전환 근거와 읽기 시작점은 아래 문서가 소유한다.
+자세한 closure context와 future extension 근거는 아래 문서가 소유한다.
 
 1. `docs/transition/README.md`
-2. `axonrunner_7674ced_autonomous_review/docs/01_REVIEW_REPORT.md`
-3. `axonrunner_7674ced_autonomous_review/docs/04_NEXT_PRODUCT_DEFINITION.md`
-4. `axonrunner_7674ced_autonomous_review/docs/05_ROADMAP.md`
-5. `axonrunner_7674ced_autonomous_review/docs/06_PHASED_IMPLEMENTATION_PLAN.md`
+2. `docs/transition/REMAINING_GAPS.md`
+3. `docs/transition/WORKFLOW_PACK_CONTRACT.md`

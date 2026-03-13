@@ -1,10 +1,8 @@
 use axonrunner_core::{
     AgentState, DecisionOutcome, DomainEvent, DoneCondition, ExecutionMode, Intent, PolicyCode,
     RunApprovalMode, RunBudget, RunConstraint, RunEvent, RunGoal, RunGoalValidationError,
-    RunOutcome, RunPhase,
-    RunStatus, VerificationCheck,
-    build_policy_audit, decide, evaluate_policy, project, project_from, project_run,
-    reduce, reduce_run_status,
+    RunOutcome, RunPhase, RunStatus, VerificationCheck, build_policy_audit, decide,
+    evaluate_policy, project, project_from, project_run, reduce, reduce_run_status,
 };
 
 fn pipeline_events(state: &AgentState, intent: Intent) -> Vec<DomainEvent> {
@@ -153,7 +151,13 @@ fn run_goal_types_capture_autonomous_contract_basics() {
     assert_eq!(status.goal, goal);
     assert_eq!(status.goal.validate(), Ok(()));
     assert_eq!(status.budget.max_steps, 12);
-    assert_eq!(created, RunEvent::RunCreated { run_id: String::from("run-1"), goal });
+    assert_eq!(
+        created,
+        RunEvent::RunCreated {
+            run_id: String::from("run-1"),
+            goal
+        }
+    );
     assert_eq!(
         completed,
         RunEvent::OutcomeRecorded {
@@ -181,7 +185,10 @@ fn run_goal_validation_rejects_missing_done_conditions_and_zero_budget() {
         approval_mode: RunApprovalMode::OnRisk,
     };
 
-    assert_eq!(goal.validate(), Err(RunGoalValidationError::DoneConditionsEmpty));
+    assert_eq!(
+        goal.validate(),
+        Err(RunGoalValidationError::DoneConditionsEmpty)
+    );
 
     let zero_budget_goal = RunGoal {
         summary: String::from("Ship goal package"),

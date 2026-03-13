@@ -1,5 +1,5 @@
-use crate::event::RunEvent;
 use crate::event::DomainEvent;
+use crate::event::RunEvent;
 use crate::reducer::{reduce, reduce_run_status};
 use crate::state::{AgentState, RunStatus};
 
@@ -25,7 +25,7 @@ pub fn project_run(events: &[RunEvent]) -> Option<RunStatus> {
 }
 
 pub fn project_run_from(initial: &RunStatus, events: &[RunEvent]) -> RunStatus {
-    events
-        .iter()
-        .fold(initial.clone(), |status, event| reduce_run_status(&status, event))
+    events.iter().fold(initial.clone(), |status, event| {
+        reduce_run_status(&status, event)
+    })
 }

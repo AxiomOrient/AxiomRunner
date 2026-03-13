@@ -361,8 +361,7 @@ fn sanitize_detail(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        CodexCliCompatibility, CodexRuntimeProvider, can_reuse_session,
-        compatibility_for_version,
+        CodexCliCompatibility, CodexRuntimeProvider, can_reuse_session, compatibility_for_version,
         parse_semver_triplet,
     };
     use crate::contracts::{ProviderAdapter, ProviderRequest};
@@ -386,7 +385,9 @@ mod tests {
             .expect("fake cli should be written");
         #[cfg(unix)]
         {
-            let mut perms = fs::metadata(&path).expect("metadata should exist").permissions();
+            let mut perms = fs::metadata(&path)
+                .expect("metadata should exist")
+                .permissions();
             perms.set_mode(0o755);
             fs::set_permissions(&path, perms).expect("permissions should be updated");
         }
@@ -448,7 +449,10 @@ mod tests {
         let report = block_on(provider.health()).expect("health probe should complete");
 
         assert_eq!(report.status.as_str(), "blocked");
-        assert!(report.detail.contains("version=codex_0.103.9") || report.detail.contains("version=codex 0.103.9"));
+        assert!(
+            report.detail.contains("version=codex_0.103.9")
+                || report.detail.contains("version=codex 0.103.9")
+        );
         assert!(report.detail.contains("compatibility=blocked"));
 
         let _ = fs::remove_file(cli);

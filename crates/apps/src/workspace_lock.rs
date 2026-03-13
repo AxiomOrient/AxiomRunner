@@ -13,7 +13,10 @@ impl WorkspaceLock {
         let path = lock_path(workspace_root);
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).map_err(|error| {
-                format!("create workspace lock directory '{}' failed: {error}", parent.display())
+                format!(
+                    "create workspace lock directory '{}' failed: {error}",
+                    parent.display()
+                )
             })?;
         }
 

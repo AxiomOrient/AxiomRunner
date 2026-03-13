@@ -496,7 +496,7 @@ mod tests {
     use super::{
         ReplaySummary, TRACE_INTENT_SCHEMA_V1, TraceArtifactIndex, TraceArtifacts,
         TraceFailureBoundary, TraceIntentEvent, TracePatchArtifact, TraceRepairSummary,
-        TraceRunSummary, TraceStore, TraceVerificationSummary,
+        TraceRunStepSummary, TraceRunSummary, TraceStore, TraceVerificationSummary,
     };
     use std::fs;
     use std::path::PathBuf;
@@ -591,7 +591,9 @@ mod tests {
                 } else {
                     String::from("verification_passed")
                 },
-                plan_summary: String::from("intent_id=cli-1 legacy_write key=alpha outcome=accepted"),
+                plan_summary: String::from(
+                    "intent_id=cli-1 legacy_write key=alpha outcome=accepted",
+                ),
                 planned_steps: 4,
                 repair: TraceRepairSummary {
                     attempted: false,
@@ -628,8 +630,14 @@ mod tests {
 
         let events = store.load_events().expect("events should load");
         assert_eq!(events.len(), 2);
-        assert_eq!(events[0].run.as_ref().map(|run| run.run_id.as_str()), Some("run-for-cli-1"));
-        assert_eq!(events[0].run.as_ref().map(|run| run.step_ids.len()), Some(4));
+        assert_eq!(
+            events[0].run.as_ref().map(|run| run.run_id.as_str()),
+            Some("run-for-cli-1")
+        );
+        assert_eq!(
+            events[0].run.as_ref().map(|run| run.step_ids.len()),
+            Some(4)
+        );
         assert_eq!(
             events[0].run.as_ref().map(|run| run.provider_cwd.as_str()),
             Some("/tmp/workspace")

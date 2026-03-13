@@ -2,9 +2,11 @@
 
 ## Status
 
-This document describes the target goal/run contract for the next AxonRunner
-product phase. The current shipped truth remains the `intent-spec` runtime
-surface documented by `README.md`, `docs/project-charter.md`,
+This document describes the canonical goal/run contract that the shipped
+AxonRunner product now uses. The current delivery cycle is already closed, and
+`docs/transition/*.md` now exist as closure context plus future backlog
+boundaries rather than an active transition checklist. The public runtime surface is
+documented by `README.md`, `docs/project-charter.md`,
 `docs/CAPABILITY_MATRIX.md`, and `docs/RUNBOOK.md`.
 
 ## Goal Schema
@@ -65,6 +67,8 @@ Supported approval modes:
 
 `on-risk` applies to operations such as destructive file removal, broad replace,
 dangerous command execution, or other actions classified as high risk by policy.
+현재 default goal workflow-pack path에서는 risk를 보수적으로 취급하므로,
+`on-risk` goal은 실행 전에 approval을 요구한다.
 
 ## Run Phases
 

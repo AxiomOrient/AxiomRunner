@@ -26,7 +26,10 @@ fn tool_contract_docs_lock_request_output_and_evidence_schema() {
         "after_digest",
         "unified_diff",
     ] {
-        assert!(docs.contains(token), "tool contract docs missing token: {token}");
+        assert!(
+            docs.contains(token),
+            "tool contract docs missing token: {token}"
+        );
     }
 }
 
@@ -44,6 +47,8 @@ fn tool_contract_request_and_result_shapes_stay_explicit() {
             line_number: 3,
             line: String::from("alpha-03"),
         }],
+        scanned_files: 1,
+        skipped_files: 0,
     });
 
     match request {
@@ -60,6 +65,8 @@ fn tool_contract_request_and_result_shapes_stay_explicit() {
             assert_eq!(output.base, PathBuf::from("/workspace"));
             assert_eq!(output.matches.len(), 1);
             assert_eq!(output.matches[0].line_number, 3);
+            assert_eq!(output.scanned_files, 1);
+            assert_eq!(output.skipped_files, 0);
         }
         _ => panic!("expected search result"),
     }
@@ -113,7 +120,10 @@ fn tool_contract_mutation_outputs_keep_evidence_fields() {
     };
 
     assert_eq!(write.evidence.operation, "overwrite");
-    assert_eq!(replace.evidence.unified_diff.as_deref(), Some("--- before\\n+++ after"));
+    assert_eq!(
+        replace.evidence.unified_diff.as_deref(),
+        Some("--- before\\n+++ after")
+    );
     assert_eq!(
         remove
             .evidence
@@ -126,6 +136,31 @@ fn tool_contract_mutation_outputs_keep_evidence_fields() {
     assert_eq!(run.program, "cargo");
     assert_eq!(run.profile, RunCommandProfile::Test);
     assert!(!run.stdout_truncated);
+}
+
+#[test]
+fn tool_contract_replace_request_shape_stays_explicit() {
+    let request = ToolRequest::ReplaceInFile {
+        path: String::from("notes.txt"),
+        needle: String::from("alpha"),
+        replacement: String::from("beta"),
+        expected_replacements: Some(2),
+    };
+
+    match request {
+        ToolRequest::ReplaceInFile {
+            path,
+            needle,
+            replacement,
+            expected_replacements,
+        } => {
+            assert_eq!(path, "notes.txt");
+            assert_eq!(needle, "alpha");
+            assert_eq!(replacement, "beta");
+            assert_eq!(expected_replacements, Some(2));
+        }
+        _ => panic!("expected replace request"),
+    }
 }
 
 #[test]
@@ -145,7 +180,10 @@ fn workflow_pack_contract_docs_lock_manifest_and_ownership_rules() {
         "status",
         "replay",
     ] {
-        assert!(docs.contains(token), "workflow pack docs missing token: {token}");
+        assert!(
+            docs.contains(token),
+            "workflow pack docs missing token: {token}"
+        );
     }
 }
 

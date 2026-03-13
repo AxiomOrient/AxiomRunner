@@ -4,9 +4,9 @@ use crate::config_loader::AppConfig;
 use crate::env_util::read_env_trimmed;
 use axonrunner_adapters::{
     FileMutationEvidence, FileWriteOutput, MemoryAdapter, MemoryTier, ProviderAdapter,
-    ProviderRequest, ToolAdapter, ToolPolicy, ToolRequest, ToolResult, WorkspaceTool,
-    build_contract_memory, build_contract_provider, provider_registry, resolve_provider_id,
-    tiered_memory_key,
+    ProviderRequest, RunCommandOutput, ToolAdapter, ToolPolicy, ToolRequest, ToolResult,
+    WorkspaceTool, build_contract_memory, build_contract_provider, provider_registry,
+    resolve_provider_id, tiered_memory_key,
 };
 use axonrunner_core::DecisionOutcome;
 use std::fs;
@@ -19,7 +19,7 @@ pub use self::plan::RuntimeRunPlan;
 
 use self::plan::{
     MemoryPlan, ProviderPlan, RuntimeComposePlan, ToolPlan, build_runtime_compose_plan,
-    build_runtime_run_plan,
+    build_runtime_run_plan, goal_verifier_tool_plan,
 };
 
 const ENV_RUNTIME_MEMORY_PATH: &str = "AXONRUNNER_RUNTIME_MEMORY_PATH";
@@ -402,12 +402,13 @@ impl RuntimeComposeState {
             self.config.max_tokens,
             &self.config.tool_log_path,
         );
-        if plan.tool.is_none() {
+        let goal_tool = goal_verifier_tool_plan(&plan);
+        if goal_tool.is_none() && plan.tool.is_none() {
             return RuntimeRunRepair::skipped("no_tool_plan");
         }
 
         let (tool, tool_outputs, patch_artifacts) =
-            self.execute_tool(plan.tool, prior.provider_output.as_deref());
+            self.execute_tool(goal_tool.or(plan.tool), prior.provider_output.as_deref());
         let status = match &tool {
             RuntimeComposeStep::Applied => "repaired",
             RuntimeComposeStep::Failed(_) => "failed",
@@ -536,6 +537,11 @@ impl RuntimeComposeState {
         };
 
         let base = format!(".axonrunner/artifacts/{intent_id}");
+        let verification_checks = render_string_list(&run.verification.checks);
+        let step_journal = render_step_journal(&run.step_journal);
+        let tool_outputs = render_string_list(&execution.tool_outputs);
+        let changed_paths = render_patch_targets(&execution.patch_artifacts);
+        let evidence = render_patch_evidence(&execution.patch_artifacts);
         let files = [
             (
                 format!("{base}.plan.md"),
@@ -576,11 +582,7 @@ impl RuntimeComposeState {
                     run_phase_name(RuntimeRunPhase::Repairing),
                     run.verification.status,
                     run.verification.summary,
-                    if run.verification.checks.is_empty() {
-                        String::from("none")
-                    } else {
-                        run.verification.checks.join(" | ")
-                    },
+                    verification_checks,
                     run.repair.attempted,
                     run.repair.status,
                     run.repair.summary,
@@ -588,18 +590,7 @@ impl RuntimeComposeState {
                         .first_failure()
                         .map(|(stage, message)| format!("{stage}:{message}"))
                         .unwrap_or_else(|| String::from("none")),
-                    if run.step_journal.is_empty() {
-                        String::from("none")
-                    } else {
-                        run.step_journal
-                            .iter()
-                            .map(|step| format!(
-                                "{}:{}:{}:{}",
-                                step.phase, step.status, step.label, step.evidence
-                            ))
-                            .collect::<Vec<_>>()
-                            .join(" | ")
-                    }
+                    step_journal,
                 ),
             ),
             (
@@ -615,38 +606,9 @@ impl RuntimeComposeState {
                     execution.provider_cwd,
                     step_name(&execution.memory),
                     step_name(&execution.tool),
-                    if execution.tool_outputs.is_empty() {
-                        String::from("none")
-                    } else {
-                        execution.tool_outputs.join(" | ")
-                    },
-                    if execution.patch_artifacts.is_empty() {
-                        String::from("none")
-                    } else {
-                        execution
-                            .patch_artifacts
-                            .iter()
-                            .map(|artifact| artifact.target_path.as_str())
-                            .collect::<Vec<_>>()
-                            .join(" | ")
-                    },
-                    if execution.patch_artifacts.is_empty() {
-                        String::from("none")
-                    } else {
-                        execution
-                            .patch_artifacts
-                            .iter()
-                            .map(|artifact| {
-                                format!(
-                                    "{}:{}:{}",
-                                    artifact.operation,
-                                    artifact.target_path,
-                                    artifact.after_excerpt.as_deref().unwrap_or("no_excerpt")
-                                )
-                            })
-                            .collect::<Vec<_>>()
-                            .join(" | ")
-                    }
+                    tool_outputs,
+                    changed_paths,
+                    evidence,
                 ),
             ),
         ];
@@ -672,6 +634,7 @@ impl RuntimeComposeState {
     }
 
     fn apply_plan(&mut self, plan: RuntimeComposePlan) -> RuntimeComposeExecution {
+        let goal_tool = goal_verifier_tool_plan(&plan);
         let (provider_output, provider) = self.execute_provider(plan.provider);
         if matches!(provider, RuntimeComposeStep::Failed(_)) {
             return RuntimeComposeExecution {
@@ -699,7 +662,7 @@ impl RuntimeComposeState {
         }
 
         let (tool, tool_outputs, patch_artifacts) =
-            self.execute_tool(plan.tool, provider_output.as_deref());
+            self.execute_tool(goal_tool.or(plan.tool), provider_output.as_deref());
         RuntimeComposeExecution {
             provider_output,
             provider_cwd: self.provider_cwd(),
@@ -763,27 +726,83 @@ impl RuntimeComposeState {
             return (RuntimeComposeStep::Skipped, Vec::new(), Vec::new());
         };
 
-        let line = format!(
-            "{} provider={}\n",
-            plan.line_prefix,
-            provider_output.unwrap_or("<none>")
-        );
-        match tool.execute(ToolRequest::FileWrite {
-            path: plan.path,
-            contents: line,
-            append: true,
-        }) {
-            Ok(ToolResult::FileWrite(FileWriteOutput { path, evidence, .. })) => (
-                RuntimeComposeStep::Applied,
-                vec![format!("log={}", path.display())],
-                vec![patch_artifact_from_write_output(path, evidence)],
-            ),
-            Ok(_) => (RuntimeComposeStep::Applied, Vec::new(), Vec::new()),
-            Err(error) => (
-                RuntimeComposeStep::Failed(format!("runtime_compose.tool.file_write: {error}")),
-                Vec::new(),
-                Vec::new(),
-            ),
+        match plan {
+            ToolPlan::WriteLog { path, line_prefix } => {
+                let line = format!(
+                    "{line_prefix} provider={}\n",
+                    provider_output.unwrap_or("<none>")
+                );
+                match tool.execute(ToolRequest::FileWrite {
+                    path,
+                    contents: line,
+                    append: true,
+                }) {
+                    Ok(ToolResult::FileWrite(FileWriteOutput { path, evidence, .. })) => (
+                        RuntimeComposeStep::Applied,
+                        vec![format!("log={}", path.display())],
+                        vec![patch_artifact_from_write_output(path, evidence)],
+                    ),
+                    Ok(_) => (RuntimeComposeStep::Applied, Vec::new(), Vec::new()),
+                    Err(error) => (
+                        RuntimeComposeStep::Failed(format!(
+                            "runtime_compose.tool.file_write: {error}"
+                        )),
+                        Vec::new(),
+                        Vec::new(),
+                    ),
+                }
+            }
+            ToolPlan::RunCommand {
+                label,
+                program,
+                args,
+            } => match tool.execute(ToolRequest::RunCommand { program, args }) {
+                Ok(ToolResult::RunCommand(RunCommandOutput {
+                    profile,
+                    exit_code,
+                    artifact_path,
+                    ..
+                })) if exit_code == 0 => (
+                    RuntimeComposeStep::Applied,
+                    vec![format!(
+                        "verifier={} profile={} exit_code={} artifact={}",
+                        label,
+                        profile.as_str(),
+                        exit_code,
+                        artifact_path.display()
+                    )],
+                    Vec::new(),
+                ),
+                Ok(ToolResult::RunCommand(RunCommandOutput {
+                    profile,
+                    exit_code,
+                    artifact_path,
+                    ..
+                })) => (
+                    RuntimeComposeStep::Failed(format!(
+                        "runtime_compose.tool.verifier_failed: label={} exit_code={} artifact={}",
+                        label,
+                        exit_code,
+                        artifact_path.display()
+                    )),
+                    vec![format!(
+                        "verifier={} profile={} exit_code={} artifact={}",
+                        label,
+                        profile.as_str(),
+                        exit_code,
+                        artifact_path.display()
+                    )],
+                    Vec::new(),
+                ),
+                Ok(_) => (RuntimeComposeStep::Applied, Vec::new(), Vec::new()),
+                Err(error) => (
+                    RuntimeComposeStep::Failed(format!(
+                        "runtime_compose.tool.run_command: {error}"
+                    )),
+                    Vec::new(),
+                    Vec::new(),
+                ),
+            },
         }
     }
 
@@ -875,11 +894,67 @@ fn patch_artifact_from_write_output(
     }
 }
 
+fn render_string_list(items: &[String]) -> String {
+    if items.is_empty() {
+        String::from("none")
+    } else {
+        items.join(" | ")
+    }
+}
+
+fn render_step_journal(steps: &[RuntimeRunStepRecord]) -> String {
+    if steps.is_empty() {
+        return String::from("none");
+    }
+
+    steps
+        .iter()
+        .map(|step| {
+            format!(
+                "{}:{}:{}:{}",
+                step.phase, step.status, step.label, step.evidence
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(" | ")
+}
+
+fn render_patch_targets(artifacts: &[RuntimeComposePatchArtifact]) -> String {
+    if artifacts.is_empty() {
+        return String::from("none");
+    }
+
+    artifacts
+        .iter()
+        .map(|artifact| artifact.target_path.as_str())
+        .collect::<Vec<_>>()
+        .join(" | ")
+}
+
+fn render_patch_evidence(artifacts: &[RuntimeComposePatchArtifact]) -> String {
+    if artifacts.is_empty() {
+        return String::from("none");
+    }
+
+    artifacts
+        .iter()
+        .map(|artifact| {
+            format!(
+                "{}:{}:{}",
+                artifact.operation,
+                artifact.target_path,
+                artifact.after_excerpt.as_deref().unwrap_or("no_excerpt")
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(" | ")
+}
+
 fn complete_provider_request(
     provider: Arc<dyn ProviderAdapter>,
     request: ProviderRequest,
 ) -> Result<String, String> {
-    global_async_runtime_host().block_on_async("runtime_compose.provider.complete", async move {
+    global_async_runtime_host()?.block_on_async("runtime_compose.provider.complete", async move {
         provider
             .complete(request)
             .await
@@ -889,7 +964,7 @@ fn complete_provider_request(
 }
 
 fn shutdown_provider(provider: Arc<dyn ProviderAdapter>) -> Result<(), String> {
-    global_async_runtime_host().block_on_async("runtime_compose.provider.shutdown", async move {
+    global_async_runtime_host()?.block_on_async("runtime_compose.provider.shutdown", async move {
         provider
             .shutdown()
             .await
@@ -898,15 +973,14 @@ fn shutdown_provider(provider: Arc<dyn ProviderAdapter>) -> Result<(), String> {
 }
 
 fn probe_provider_health(provider: Arc<dyn ProviderAdapter>) -> RuntimeComposeComponentHealth {
-    match global_async_runtime_host().block_on_async(
-        "runtime_compose.provider.health",
-        async move {
+    match global_async_runtime_host().and_then(|host| {
+        host.block_on_async("runtime_compose.provider.health", async move {
             provider
                 .health()
                 .await
                 .map_err(|error| format!("runtime_compose.provider.health: {error}"))
-        },
-    ) {
+        })
+    }) {
         Ok(report) => RuntimeComposeComponentHealth {
             enabled: true,
             state: report.status.as_str(),
@@ -989,8 +1063,8 @@ mod tests {
     };
     use crate::cli_command::{LegacyIntentTemplate, RunTemplate};
     use crate::config_loader::AppConfig;
-    use axonrunner_core::DecisionOutcome;
     use axonrunner_adapters::{ToolAdapter, ToolRequest};
+    use axonrunner_core::DecisionOutcome;
     use std::fs;
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -1123,17 +1197,26 @@ mod tests {
 
     #[test]
     fn run_phase_and_outcome_names_cover_terminal_values() {
-        assert_eq!(run_phase_name(super::RuntimeRunPhase::Completed), "completed");
+        assert_eq!(
+            run_phase_name(super::RuntimeRunPhase::Completed),
+            "completed"
+        );
         assert_eq!(
             run_phase_name(super::RuntimeRunPhase::WaitingApproval),
             "waiting_approval"
         );
-        assert_eq!(run_outcome_name(super::RuntimeRunOutcome::Success), "success");
+        assert_eq!(
+            run_outcome_name(super::RuntimeRunOutcome::Success),
+            "success"
+        );
         assert_eq!(
             run_outcome_name(super::RuntimeRunOutcome::ApprovalRequired),
             "approval_required"
         );
-        assert_eq!(run_outcome_name(super::RuntimeRunOutcome::Aborted), "aborted");
+        assert_eq!(
+            run_outcome_name(super::RuntimeRunOutcome::Aborted),
+            "aborted"
+        );
     }
 
     #[test]

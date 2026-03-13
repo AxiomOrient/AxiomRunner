@@ -1,8 +1,7 @@
 use axonrunner_core::{
     AgentState, Decision, DecisionOutcome, DomainEvent, DoneCondition, Effect, ExecutionMode,
     Intent, PolicyAuditRecord, PolicyCode, RunApprovalMode, RunBudget, RunEvent, RunGoal,
-    RunOutcome, RunPhase, RunStatus, VerificationCheck, project_from, reduce,
-    reduce_run_status,
+    RunOutcome, RunPhase, RunStatus, VerificationCheck, project_from, reduce, reduce_run_status,
 };
 
 #[derive(Clone, Copy)]

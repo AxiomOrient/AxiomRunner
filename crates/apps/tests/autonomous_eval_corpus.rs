@@ -27,21 +27,32 @@ fn fixture_goal_path(name: &str) -> PathBuf {
 #[test]
 fn autonomous_eval_corpus_representative_runs_remain_green() {
     let mut passed = 0usize;
-    let total = 4usize;
+    let total = 5usize;
 
     {
         let workspace = unique_path("eval-intake-workspace", "dir");
         let run = run_cli_with_env(
-            &["run", fixture_goal_path("intake.json").to_str().expect("utf8 path")],
-            &[("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", workspace.to_str().expect("utf8 path"))],
+            &[
+                "run",
+                fixture_goal_path("intake.json")
+                    .to_str()
+                    .expect("utf8 path"),
+            ],
+            &[(
+                "AXONRUNNER_RUNTIME_TOOL_WORKSPACE",
+                workspace.to_str().expect("utf8 path"),
+            )],
         );
         let replay = run_cli_with_env(
             &["replay", "run-1"],
-            &[("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", workspace.to_str().expect("utf8 path"))],
+            &[(
+                "AXONRUNNER_RUNTIME_TOOL_WORKSPACE",
+                workspace.to_str().expect("utf8 path"),
+            )],
         );
         assert!(run.status.success(), "stderr:\n{}", stderr_of(&run));
         assert!(replay.status.success(), "stderr:\n{}", stderr_of(&replay));
-        assert!(stdout_of(&run).contains("goal_file_ingested_execution_pending"));
+        assert!(stdout_of(&run).contains("phase=completed outcome=success"));
         assert!(stdout_of(&replay).contains("replay step id="));
         passed += 1;
         let _ = fs::remove_dir_all(workspace);
@@ -51,23 +62,40 @@ fn autonomous_eval_corpus_representative_runs_remain_green() {
         let workspace = unique_path("eval-approval-workspace", "dir");
         let state_path = unique_path("eval-approval-state", "snapshot");
         let run = run_cli_with_env(
-            &["run", fixture_goal_path("approval.json").to_str().expect("utf8 path")],
             &[
-                ("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", workspace.to_str().expect("utf8 path")),
-                ("AXONRUNNER_RUNTIME_STATE_PATH", state_path.to_str().expect("utf8 path")),
+                "run",
+                fixture_goal_path("approval.json")
+                    .to_str()
+                    .expect("utf8 path"),
+            ],
+            &[
+                (
+                    "AXONRUNNER_RUNTIME_TOOL_WORKSPACE",
+                    workspace.to_str().expect("utf8 path"),
+                ),
+                (
+                    "AXONRUNNER_RUNTIME_STATE_PATH",
+                    state_path.to_str().expect("utf8 path"),
+                ),
             ],
         );
         let resume = run_cli_with_env(
             &["resume", "run-1"],
             &[
-                ("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", workspace.to_str().expect("utf8 path")),
-                ("AXONRUNNER_RUNTIME_STATE_PATH", state_path.to_str().expect("utf8 path")),
+                (
+                    "AXONRUNNER_RUNTIME_TOOL_WORKSPACE",
+                    workspace.to_str().expect("utf8 path"),
+                ),
+                (
+                    "AXONRUNNER_RUNTIME_STATE_PATH",
+                    state_path.to_str().expect("utf8 path"),
+                ),
             ],
         );
         assert!(run.status.success(), "stderr:\n{}", stderr_of(&run));
         assert!(resume.status.success(), "stderr:\n{}", stderr_of(&resume));
         assert!(stdout_of(&run).contains("approval_required_before_execution"));
-        assert!(stdout_of(&resume).contains("approval_granted_execution_pending"));
+        assert!(stdout_of(&resume).contains("phase=completed outcome=success"));
         passed += 1;
         let _ = fs::remove_dir_all(workspace);
         let _ = fs::remove_file(state_path);
@@ -82,11 +110,17 @@ fn autonomous_eval_corpus_representative_runs_remain_green() {
                     .to_str()
                     .expect("utf8 path"),
             ],
-            &[("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", workspace.to_str().expect("utf8 path"))],
+            &[(
+                "AXONRUNNER_RUNTIME_TOOL_WORKSPACE",
+                workspace.to_str().expect("utf8 path"),
+            )],
         );
         let replay = run_cli_with_env(
             &["replay", "run-1"],
-            &[("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", workspace.to_str().expect("utf8 path"))],
+            &[(
+                "AXONRUNNER_RUNTIME_TOOL_WORKSPACE",
+                workspace.to_str().expect("utf8 path"),
+            )],
         );
         assert!(run.status.success(), "stderr:\n{}", stderr_of(&run));
         assert!(replay.status.success(), "stderr:\n{}", stderr_of(&replay));
@@ -94,6 +128,49 @@ fn autonomous_eval_corpus_representative_runs_remain_green() {
         assert!(stdout_of(&replay).contains("outcome=budget_exhausted"));
         passed += 1;
         let _ = fs::remove_dir_all(workspace);
+    }
+
+    {
+        let workspace = unique_path("eval-on-risk-workspace", "dir");
+        let state_path = unique_path("eval-on-risk-state", "snapshot");
+        let run = run_cli_with_env(
+            &[
+                "run",
+                fixture_goal_path("on_risk.json")
+                    .to_str()
+                    .expect("utf8 path"),
+            ],
+            &[
+                (
+                    "AXONRUNNER_RUNTIME_TOOL_WORKSPACE",
+                    workspace.to_str().expect("utf8 path"),
+                ),
+                (
+                    "AXONRUNNER_RUNTIME_STATE_PATH",
+                    state_path.to_str().expect("utf8 path"),
+                ),
+            ],
+        );
+        let resume = run_cli_with_env(
+            &["resume", "run-1"],
+            &[
+                (
+                    "AXONRUNNER_RUNTIME_TOOL_WORKSPACE",
+                    workspace.to_str().expect("utf8 path"),
+                ),
+                (
+                    "AXONRUNNER_RUNTIME_STATE_PATH",
+                    state_path.to_str().expect("utf8 path"),
+                ),
+            ],
+        );
+        assert!(run.status.success(), "stderr:\n{}", stderr_of(&run));
+        assert!(resume.status.success(), "stderr:\n{}", stderr_of(&resume));
+        assert!(stdout_of(&run).contains("approval_required_before_execution"));
+        assert!(stdout_of(&resume).contains("phase=completed outcome=success"));
+        passed += 1;
+        let _ = fs::remove_dir_all(workspace);
+        let _ = fs::remove_file(state_path);
     }
 
     {
@@ -105,12 +182,23 @@ fn autonomous_eval_corpus_representative_runs_remain_green() {
         )
         .expect("lock file should exist");
         let run = run_cli_with_env(
-            &["run", fixture_goal_path("intake.json").to_str().expect("utf8 path")],
-            &[("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", workspace.to_str().expect("utf8 path"))],
+            &[
+                "run",
+                fixture_goal_path("intake.json")
+                    .to_str()
+                    .expect("utf8 path"),
+            ],
+            &[(
+                "AXONRUNNER_RUNTIME_TOOL_WORKSPACE",
+                workspace.to_str().expect("utf8 path"),
+            )],
         );
         let status = run_cli_with_env(
             &["status"],
-            &[("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", workspace.to_str().expect("utf8 path"))],
+            &[(
+                "AXONRUNNER_RUNTIME_TOOL_WORKSPACE",
+                workspace.to_str().expect("utf8 path"),
+            )],
         );
         assert_eq!(run.status.code(), Some(6), "stderr:\n{}", stderr_of(&run));
         assert!(stderr_of(&run).contains("workspace lock is active"));
@@ -119,5 +207,8 @@ fn autonomous_eval_corpus_representative_runs_remain_green() {
         let _ = fs::remove_dir_all(workspace);
     }
 
-    assert_eq!(passed, total, "autonomous eval corpus must keep all representative runs green");
+    assert_eq!(
+        passed, total,
+        "autonomous eval corpus must keep all representative runs green"
+    );
 }

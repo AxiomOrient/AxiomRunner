@@ -71,7 +71,8 @@ pub fn reduce_run_status(status: &RunStatus, event: &RunEvent) -> RunStatus {
             next.outcome = Some(*outcome);
             next.phase = phase_for_outcome(*outcome);
             if matches!(outcome, RunOutcome::Blocked | RunOutcome::ApprovalRequired) {
-                next.last_blocker.get_or_insert_with(|| String::from("operator attention required"));
+                next.last_blocker
+                    .get_or_insert_with(|| String::from("operator attention required"));
             } else {
                 next.last_blocker = None;
             }

@@ -150,7 +150,9 @@ fn fake_cli_script(label: &str, stdout: &str) -> PathBuf {
         .expect("fake cli should be written");
     #[cfg(unix)]
     {
-        let mut perms = fs::metadata(&path).expect("metadata should exist").permissions();
+        let mut perms = fs::metadata(&path)
+            .expect("metadata should exist")
+            .permissions();
         perms.set_mode(0o755);
         fs::set_permissions(&path, perms).expect("permissions should be updated");
     }
@@ -375,7 +377,7 @@ fn e2e_cli_goal_file_run_persists_run_id_and_supports_status_and_replay_by_run_i
     { "label": "release gate", "detail": "cargo test -p axonrunner_apps --test release_security_gate" }
   ],
   "budget": { "max_steps": 5, "max_minutes": 10, "max_tokens": 8000 },
-  "approval_mode": "on-risk"
+  "approval_mode": "never"
 }"#,
     )
     .expect("goal file should be written");
@@ -391,7 +393,7 @@ fn e2e_cli_goal_file_run_persists_run_id_and_supports_status_and_replay_by_run_i
     assert!(run.status.success(), "stderr:\n{run_stderr}");
     assert!(run_stdout.contains("intent id=cli-1 kind=goal outcome=accepted"));
     assert!(run_stdout.contains(
-        "run intent_id=cli-1 phase=blocked outcome=blocked reason=goal_file_ingested_execution_pending"
+        "run intent_id=cli-1 phase=completed outcome=success reason=verification_passed"
     ));
 
     let status = run_cli_with_env(
@@ -407,9 +409,15 @@ fn e2e_cli_goal_file_run_persists_run_id_and_supports_status_and_replay_by_run_i
 
     assert!(status.status.success());
     assert!(replay.status.success());
-    assert!(stdout_of(&status).contains("status run run_id=run-1 phase=blocked outcome=blocked"));
-    assert!(stdout_of(&replay).contains("replay run run_id=run-1 phase=blocked outcome=blocked"));
-    assert!(stdout_of(&replay).contains("replay verification status=passed summary=goal_contract_validated"));
+    assert!(stdout_of(&status).contains("status run run_id=run-1 phase=completed outcome=success"));
+    assert!(stdout_of(&replay).contains("replay run run_id=run-1 phase=completed outcome=success"));
+    assert!(
+        stdout_of(&replay)
+            .contains("replay verification status=passed summary=goal_done_conditions_verified")
+    );
+    assert!(
+        stdout_of(&replay).contains("replay stages provider=skipped memory=skipped tool=applied")
+    );
     assert!(stdout_of(&replay).contains("replay step id="));
     assert!(stdout_of(&replay).contains("label=validate goal contract"));
     assert!(
@@ -419,6 +427,78 @@ fn e2e_cli_goal_file_run_persists_run_id_and_supports_status_and_replay_by_run_i
     );
 
     let _ = fs::remove_dir_all(workspace);
+    let _ = fs::remove_file(goal_file);
+}
+
+#[test]
+fn e2e_cli_goal_file_on_risk_requires_approval_before_execution() {
+    let workspace = unique_path("goal-file-on-risk-workspace", "dir");
+    let state_path = unique_path("goal-file-on-risk-state", "snapshot");
+    let goal_file = unique_path("goal-file-on-risk", "json");
+    fs::write(
+        &goal_file,
+        r#"{
+  "summary": "Wait for on-risk approval before execution",
+  "workspace_root": "/workspace",
+  "constraints": [],
+  "done_conditions": [
+    { "label": "report", "evidence": "report artifact exists" }
+  ],
+  "verification_checks": [
+    { "label": "release gate", "detail": "cargo test -p axonrunner_apps --test release_security_gate" }
+  ],
+  "budget": { "max_steps": 5, "max_minutes": 10, "max_tokens": 8000 },
+  "approval_mode": "on-risk"
+}"#,
+    )
+    .expect("goal file should be written");
+
+    let run = run_cli_with_env(
+        &["run", path_str(&goal_file)],
+        &[
+            ("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace)),
+            ("AXONRUNNER_RUNTIME_STATE_PATH", path_str(&state_path)),
+        ],
+        "goal-file-on-risk-run",
+    );
+    assert!(run.status.success());
+    assert!(stdout_of(&run).contains(
+        "run intent_id=cli-1 phase=waiting_approval outcome=approval_required reason=approval_required_before_execution"
+    ));
+
+    let resume = run_cli_with_env(
+        &["resume", "run-1"],
+        &[
+            ("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace)),
+            ("AXONRUNNER_RUNTIME_STATE_PATH", path_str(&state_path)),
+        ],
+        "goal-file-on-risk-resume",
+    );
+    let status = run_cli_with_env(
+        &["status", "run-1"],
+        &[
+            ("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace)),
+            ("AXONRUNNER_RUNTIME_STATE_PATH", path_str(&state_path)),
+        ],
+        "goal-file-on-risk-status",
+    );
+    let replay = run_cli_with_env(
+        &["replay", "run-1"],
+        &[("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
+        "goal-file-on-risk-replay",
+    );
+
+    assert!(resume.status.success());
+    assert!(stdout_of(&resume).contains(
+        "resume run_id=run-1 phase=completed outcome=success reason=verification_passed"
+    ));
+    assert!(status.status.success());
+    assert!(stdout_of(&status).contains("status run run_id=run-1 phase=completed outcome=success"));
+    assert!(replay.status.success());
+    assert!(stdout_of(&replay).contains("replay run run_id=run-1 phase=completed outcome=success"));
+
+    let _ = fs::remove_dir_all(workspace);
+    let _ = fs::remove_file(state_path);
     let _ = fs::remove_file(goal_file);
 }
 
@@ -482,12 +562,12 @@ fn e2e_cli_goal_file_approval_can_resume_from_pending_run() {
 
     assert!(resume.status.success());
     assert!(stdout_of(&resume).contains(
-        "resume run_id=run-1 phase=blocked outcome=blocked reason=approval_granted_execution_pending"
+        "resume run_id=run-1 phase=completed outcome=success reason=verification_passed"
     ));
     assert!(status.status.success());
-    assert!(stdout_of(&status).contains("status run run_id=run-1 phase=blocked outcome=blocked"));
+    assert!(stdout_of(&status).contains("status run run_id=run-1 phase=completed outcome=success"));
     assert!(replay.status.success());
-    assert!(stdout_of(&replay).contains("replay run run_id=run-1 phase=blocked outcome=blocked"));
+    assert!(stdout_of(&replay).contains("replay run run_id=run-1 phase=completed outcome=success"));
 
     let _ = fs::remove_dir_all(workspace);
     let _ = fs::remove_file(state_path);
@@ -550,7 +630,10 @@ fn e2e_cli_goal_file_pending_run_can_abort_cleanly() {
     );
 
     assert!(abort.status.success());
-    assert!(stdout_of(&abort).contains("abort run_id=run-1 phase=aborted outcome=aborted reason=operator_abort"));
+    assert!(
+        stdout_of(&abort)
+            .contains("abort run_id=run-1 phase=aborted outcome=aborted reason=operator_abort")
+    );
     assert!(status.status.success());
     assert!(stdout_of(&status).contains("status run run_id=run-1 phase=aborted outcome=aborted"));
     assert!(replay.status.success());
@@ -604,9 +687,15 @@ fn e2e_cli_goal_file_blocks_when_step_budget_is_already_exhausted() {
         "run intent_id=cli-1 phase=blocked outcome=budget_exhausted reason=budget_exhausted_before_execution"
     ));
     assert!(status.status.success());
-    assert!(stdout_of(&status).contains("status run run_id=run-1 phase=blocked outcome=budget_exhausted"));
+    assert!(
+        stdout_of(&status)
+            .contains("status run run_id=run-1 phase=blocked outcome=budget_exhausted")
+    );
     assert!(replay.status.success());
-    assert!(stdout_of(&replay).contains("replay run run_id=run-1 phase=blocked outcome=budget_exhausted"));
+    assert!(
+        stdout_of(&replay)
+            .contains("replay run run_id=run-1 phase=blocked outcome=budget_exhausted")
+    );
 
     let _ = fs::remove_dir_all(workspace);
     let _ = fs::remove_file(goal_file);
@@ -690,9 +779,18 @@ fn e2e_cli_rejected_control_action_surfaces_approval_required_outcome() {
     assert!(run.status.success());
     assert!(status.status.success());
     assert!(replay.status.success());
-    assert!(stdout_of(&run).contains("run intent_id=cli-1 phase=waiting_approval outcome=approval_required"));
-    assert!(stdout_of(&status).contains("status run run_id=run-1 phase=waiting_approval outcome=approval_required"));
-    assert!(stdout_of(&replay).contains("replay run run_id=run-1 phase=waiting_approval outcome=approval_required"));
+    assert!(
+        stdout_of(&run)
+            .contains("run intent_id=cli-1 phase=waiting_approval outcome=approval_required")
+    );
+    assert!(
+        stdout_of(&status)
+            .contains("status run run_id=run-1 phase=waiting_approval outcome=approval_required")
+    );
+    assert!(
+        stdout_of(&replay)
+            .contains("replay run run_id=run-1 phase=waiting_approval outcome=approval_required")
+    );
 
     let _ = fs::remove_dir_all(workspace);
     let _ = fs::remove_file(state_path);
@@ -1232,7 +1330,10 @@ fn e2e_cli_status_and_replay_render_aborted_outcome_from_trace() {
     });
     fs::write(
         workspace.join(".axonrunner/trace/events.jsonl"),
-        format!("{}\n", serde_json::to_string(&trace).expect("trace should serialize")),
+        format!(
+            "{}\n",
+            serde_json::to_string(&trace).expect("trace should serialize")
+        ),
     )
     .expect("trace log should be written");
 
@@ -1249,8 +1350,12 @@ fn e2e_cli_status_and_replay_render_aborted_outcome_from_trace() {
 
     assert!(status.status.success());
     assert!(replay.status.success());
-    assert!(stdout_of(&status).contains("status run run_id=run-abort phase=aborted outcome=aborted"));
-    assert!(stdout_of(&replay).contains("replay run run_id=run-abort phase=aborted outcome=aborted"));
+    assert!(
+        stdout_of(&status).contains("status run run_id=run-abort phase=aborted outcome=aborted")
+    );
+    assert!(
+        stdout_of(&replay).contains("replay run run_id=run-abort phase=aborted outcome=aborted")
+    );
 
     let _ = fs::remove_dir_all(workspace);
 }

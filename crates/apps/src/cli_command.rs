@@ -83,7 +83,9 @@ impl LegacyIntentTemplate {
             LegacyIntentTemplate::Write { key, value } => {
                 Intent::write(intent_id, actor_id, key.clone(), value.clone())
             }
-            LegacyIntentTemplate::Remove { key } => Intent::remove(intent_id, actor_id, key.clone()),
+            LegacyIntentTemplate::Remove { key } => {
+                Intent::remove(intent_id, actor_id, key.clone())
+            }
             LegacyIntentTemplate::Freeze => Intent::freeze_writes(intent_id, actor_id),
             LegacyIntentTemplate::Halt => Intent::halt(intent_id, actor_id),
         }

@@ -1,4 +1,4 @@
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use rusqlite::{Connection, ToSql, TransactionBehavior, params, params_from_iter};
@@ -82,7 +82,7 @@ impl SqliteMemoryAdapter {
 
     pub fn store_at(&self, key: &str, value: &str, updated_at: u64) -> AdapterResult<()> {
         let record = SqliteIndexedRecord::from_input(key, value, updated_at);
-        let mut connection = self.connection.lock().unwrap();
+        let mut connection = lock_connection(&self.connection);
         let transaction = connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(map_sqlite_error)
@@ -130,7 +130,7 @@ impl SqliteMemoryAdapter {
     }
 
     pub fn prune_before(&self, cutoff_ms: u64) -> AdapterResult<usize> {
-        let mut connection = self.connection.lock().unwrap();
+        let mut connection = lock_connection(&self.connection);
         let transaction = connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(map_sqlite_error)
@@ -159,7 +159,7 @@ impl SqliteMemoryAdapter {
     }
 
     fn fetch_records_no_params(&self, sql: &str) -> MemoryResult<Vec<MemoryRecord>> {
-        let connection = self.connection.lock().unwrap();
+        let connection = lock_connection(&self.connection);
         let mut statement = connection.prepare(sql).map_err(map_sqlite_error)?;
         let mut rows = statement.query([]).map_err(map_sqlite_error)?;
         let mut records = Vec::new();
@@ -193,7 +193,7 @@ impl SqliteMemoryAdapter {
         );
 
         let params: Vec<&dyn ToSql> = plan.terms.iter().map(|term| term as &dyn ToSql).collect();
-        let connection = self.connection.lock().unwrap();
+        let connection = lock_connection(&self.connection);
         let mut statement = connection.prepare(&sql).map_err(map_sqlite_error)?;
         let mut rows = statement
             .query(params_from_iter(params))
@@ -208,7 +208,7 @@ impl SqliteMemoryAdapter {
     }
 
     fn run_health_check(&self) -> MemoryResult<bool> {
-        let connection = self.connection.lock().unwrap();
+        let connection = lock_connection(&self.connection);
         let mut statement = connection
             .prepare("PRAGMA quick_check;")
             .map_err(map_sqlite_error)?;
@@ -231,7 +231,7 @@ impl crate::contracts::MemoryAdapter for SqliteMemoryAdapter {
     fn health(&self) -> crate::contracts::AdapterHealth {
         // TTL 이내이면 캐시 반환
         {
-            let cache = self.health_cache.lock().unwrap();
+            let cache = lock_health_cache(&self.health_cache);
             if let Some(ref cached) = *cache
                 && cached.checked_at.elapsed() < HEALTH_CACHE_TTL
             {
@@ -246,7 +246,7 @@ impl crate::contracts::MemoryAdapter for SqliteMemoryAdapter {
             Err(_) => crate::contracts::AdapterHealth::Unavailable,
         };
 
-        let mut cache = self.health_cache.lock().unwrap();
+        let mut cache = lock_health_cache(&self.health_cache);
         *cache = Some(HealthCache {
             result,
             checked_at: Instant::now(),
@@ -279,7 +279,7 @@ impl crate::contracts::MemoryAdapter for SqliteMemoryAdapter {
     fn get(&self, key: &str) -> AdapterResult<Option<crate::contracts::MemoryEntry>> {
         let key_hex = hex_encode(key.as_bytes());
         let sql = "SELECT key_hex, value_hex, updated_at FROM memory WHERE key_hex = ?1 LIMIT 1;";
-        let connection = self.connection.lock().unwrap();
+        let connection = lock_connection(&self.connection);
         let mut statement = connection
             .prepare(sql)
             .map_err(map_sqlite_error)
@@ -309,7 +309,7 @@ impl crate::contracts::MemoryAdapter for SqliteMemoryAdapter {
 
     fn delete(&self, key: &str) -> AdapterResult<bool> {
         let key_hex = hex_encode(key.as_bytes());
-        let mut connection = self.connection.lock().unwrap();
+        let mut connection = lock_connection(&self.connection);
         let transaction = connection
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
             .map_err(map_sqlite_error)
@@ -336,9 +336,23 @@ impl crate::contracts::MemoryAdapter for SqliteMemoryAdapter {
     }
 
     fn count(&self) -> AdapterResult<usize> {
-        let connection = self.connection.lock().unwrap();
+        let connection = lock_connection(&self.connection);
         count_from_connection(&connection).map_err(|e| map_memory_error("memory.sqlite.count", e))
     }
+}
+
+fn lock_connection(connection: &Arc<Mutex<Connection>>) -> MutexGuard<'_, Connection> {
+    connection
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+fn lock_health_cache(
+    health_cache: &Arc<Mutex<Option<HealthCache>>>,
+) -> MutexGuard<'_, Option<HealthCache>> {
+    health_cache
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 fn record_to_entry(record: MemoryRecord) -> crate::contracts::MemoryEntry {

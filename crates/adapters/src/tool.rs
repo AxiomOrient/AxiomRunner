@@ -1,7 +1,7 @@
 use crate::contracts::{
     AdapterHealth, FileMutationEvidence, FileWriteOutput, ListFilesOutput, ReadFileOutput,
-    RemovePathOutput, ReplaceInFileOutput, RunCommandOutput, RunCommandProfile,
-    SearchFilesOutput, SearchMatch, SearchMode, ToolAdapter, ToolPolicy, ToolRequest, ToolResult,
+    RemovePathOutput, ReplaceInFileOutput, RunCommandOutput, RunCommandProfile, SearchFilesOutput,
+    SearchMatch, SearchMode, ToolAdapter, ToolPolicy, ToolRequest, ToolResult,
 };
 use crate::error::{AdapterError, AdapterResult, RetryClass};
 use crate::tool_workspace::{
@@ -58,7 +58,11 @@ pub fn classify_tool_request_risk(request: &ToolRequest) -> ToolRiskTier {
                 ToolRiskTier::Medium
             }
         }
-        ToolRequest::ReplaceInFile { needle, replacement, .. } => {
+        ToolRequest::ReplaceInFile {
+            needle,
+            replacement,
+            ..
+        } => {
             if needle.len() > 256 || replacement.len() > 4 * 1024 {
                 ToolRiskTier::High
             } else {
@@ -162,31 +166,42 @@ impl WorkspaceTool {
         })?;
 
         let mut matches = Vec::new();
+        let mut scanned_files = 0;
+        let mut skipped_files = 0;
         for file in files {
             if matches.len() >= self.policy.max_search_results {
                 break;
             }
-            if let Ok(contents) = fs::read_to_string(&file) {
-                for (index, line) in contents.lines().enumerate() {
-                    let matched = match &regex {
-                        Some(regex) => regex.is_match(line),
-                        None => line.contains(needle),
-                    };
-                    if matched {
-                        matches.push(SearchMatch {
-                            path: file.clone(),
-                            line_number: index + 1,
-                            line: line.to_owned(),
-                        });
-                        if matches.len() >= self.policy.max_search_results {
-                            break;
+            match fs::read_to_string(&file) {
+                Ok(contents) => {
+                    scanned_files += 1;
+                    for (index, line) in contents.lines().enumerate() {
+                        let matched = match &regex {
+                            Some(regex) => regex.is_match(line),
+                            None => line.contains(needle),
+                        };
+                        if matched {
+                            matches.push(SearchMatch {
+                                path: file.clone(),
+                                line_number: index + 1,
+                                line: line.to_owned(),
+                            });
+                            if matches.len() >= self.policy.max_search_results {
+                                break;
+                            }
                         }
                     }
                 }
+                Err(_) => skipped_files += 1,
             }
         }
 
-        Ok(ToolResult::SearchFiles(SearchFilesOutput { base, matches }))
+        Ok(ToolResult::SearchFiles(SearchFilesOutput {
+            base,
+            matches,
+            scanned_files,
+            skipped_files,
+        }))
     }
 
     fn file_write(
@@ -301,9 +316,15 @@ impl WorkspaceTool {
         path: &str,
         needle: &str,
         replacement: &str,
+        expected_replacements: Option<usize>,
     ) -> Result<ToolResult, ToolError> {
         if needle.is_empty() {
             return Err(ToolError::InvalidInput("replace needle"));
+        }
+        if matches!(expected_replacements, Some(0)) {
+            return Err(ToolError::InvalidInput(
+                "expected replacements must be positive",
+            ));
         }
         let resolved_path = self.resolve_workspace_path(path)?;
         let contents = match fs::read(&resolved_path).map_err(|error| ToolError::Io {
@@ -319,6 +340,20 @@ impl WorkspaceTool {
         if replacements == 0 {
             return Err(ToolError::NotFound {
                 path: format!("{path}::{needle}"),
+            });
+        }
+        if let Some(expected) = expected_replacements {
+            if replacements != expected {
+                return Err(ToolError::ReplacementCountMismatch {
+                    path: path.to_owned(),
+                    expected,
+                    actual: replacements,
+                });
+            }
+        } else if replacements > 1 {
+            return Err(ToolError::AmbiguousReplace {
+                path: path.to_owned(),
+                occurrences: replacements,
             });
         }
         let updated = contents.replace(needle, replacement);
@@ -509,7 +544,11 @@ impl WorkspaceTool {
 }
 
 fn classify_run_command_profile(program: &str, args: &[String]) -> RunCommandProfile {
-    match (program, args.first().map(String::as_str), args.get(1).map(String::as_str)) {
+    match (
+        program,
+        args.first().map(String::as_str),
+        args.get(1).map(String::as_str),
+    ) {
         ("cargo", Some("build"), _) => RunCommandProfile::Build,
         ("cargo", Some("test"), _) => RunCommandProfile::Test,
         ("cargo", Some("clippy"), _) => RunCommandProfile::Lint,
@@ -557,7 +596,8 @@ impl ToolAdapter for WorkspaceTool {
                 path,
                 needle,
                 replacement,
-            } => self.replace_in_file(&path, &needle, &replacement),
+                expected_replacements,
+            } => self.replace_in_file(&path, &needle, &replacement, expected_replacements),
             ToolRequest::RemovePath { path } => self.remove_path(&path),
             ToolRequest::RunCommand { program, args } => self.run_command(&program, &args),
         };
@@ -586,6 +626,15 @@ pub enum ToolError {
     UnsupportedEncoding {
         path: PathBuf,
     },
+    AmbiguousReplace {
+        path: String,
+        occurrences: usize,
+    },
+    ReplacementCountMismatch {
+        path: String,
+        expected: usize,
+        actual: usize,
+    },
     Timeout {
         program: String,
         timeout_ms: u64,
@@ -612,6 +661,20 @@ impl std::fmt::Display for ToolError {
             Self::UnsupportedEncoding { path } => {
                 write!(f, "unsupported file encoding: {}", path.display())
             }
+            Self::AmbiguousReplace { path, occurrences } => {
+                write!(
+                    f,
+                    "replace target is ambiguous: {path} matched {occurrences} locations"
+                )
+            }
+            Self::ReplacementCountMismatch {
+                path,
+                expected,
+                actual,
+            } => write!(
+                f,
+                "replace target count mismatch: {path} expected {expected} matches but found {actual}"
+            ),
             Self::Timeout {
                 program,
                 timeout_ms,
@@ -760,6 +823,20 @@ fn map_tool_error(error: ToolError) -> AdapterError {
         ToolError::UnsupportedEncoding { path } => AdapterError::failed(
             "tool.unsupported_encoding",
             path.display().to_string(),
+            RetryClass::NonRetryable,
+        ),
+        ToolError::AmbiguousReplace { path, occurrences } => AdapterError::failed(
+            "tool.ambiguous_replace",
+            format!("{path}@{occurrences}"),
+            RetryClass::NonRetryable,
+        ),
+        ToolError::ReplacementCountMismatch {
+            path,
+            expected,
+            actual,
+        } => AdapterError::failed(
+            "tool.replace_count_mismatch",
+            format!("{path}@expected={expected}@actual={actual}"),
             RetryClass::NonRetryable,
         ),
         ToolError::Timeout {

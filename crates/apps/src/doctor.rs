@@ -1,4 +1,4 @@
-use crate::async_runtime_host::global_async_runtime_host;
+use crate::async_runtime_host::global_async_runtime_host_status;
 use crate::config_loader::AppConfig;
 use crate::display::mode_name;
 use crate::runtime_compose::{RuntimeComposeConfig, RuntimeComposeHealth};
@@ -64,7 +64,7 @@ pub fn build_doctor_report(
     state_path: &Path,
 ) -> DoctorReport {
     let compose_config = RuntimeComposeConfig::from_app_config(config);
-    let async_host = global_async_runtime_host().status();
+    let async_host = global_async_runtime_host_status();
     let workspace = compose_config.tool_workspace.unwrap_or_else(|| {
         std::env::current_dir().unwrap_or_else(|_| Path::new(".").to_path_buf())
     });
@@ -109,16 +109,7 @@ pub fn build_doctor_report(
             memory_detail: compose.memory.detail.clone(),
             tool_state: compose.tool.state.to_owned(),
             tool_detail: compose.tool.detail.clone(),
-            async_host_detail: format!(
-                "init_mode={},worker_threads={},max_in_flight={},timeout_ms={}",
-                async_host.init_mode,
-                async_host.worker_threads,
-                async_host.max_in_flight,
-                async_host
-                    .timeout_ms
-                    .map(|value| value.to_string())
-                    .unwrap_or_else(|| String::from("none"))
-            ),
+            async_host_detail: format_async_host_detail(&async_host),
         },
         paths: DoctorPaths {
             workspace: workspace_display,
@@ -181,6 +172,25 @@ pub fn render_doctor_lines(report: &DoctorReport) -> Vec<String> {
     lines
 }
 
+fn format_async_host_detail(
+    async_host: &crate::async_runtime_host::AsyncRuntimeHostStatus,
+) -> String {
+    if let Some(error) = async_host.init_error.as_deref() {
+        format!("init_mode={},error={error}", async_host.init_mode)
+    } else {
+        format!(
+            "init_mode={},worker_threads={},max_in_flight={},timeout_ms={}",
+            async_host.init_mode,
+            async_host.worker_threads,
+            async_host.max_in_flight,
+            async_host
+                .timeout_ms
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| String::from("none"))
+        )
+    }
+}
+
 fn directory_check(name: &str, path: &Path) -> DoctorCheck {
     if path.is_dir() {
         return DoctorCheck {
@@ -232,6 +242,44 @@ fn file_presence_check(name: &str, path: &Path) -> DoctorCheck {
         name: name.to_owned(),
         state: state.to_owned(),
         detail,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::format_async_host_detail;
+    use crate::async_runtime_host::AsyncRuntimeHostStatus;
+
+    #[test]
+    fn doctor_formats_configured_async_host_detail() {
+        let detail = format_async_host_detail(&AsyncRuntimeHostStatus {
+            init_mode: "configured",
+            worker_threads: 2,
+            max_in_flight: 8,
+            timeout_ms: None,
+            init_error: None,
+        });
+
+        assert_eq!(
+            detail,
+            "init_mode=configured,worker_threads=2,max_in_flight=8,timeout_ms=none"
+        );
+    }
+
+    #[test]
+    fn doctor_formats_failed_async_host_detail() {
+        let detail = format_async_host_detail(&AsyncRuntimeHostStatus {
+            init_mode: "failed",
+            worker_threads: 0,
+            max_in_flight: 0,
+            timeout_ms: None,
+            init_error: Some(String::from("async runtime host init failed: boom")),
+        });
+
+        assert_eq!(
+            detail,
+            "init_mode=failed,error=async runtime host init failed: boom"
+        );
     }
 }
 

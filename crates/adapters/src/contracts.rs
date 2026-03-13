@@ -146,6 +146,7 @@ pub enum ToolRequest {
         path: String,
         needle: String,
         replacement: String,
+        expected_replacements: Option<usize>,
     },
     RemovePath {
         path: String,
@@ -215,6 +216,8 @@ pub struct SearchMatch {
 pub struct SearchFilesOutput {
     pub base: PathBuf,
     pub matches: Vec<SearchMatch>,
+    pub scanned_files: usize,
+    pub skipped_files: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -112,9 +112,9 @@ axonrunner_apps halt
 |---|---|---|
 | `list_files` | `path` | workspace 안의 경로만 허용 |
 | `read_file` | `path` | 파일만 허용, 크기 제한 준수 |
-| `search_files` | `path`, `needle`, `mode` | substring / regex 검색만 허용 |
+| `search_files` | `path`, `needle`, `mode` | substring / regex 검색만 허용, scanned/skipped count 포함 |
 | `file_write` | `path`, `contents`, `append` | bounded write/append만 허용 |
-| `replace_in_file` | `path`, `needle`, `replacement` | 최소 1회 치환이 있어야 함 |
+| `replace_in_file` | `path`, `needle`, `replacement`, `expected_replacements?` | 최소 1회 치환, multi-match 는 expected count가 맞을 때만 허용 |
 | `remove_path` | `path` | workspace boundary 안 경로만 허용 |
 | `run_command` | `program`, `args` | allowlist, timeout, output truncation 적용 |
 
@@ -124,7 +124,7 @@ axonrunner_apps halt
 |---|---|
 | `list_files` | `base`, `paths` |
 | `read_file` | `path`, `contents` |
-| `search_files` | `base`, `matches[path,line_number,line]` |
+| `search_files` | `base`, `matches[path,line_number,line]`, `scanned_files`, `skipped_files` |
 | `file_write` | `path`, `bytes_written`, `evidence` |
 | `replace_in_file` | `path`, `replacements`, `evidence` |
 | `remove_path` | `path`, `removed`, `evidence?` |
