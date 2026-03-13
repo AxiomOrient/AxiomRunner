@@ -155,7 +155,7 @@ fn e2e_cli_batch_pipeline_flow() {
 }
 
 #[test]
-fn golden_false_success_is_blocked_for_missing_codek_binary() {
+fn golden_provider_boundary_blocks_missing_codek_binary() {
     let workspace = unique_path("golden-codek-blocked-workspace", "dir");
     let output = run_cli_with_env(
         &["run", "write:alpha=42"],
@@ -171,7 +171,11 @@ fn golden_false_success_is_blocked_for_missing_codek_binary() {
     assert_eq!(output.status.code(), Some(6));
     assert!(stderr.contains("runtime execution failed intent_id=cli-1 stage=provider"));
     assert!(workspace.join(".axonrunner/trace/events.jsonl").exists());
-    assert!(workspace.join(".axonrunner/artifacts/cli-1.report.md").exists());
+    assert!(
+        workspace
+            .join(".axonrunner/artifacts/cli-1.report.md")
+            .exists()
+    );
 
     let _ = fs::remove_dir_all(workspace);
 }
@@ -353,6 +357,7 @@ fn e2e_cli_doctor_json_is_machine_readable() {
         serde_json::from_str(&stdout).expect("doctor json should be valid");
     assert_eq!(json["provider_id"], "mock-local");
     assert_eq!(json["runtime"]["provider_state"], "ready");
+    assert!(json["runtime"]["async_host_detail"].as_str().is_some());
     assert_eq!(json["checks"][0]["name"], "workspace_dir");
     assert!(json["paths"]["trace_events_path"].as_str().is_some());
 
@@ -360,7 +365,7 @@ fn e2e_cli_doctor_json_is_machine_readable() {
 }
 
 #[test]
-fn golden_doctor_text_contract_for_ready_mock_local_is_stable() {
+fn golden_truth_surface_doctor_text_contract_for_ready_mock_local_is_stable() {
     let workspace = unique_path("doctor-golden-workspace", "dir");
     let state_path = unique_path("doctor-golden-state", "snapshot");
     let memory_path = unique_path("doctor-golden-memory", "md");
@@ -401,6 +406,9 @@ fn golden_doctor_text_contract_for_ready_mock_local_is_stable() {
             memory_path.display(),
             canonical_workspace.display()
         ),
+        String::from(
+            "doctor async_host detail=init_mode=configured,worker_threads=2,max_in_flight=8,timeout_ms=none",
+        ),
         format!(
             "doctor paths workspace={} state_path={} trace_events_path={} tool_log_path={}",
             workspace.display(),
@@ -414,7 +422,10 @@ fn golden_doctor_text_contract_for_ready_mock_local_is_stable() {
         ),
         format!(
             "doctor check name=state_parent_dir state=ok detail=exists,path={}",
-            state_path.parent().expect("state parent should exist").display()
+            state_path
+                .parent()
+                .expect("state parent should exist")
+                .display()
         ),
         format!(
             "doctor check name=trace_parent_dir state=ok detail=exists,path={}",
@@ -465,7 +476,7 @@ fn e2e_cli_read_runs_through_canonical_query_path_and_persisted_state() {
 }
 
 #[test]
-fn golden_persisted_freeze_blocks_later_write_across_processes() {
+fn golden_persisted_control_state_freeze_blocks_later_write() {
     let state_path = unique_path("golden-freeze-state", "snapshot");
 
     let freeze = run_cli_with_env(
@@ -537,6 +548,19 @@ fn e2e_cli_rejects_unknown_runtime_provider_from_config_file() {
     assert!(stdout.is_empty());
     assert!(stderr.contains("runtime init error:"));
     assert!(stderr.contains("unknown runtime provider 'openrouter'"));
+}
+
+#[test]
+fn golden_workspace_contract_blocks_runtime_when_workspace_is_undetermined() {
+    let output = run_cli_without_runtime_defaults(&["status"], &[], "workspace-missing");
+    let stdout = stdout_of(&output);
+    let stderr = stderr_of(&output);
+
+    assert_eq!(output.status.code(), Some(5));
+    assert!(stdout.is_empty());
+    assert!(stderr.contains("runtime init error:"));
+    assert!(stderr.contains("runtime tool workspace is not configured"));
+    assert!(stderr.contains("--workspace"));
 }
 
 #[test]
@@ -659,7 +683,7 @@ fn e2e_cli_replay_missing_target_is_runtime_error() {
 }
 
 #[test]
-fn e2e_cli_replay_reads_legacy_trace_without_new_fields() {
+fn golden_schema_legacy_trace_replay_remains_compatible() {
     let workspace = unique_path("replay-legacy-workspace", "dir");
     fs::create_dir_all(workspace.join(".axonrunner/trace")).expect("trace dir should exist");
     let legacy = serde_json::json!({

@@ -74,7 +74,10 @@ fn config_cli_option_grammar_conformance_matrix() {
     );
     assert_eq!(
         config_loader::parse_cli_config_option("--command-allowlist=git,cargo"),
-        Some((config_loader::CliConfigOption::CommandAllowlist, "git,cargo"))
+        Some((
+            config_loader::CliConfigOption::CommandAllowlist,
+            "git,cargo"
+        ))
     );
 
     assert_eq!(config_loader::parse_cli_config_option("--profile"), None);

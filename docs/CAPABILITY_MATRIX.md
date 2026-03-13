@@ -14,6 +14,7 @@
 |---|---|---|---|
 | CLI | `run` | Core | must pass |
 | CLI | `batch` | Core | must pass |
+| CLI | `doctor` | Core | must pass |
 | CLI | `replay` | Core | must pass |
 | CLI | `status` | Core | must pass |
 | CLI | `health` | Core | must pass |
@@ -43,7 +44,6 @@
 현재 README, help, DEPLOYMENT, charter에서 기본 노출하지 않는 것:
 
 - `agent`
-- `doctor`
 - `daemon`
 - `gateway`
 - `service`
@@ -58,6 +58,7 @@
 ```bash
 axonrunner_apps run <intent-spec>
 axonrunner_apps batch [--reset-state] <intent-spec>...
+axonrunner_apps doctor [--json]
 axonrunner_apps replay <intent-id|latest>
 axonrunner_apps status
 axonrunner_apps health

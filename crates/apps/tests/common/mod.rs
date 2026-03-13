@@ -32,10 +32,26 @@ fn isolated_cli_home(label: &str) -> std::path::PathBuf {
 
 fn run_with_isolated_env(args: &[&str], env: &[(&str, &str)], label: &str) -> Output {
     let home = isolated_cli_home(label);
+    let tool_workspace = home.join(".axonrunner").join("workspace");
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_axonrunner_apps"));
     cmd.env("HOME", &home).args(args);
     for key in SANITIZED_ENV_KEYS {
         cmd.env_remove(key);
+    }
+    if !env
+        .iter()
+        .any(|(key, _)| *key == "AXONRUNNER_RUNTIME_TOOL_WORKSPACE")
+    {
+        cmd.env("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", &tool_workspace);
+    }
+    if !env
+        .iter()
+        .any(|(key, _)| *key == "AXONRUNNER_RUNTIME_TOOL_LOG_PATH")
+    {
+        cmd.env(
+            "AXONRUNNER_RUNTIME_TOOL_LOG_PATH",
+            tool_workspace.join("runtime.log"),
+        );
     }
     for (key, value) in env {
         cmd.env(key, value);

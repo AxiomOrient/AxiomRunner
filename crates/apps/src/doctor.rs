@@ -1,3 +1,4 @@
+use crate::async_runtime_host::global_async_runtime_host;
 use crate::config_loader::AppConfig;
 use crate::display::mode_name;
 use crate::runtime_compose::{RuntimeComposeConfig, RuntimeComposeHealth};
@@ -37,6 +38,7 @@ pub struct DoctorRuntime {
     pub memory_detail: String,
     pub tool_state: String,
     pub tool_detail: String,
+    pub async_host_detail: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -62,9 +64,10 @@ pub fn build_doctor_report(
     state_path: &Path,
 ) -> DoctorReport {
     let compose_config = RuntimeComposeConfig::from_app_config(config);
-    let workspace = compose_config
-        .tool_workspace
-        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| Path::new(".").to_path_buf()));
+    let async_host = global_async_runtime_host().status();
+    let workspace = compose_config.tool_workspace.unwrap_or_else(|| {
+        std::env::current_dir().unwrap_or_else(|_| Path::new(".").to_path_buf())
+    });
     let workspace_display = workspace.display().to_string();
     let state_path_display = state_path.display().to_string();
     let trace_path = trace_store.events_path().display().to_string();
@@ -106,6 +109,16 @@ pub fn build_doctor_report(
             memory_detail: compose.memory.detail.clone(),
             tool_state: compose.tool.state.to_owned(),
             tool_detail: compose.tool.detail.clone(),
+            async_host_detail: format!(
+                "init_mode={},worker_threads={},max_in_flight={},timeout_ms={}",
+                async_host.init_mode,
+                async_host.worker_threads,
+                async_host.max_in_flight,
+                async_host
+                    .timeout_ms
+                    .map(|value| value.to_string())
+                    .unwrap_or_else(|| String::from("none"))
+            ),
         },
         paths: DoctorPaths {
             workspace: workspace_display,
@@ -141,7 +154,13 @@ pub fn render_doctor_lines(report: &DoctorReport) -> Vec<String> {
         ),
         format!(
             "doctor detail provider_detail={} memory_detail={} tool_detail={}",
-            report.runtime.provider_detail, report.runtime.memory_detail, report.runtime.tool_detail
+            report.runtime.provider_detail,
+            report.runtime.memory_detail,
+            report.runtime.tool_detail
+        ),
+        format!(
+            "doctor async_host detail={}",
+            report.runtime.async_host_detail
         ),
         format!(
             "doctor paths workspace={} state_path={} trace_events_path={} tool_log_path={}",

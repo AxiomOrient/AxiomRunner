@@ -2,7 +2,7 @@
 
 AxonRunner는 로컬 워크스페이스 자동화를 위한 minimal event-sourced CLI runtime이다.
 
-제품 표면은 의도적으로 좁다. 지금 보장하는 것은 `run`, `batch`, `replay`, `status`, `health`, `help`와 legacy single-intent alias(`read`, `write`, `remove`, `freeze`, `halt`) 뿐이다.
+제품 표면은 의도적으로 좁다. 지금 보장하는 것은 `run`, `batch`, `doctor`, `replay`, `status`, `health`, `help`와 legacy single-intent alias(`read`, `write`, `remove`, `freeze`, `halt`) 뿐이다.
 
 ## 현재 제품면
 
@@ -10,6 +10,7 @@ AxonRunner는 로컬 워크스페이스 자동화를 위한 minimal event-source
 
 - `run <intent-spec>`
 - `batch [--reset-state] <intent-spec>...`
+- `doctor [--json]`
 - `replay <intent-id|latest>`
 - `status`
 - `health`
@@ -63,6 +64,14 @@ CLI 표면 확인:
 ./target/debug/axonrunner_apps --help
 ```
 
+현재 runtime / path / provider 상태 점검:
+
+```bash
+./target/debug/axonrunner_apps \
+  --workspace="$PWD" \
+  doctor --json
+```
+
 가장 최근 intent 요약 replay:
 
 ```bash
@@ -100,6 +109,14 @@ env-only runtime knobs:
 - `AXONRUNNER_EXPERIMENTAL_OPENAI`
 - `OPENAI_API_KEY`
 
+`provider=codek` contract:
+
+- bundled crate pin: `codex-runtime 0.5.0`
+- minimum supported Codex CLI: `0.104.0`
+- `doctor --json` exposes `cli_bin`, detected `version`, and `compatibility`
+  through provider health detail
+- session reuse는 `cwd`와 `model`이 같을 때만 허용된다
+
 ## 실행 의미
 
 - `read`도 이제 다른 intent와 같은 canonical path를 타며 intent id와 revision이 남는다.
@@ -110,6 +127,12 @@ env-only runtime knobs:
 
 ## 문서
 
-- 배포/운영 설정: [docs/DEPLOYMENT.md](/Users/axient/repository/AxonRunner/docs/DEPLOYMENT.md)
-- 제품 charter: [docs/project-charter.md](/Users/axient/repository/AxonRunner/docs/project-charter.md)
-- 과거 blueprint 성격 문서는 `docs/0*.md`와 `issue/` 아래에 남아 있으며 현재 제품 README의 source of truth는 아니다.
+- 배포/운영 설정: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)
+- substrate contract: [docs/CODEK_RUNTIME_CONTRACT.md](docs/CODEK_RUNTIME_CONTRACT.md)
+- runbook: [docs/RUNBOOK.md](docs/RUNBOOK.md)
+- release checklist: [docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md)
+- versioning policy: [docs/VERSIONING.md](docs/VERSIONING.md)
+- 제품 charter: [docs/project-charter.md](docs/project-charter.md)
+- 현재 실행 계획: [plans/IMPLEMENTATION-PLAN.md](plans/IMPLEMENTATION-PLAN.md)
+- 현재 태스크 ledger: [plans/TASKS.md](plans/TASKS.md)
+- review input bundle은 `plans/docs/*`, `plans/data/*`에 남아 있으며 현재 제품 README의 source of truth는 아니다.

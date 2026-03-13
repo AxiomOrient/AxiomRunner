@@ -45,14 +45,36 @@ pub fn execute_replay(config: &AppConfig, target: &str) -> Result<(), String> {
         latest.artifacts.verify,
         latest.artifacts.report,
     );
+    if !latest.patch_artifacts.is_empty() {
+        let changed_paths = latest
+            .patch_artifacts
+            .iter()
+            .map(|patch| patch.target_path.as_str())
+            .collect::<Vec<_>>();
+        println!(
+            "replay changed_paths count={} paths={}",
+            changed_paths.len(),
+            changed_paths.join(",")
+        );
+    }
     for patch in &latest.patch_artifacts {
         println!(
-            "replay patch target={} artifact={} before={} after={}",
+            "replay patch target={} op={} artifact={} before={} after={}",
             patch.target_path,
+            patch.operation,
             patch.artifact_path,
             patch.before_digest.as_deref().unwrap_or("none"),
-            patch.after_digest,
+            patch.after_digest.as_deref().unwrap_or("none"),
         );
+        if let Some(excerpt) = &patch.before_excerpt {
+            println!("replay patch before_excerpt={excerpt}");
+        }
+        if let Some(excerpt) = &patch.after_excerpt {
+            println!("replay patch after_excerpt={excerpt}");
+        }
+        if let Some(diff) = &patch.unified_diff {
+            println!("replay patch unified_diff={diff}");
+        }
     }
     if let Some(failure) = &latest.first_failure {
         println!(

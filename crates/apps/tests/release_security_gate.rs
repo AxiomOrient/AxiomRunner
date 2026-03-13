@@ -1,3 +1,6 @@
+#[path = "../src/cli_command.rs"]
+#[allow(dead_code)]
+mod cli_command;
 #[path = "../src/config_loader.rs"]
 #[allow(dead_code)]
 mod config_loader;
@@ -13,6 +16,7 @@ mod parse_util;
 
 mod common;
 
+use cli_command::USAGE;
 use common::*;
 use config_loader::AppConfig;
 use dev_guard::{GuardError, enforce_current_build, enforce_release_gate};
@@ -146,4 +150,32 @@ fn release_security_gate_rejects_legacy_file_bypass_key() {
     assert_eq!(output.status.code(), Some(3), "stderr:\n{stderr}");
     assert!(stderr.contains("config error:"));
     assert!(stderr.contains("unknown config key 'allow_dev_in_release'"));
+}
+
+#[test]
+fn release_security_gate_truth_surface_docs_match_retained_commands() {
+    let readme = include_str!("../../../README.md");
+    let deployment = include_str!("../../../docs/DEPLOYMENT.md");
+    let charter = include_str!("../../../docs/project-charter.md");
+
+    for command in [
+        "run", "batch", "doctor", "replay", "status", "health", "help",
+    ] {
+        assert!(
+            USAGE.contains(command),
+            "cli usage missing command: {command}"
+        );
+        assert!(
+            readme.contains(command),
+            "README missing command: {command}"
+        );
+        assert!(
+            deployment.contains(command),
+            "DEPLOYMENT missing command: {command}"
+        );
+        assert!(
+            charter.contains(command),
+            "charter missing command: {command}"
+        );
+    }
 }

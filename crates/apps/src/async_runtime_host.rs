@@ -15,6 +15,9 @@ pub struct AsyncRuntimeHost {
     runtime: tokio::runtime::Runtime,
     semaphore: Arc<tokio::sync::Semaphore>,
     timeout: Option<Duration>,
+    worker_threads: usize,
+    max_in_flight: usize,
+    init_mode: &'static str,
 }
 
 impl AsyncRuntimeHost {
@@ -39,6 +42,9 @@ impl AsyncRuntimeHost {
             runtime,
             semaphore: Arc::new(tokio::sync::Semaphore::new(max_in_flight.max(1))),
             timeout,
+            worker_threads: worker_threads.max(1),
+            max_in_flight: max_in_flight.max(1),
+            init_mode: "configured",
         })
     }
 
@@ -68,6 +74,25 @@ impl AsyncRuntimeHost {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AsyncRuntimeHostStatus {
+    pub init_mode: &'static str,
+    pub worker_threads: usize,
+    pub max_in_flight: usize,
+    pub timeout_ms: Option<u64>,
+}
+
+impl AsyncRuntimeHost {
+    pub fn status(&self) -> AsyncRuntimeHostStatus {
+        AsyncRuntimeHostStatus {
+            init_mode: self.init_mode,
+            worker_threads: self.worker_threads,
+            max_in_flight: self.max_in_flight,
+            timeout_ms: self.timeout.map(|timeout| timeout.as_millis() as u64),
+        }
+    }
+}
+
 pub fn global_async_runtime_host() -> &'static AsyncRuntimeHost {
     static HOST: OnceLock<AsyncRuntimeHost> = OnceLock::new();
     HOST.get_or_init(|| {
@@ -83,6 +108,9 @@ pub fn global_async_runtime_host() -> &'static AsyncRuntimeHost {
                     DEFAULT_ASYNC_HOST_MAX_IN_FLIGHT,
                 )),
                 timeout: None,
+                worker_threads: DEFAULT_ASYNC_HOST_WORKER_THREADS,
+                max_in_flight: DEFAULT_ASYNC_HOST_MAX_IN_FLIGHT,
+                init_mode: "fallback_after_init_error",
             }
         })
     })

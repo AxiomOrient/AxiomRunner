@@ -1,0 +1,335 @@
+[
+  {
+    "id": "AZ-001",
+    "priority": "P0",
+    "status": "TODO",
+    "task": "README에 `doctor`와 실제 command surface 반영",
+    "files": "README.md",
+    "done_condition": "README와 CLI surface 일치",
+    "verification": "cargo run -p axonrunner_apps -- --help"
+  },
+  {
+    "id": "AZ-002",
+    "priority": "P0",
+    "status": "TODO",
+    "task": "README의 잘못된 절대 링크 수정",
+    "files": "README.md",
+    "done_condition": "문서 링크가 repo-relative로 동작",
+    "verification": "manual link check"
+  },
+  {
+    "id": "AZ-003",
+    "priority": "P0",
+    "status": "TODO",
+    "task": "CHANGELOG를 현재 retained surface로 갱신",
+    "files": "CHANGELOG.md",
+    "done_condition": "`agent` 언급 제거",
+    "verification": "diff review"
+  },
+  {
+    "id": "AZ-004",
+    "priority": "P1",
+    "status": "TODO",
+    "task": "`docs/0*.md`를 archive로 이동하고 현재 source of truth 표기",
+    "files": "docs/*",
+    "done_condition": "현재 문서와 과거 blueprint 구분 명확",
+    "verification": "tree review"
+  },
+  {
+    "id": "AZ-005",
+    "priority": "P1",
+    "status": "TODO",
+    "task": "DEPLOYMENT를 현재 run/replay/doctor 중심으로 재작성",
+    "files": "docs/DEPLOYMENT.md",
+    "done_condition": "운영 문서가 현재 제품면과 일치",
+    "verification": "doc review"
+  },
+  {
+    "id": "AZ-006",
+    "priority": "P0",
+    "status": "TODO",
+    "task": "mode canonical string 선정(`read_only` 권장)",
+    "files": "state_store.rs, display.rs, trace_store.rs",
+    "done_condition": "모든 표면에서 동일 string 사용",
+    "verification": "cargo test -p axonrunner_apps"
+  },
+  {
+    "id": "AZ-007",
+    "priority": "P0",
+    "status": "TODO",
+    "task": "legacy snapshot migration 추가",
+    "files": "state_store.rs",
+    "done_condition": "`readonly`와 신규 문자열 모두 로드 가능",
+    "verification": "state store tests"
+  },
+  {
+    "id": "AZ-008",
+    "priority": "P1",
+    "status": "TODO",
+    "task": "revision 의미(event-count) 문서화",
+    "files": "README.md, replay.rs, docs",
+    "done_condition": "operator가 해석 가능",
+    "verification": "doc + golden output"
+  },
+  {
+    "id": "AZ-009",
+    "priority": "P1",
+    "status": "TODO",
+    "task": "replay/status/doctor mode 표기 일관화",
+    "files": "status.rs, doctor.rs, replay.rs, display.rs",
+    "done_condition": "출력 drift 제거",
+    "verification": "e2e"
+  },
+  {
+    "id": "AZ-010",
+    "priority": "P0",
+    "status": "TODO",
+    "task": "patch artifact schema v2 정의",
+    "files": "tool_write.rs, runtime_compose.rs, trace_store.rs",
+    "done_condition": "metadata + explainable fields 포함",
+    "verification": "unit tests"
+  },
+  {
+    "id": "AZ-011",
+    "priority": "P0",
+    "status": "TODO",
+    "task": "write/replace에 bounded before/after excerpt 추가",
+    "files": "tool_write.rs",
+    "done_condition": "text mutation evidence 강화",
+    "verification": "adapter tests"
+  },
+  {
+    "id": "AZ-012",
+    "priority": "P1",
+    "status": "TODO",
+    "task": "가능한 경우 unified diff 추가",
+    "files": "tool_write.rs",
+    "done_condition": "diff artifact 생성",
+    "verification": "adapter tests"
+  },
+  {
+    "id": "AZ-013",
+    "priority": "P1",
+    "status": "TODO",
+    "task": "remove_path evidence 추가",
+    "files": "tool.rs, trace_store.rs",
+    "done_condition": "삭제 경로가 trace/report에 남음",
+    "verification": "adapter/apps tests"
+  },
+  {
+    "id": "AZ-014",
+    "priority": "P1",
+    "status": "TODO",
+    "task": "replay가 changed paths와 evidence를 요약 출력",
+    "files": "replay.rs",
+    "done_condition": "replay UX 개선",
+    "verification": "e2e"
+  },
+  {
+    "id": "AZ-015",
+    "priority": "P1",
+    "status": "TODO",
+    "task": "report 템플릿에서 plan/apply/verify/report 연결 강화",
+    "files": "runtime_compose.rs",
+    "done_condition": "report가 self-contained",
+    "verification": "golden review"
+  },
+  {
+    "id": "AZ-016",
+    "priority": "P0",
+    "status": "TODO",
+    "task": "현재 `codex-runtime` pin과 upstream 권장 버전 차이 문서화",
+    "files": "README.md, docs, Cargo.toml",
+    "done_condition": "운영자가 버전 기대치를 이해",
+    "verification": "doctor/manual"
+  },
+  {
+    "id": "AZ-017",
+    "priority": "P0",
+    "status": "TODO",
+    "task": "`doctor`에 codex binary path/version/compatibility 출력 강화",
+    "files": "doctor.rs, provider_codex_runtime.rs",
+    "done_condition": "설치 문제 진단 가능",
+    "verification": "doctor --json"
+  },
+  {
+    "id": "AZ-018",
+    "priority": "P0",
+    "status": "TODO",
+    "task": "unsupported version에 대한 blocked/degraded 정책 명시",
+    "files": "provider_codex_runtime.rs, docs",
+    "done_condition": "상태 판단 기준 고정",
+    "verification": "unit tests"
+  },
+  {
+    "id": "AZ-019",
+    "priority": "P1",
+    "status": "TODO",
+    "task": "session/workspace reuse contract 문서화",
+    "files": "provider_codex_runtime.rs, docs",
+    "done_condition": "런타임 의미 명확",
+    "verification": "doc review"
+  },
+  {
+    "id": "AZ-020",
+    "priority": "P1",
+    "status": "TODO",
+    "task": "0.4.x 유지 vs 0.5.x 업그레이드 decision record 작성",
+    "files": "docs",
+    "done_condition": "결정과 이유 명시",
+    "verification": "ADR review"
+  },
+  {
+    "id": "AZ-021",
+    "priority": "P0",
+    "status": "TODO",
+    "task": "`plans/TASKS.md` verification 문구와 실제 테스트 트리 정렬",
+    "files": "plans/TASKS.md, crates/*/tests/*",
+    "done_condition": "계획과 검증이 일치",
+    "verification": "tree + cargo test"
+  },
+  {
+    "id": "AZ-022",
+    "priority": "P0",
+    "status": "TODO",
+    "task": "adapter tool integration tests 존재 여부 확정 및 보강",
+    "files": "crates/adapters/tests/*",
+    "done_condition": "essential tool surface가 테스트됨",
+    "verification": "cargo test -p axonrunner_adapters"
+  },
+  {
+    "id": "AZ-023",
+    "priority": "P1",
+    "status": "TODO",
+    "task": "e2e corpus를 truth-surface 시나리오 이름으로 재정렬",
+    "files": "crates/apps/tests/e2e_cli.rs",
+    "done_condition": "테스트가 제품 계약을 직접 말함",
+    "verification": "cargo test"
+  },
+  {
+    "id": "AZ-024",
+    "priority": "P1",
+    "status": "TODO",
+    "task": "blocked provider / workspace boundary / persisted control state golden 추가",
+    "files": "e2e_cli.rs, adapter tests",
+    "done_condition": "핵심 계약 회귀 방지",
+    "verification": "cargo test"
+  },
+  {
+    "id": "AZ-025",
+    "priority": "P1",
+    "status": "TODO",
+    "task": "release gate에 doc drift 검사 추가",
+    "files": "release_security_gate.rs or scripts",
+    "done_condition": "README/help/charter drift 감지",
+    "verification": "cargo test"
+  },
+  {
+    "id": "AZ-026",
+    "priority": "P0",
+    "status": "TODO",
+    "task": "workspace 미결정 시 fail-closed",
+    "files": "runtime_compose.rs",
+    "done_condition": "`/` fallback 제거",
+    "verification": "unit/e2e"
+  },
+  {
+    "id": "AZ-027",
+    "priority": "P1",
+    "status": "TODO",
+    "task": "async runtime fallback 정책을 operator-visible로 변경",
+    "files": "async_runtime_host.rs, doctor.rs",
+    "done_condition": "fallback이 숨지 않음",
+    "verification": "tests/manual"
+  },
+  {
+    "id": "AZ-028",
+    "priority": "P1",
+    "status": "TODO",
+    "task": "`batch --reset-state` semantics 문서화",
+    "files": "cli_runtime.rs, README",
+    "done_condition": "reset 범위 오해 제거",
+    "verification": "e2e/docs"
+  },
+  {
+    "id": "AZ-029",
+    "priority": "P1",
+    "status": "TODO",
+    "task": "필요 시 `--reset-trace` / `--reset-artifacts` 설계 검토",
+    "files": "cli_command.rs, cli_runtime.rs",
+    "done_condition": "결정이 명확",
+    "verification": "ADR/doc"
+  },
+  {
+    "id": "AZ-030",
+    "priority": "P1",
+    "status": "TODO",
+    "task": "remove_path / run_command high-risk action trace 강화",
+    "files": "tool.rs, trace_store.rs, report",
+    "done_condition": "위험 작업 설명력 향상",
+    "verification": "adapter/apps tests"
+  },
+  {
+    "id": "AZ-031",
+    "priority": "P2",
+    "status": "TODO",
+    "task": "markdown memory header의 `ZeroClaw` 잔재 제거",
+    "files": "memory_markdown.rs",
+    "done_condition": "브랜딩 정리",
+    "verification": "unit tests"
+  },
+  {
+    "id": "AZ-032",
+    "priority": "P2",
+    "status": "TODO",
+    "task": "experimental OpenAI provider 유지 여부 결정",
+    "files": "provider_openai.rs, docs",
+    "done_condition": "유지/격리/삭제 결정",
+    "verification": "ADR"
+  },
+  {
+    "id": "AZ-033",
+    "priority": "P2",
+    "status": "TODO",
+    "task": "유지 시 blocking reqwest 제거 또는 분리",
+    "files": "provider_openai.rs",
+    "done_condition": "async bridge 일관성",
+    "verification": "tests"
+  },
+  {
+    "id": "AZ-034",
+    "priority": "P1",
+    "status": "TODO",
+    "task": "install/build/doctor/run/replay runbook 정리",
+    "files": "docs",
+    "done_condition": "신규 사용자가 따라갈 수 있음",
+    "verification": "clean-machine rehearsal"
+  },
+  {
+    "id": "AZ-035",
+    "priority": "P1",
+    "status": "TODO",
+    "task": "minimal example scenario 추가",
+    "files": "README, docs",
+    "done_condition": "사용 예시가 실제 제품과 일치",
+    "verification": "manual"
+  },
+  {
+    "id": "AZ-036",
+    "priority": "P1",
+    "status": "TODO",
+    "task": "release checklist 작성",
+    "files": "docs/plans",
+    "done_condition": "릴리즈 gate 명확",
+    "verification": "checklist review"
+  },
+  {
+    "id": "AZ-037",
+    "priority": "P2",
+    "status": "TODO",
+    "task": "versioning/changelog policy 문서화",
+    "files": "CHANGELOG, docs",
+    "done_condition": "기록 체계 고정",
+    "verification": "doc review"
+  }
+]

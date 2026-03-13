@@ -8,6 +8,7 @@ AxonRunner is a minimal event-sourced CLI agent runtime.
 
 - `run`
 - `batch`
+- `doctor`
 - `replay`
 - `status`
 - `health`

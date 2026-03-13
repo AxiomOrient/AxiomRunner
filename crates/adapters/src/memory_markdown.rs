@@ -135,7 +135,7 @@ impl MarkdownMemoryAdapter {
 
     fn persist_records(&self, records: &BTreeMap<String, MemoryRecord>) -> MemoryResult<()> {
         let mut content = String::from(
-            "# ZeroClaw Markdown Memory\n\n<!-- format: zeroclaw-memory-markdown-v1 -->\n",
+            "# AxonRunner Markdown Memory\n\n<!-- format: axonrunner-memory-markdown-v1 -->\n",
         );
 
         for record in records.values() {

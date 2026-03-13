@@ -160,7 +160,9 @@ pub fn parse_file_config(contents: &str) -> Result<PartialConfig, ConfigError> {
             "provider_model" => partial.provider_model = Some(value.to_string()),
             "workspace" => partial.workspace = Some(PathBuf::from(value)),
             "state_path" => partial.state_path = Some(PathBuf::from(value)),
-            "command_allowlist" => partial.command_allowlist = Some(parse_command_allowlist(value)?),
+            "command_allowlist" => {
+                partial.command_allowlist = Some(parse_command_allowlist(value)?)
+            }
             _ => {
                 return Err(ConfigError::new(format!(
                     "unknown config key '{}' on line {}",

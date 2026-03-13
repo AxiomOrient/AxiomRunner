@@ -4,15 +4,16 @@ use crate::contracts::{
     SearchMode, ToolAdapter, ToolPolicy, ToolRequest, ToolResult,
 };
 use crate::error::{AdapterError, AdapterResult, RetryClass};
-use regex::Regex;
 use crate::tool_workspace::{
     WorkspacePathError, canonicalize_workspace_root, collect_files_respecting_gitignore,
     resolve_workspace_path,
 };
 use crate::tool_write::{
-    WritePreparationError, atomic_overwrite, digest_path, existing_digest,
-    prepare_contents_for_existing_file, write_patch_artifact,
+    WritePreparationError, atomic_overwrite, bounded_excerpt, bounded_unified_diff, digest_path,
+    existing_digest, existing_utf8_contents, prepare_contents_for_existing_file,
+    write_command_artifact, write_patch_artifact,
 };
+use regex::Regex;
 use std::fs::{self, OpenOptions};
 use std::io::{self, Read, Write};
 #[cfg(unix)]
@@ -97,8 +98,7 @@ impl WorkspaceTool {
         let regex = match mode {
             SearchMode::Substring => None,
             SearchMode::Regex => Some(
-                Regex::new(needle)
-                    .map_err(|error| ToolError::InvalidPattern(error.to_string()))?,
+                Regex::new(needle).map_err(|error| ToolError::InvalidPattern(error.to_string()))?,
             ),
         };
 
@@ -169,6 +169,8 @@ impl WorkspaceTool {
             })?;
         }
 
+        let before_contents =
+            existing_utf8_contents(&resolved_path).map_err(map_write_preparation_error)?;
         let before_digest = existing_digest(&resolved_path).map_err(map_write_preparation_error)?;
 
         let bytes_written = if append {
@@ -203,13 +205,29 @@ impl WorkspaceTool {
             operation: "digest_file_after_write",
             source: error,
         })?;
+        let after_contents =
+            existing_utf8_contents(&resolved_path).map_err(map_write_preparation_error)?;
+        let operation = if append { "append" } else { "overwrite" };
+        let before_excerpt = before_contents
+            .as_deref()
+            .and_then(|contents| bounded_excerpt(contents, 240));
+        let after_excerpt = after_contents
+            .as_deref()
+            .and_then(|contents| bounded_excerpt(contents, 240));
+        let unified_diff = before_contents
+            .as_deref()
+            .zip(after_contents.as_deref())
+            .and_then(|(before, after)| bounded_unified_diff(before, after, 2048));
         let artifact_path = write_patch_artifact(
             &self.workspace_root,
             &resolved_path,
-            if append { "append" } else { "overwrite" },
+            operation,
             before_digest.as_deref(),
-            &after_digest,
-            bytes_written,
+            Some(&after_digest),
+            Some(bytes_written),
+            before_excerpt.as_deref(),
+            after_excerpt.as_deref(),
+            unified_diff.as_deref(),
         )
         .map_err(|error| ToolError::Io {
             operation: "write_patch_artifact",
@@ -220,9 +238,13 @@ impl WorkspaceTool {
             path: resolved_path,
             bytes_written,
             evidence: FileMutationEvidence {
+                operation: operation.to_owned(),
                 artifact_path,
                 before_digest,
-                after_digest,
+                after_digest: Some(after_digest),
+                before_excerpt,
+                after_excerpt,
+                unified_diff,
             },
         }))
     }
@@ -273,9 +295,13 @@ impl WorkspaceTool {
             return Ok(ToolResult::RemovePath(RemovePathOutput {
                 path: resolved_path,
                 removed: false,
+                evidence: None,
             }));
         }
 
+        let before_contents =
+            existing_utf8_contents(&resolved_path).map_err(map_write_preparation_error)?;
+        let before_digest = existing_digest(&resolved_path).map_err(map_write_preparation_error)?;
         let metadata = fs::metadata(&resolved_path).map_err(|error| ToolError::Io {
             operation: "stat_remove_path",
             source: error,
@@ -292,9 +318,37 @@ impl WorkspaceTool {
             })?;
         }
 
+        let before_excerpt = before_contents
+            .as_deref()
+            .and_then(|contents| bounded_excerpt(contents, 240));
+        let artifact_path = write_patch_artifact(
+            &self.workspace_root,
+            &resolved_path,
+            "remove",
+            before_digest.as_deref(),
+            None,
+            None,
+            before_excerpt.as_deref(),
+            None,
+            None,
+        )
+        .map_err(|error| ToolError::Io {
+            operation: "write_patch_artifact",
+            source: error,
+        })?;
+
         Ok(ToolResult::RemovePath(RemovePathOutput {
             path: resolved_path,
             removed: true,
+            evidence: Some(FileMutationEvidence {
+                operation: String::from("remove"),
+                artifact_path,
+                before_digest,
+                after_digest: None,
+                before_excerpt,
+                after_excerpt: None,
+                unified_diff: None,
+            }),
         }))
     }
 
@@ -369,15 +423,32 @@ impl WorkspaceTool {
 
         let stdout = join_output_worker(stdout_worker, "read_command_stdout")?;
         let stderr = join_output_worker(stderr_worker, "read_command_stderr")?;
+        let rendered_stdout = finalize_command_output(stdout.bytes, stdout.truncated);
+        let rendered_stderr = finalize_command_output(stderr.bytes, stderr.truncated);
+        let artifact_path = write_command_artifact(
+            &self.workspace_root,
+            program,
+            args,
+            exit_code,
+            &rendered_stdout,
+            &rendered_stderr,
+            stdout.truncated,
+            stderr.truncated,
+        )
+        .map_err(|error| ToolError::Io {
+            operation: "write_command_artifact",
+            source: error,
+        })?;
 
         Ok(ToolResult::RunCommand(RunCommandOutput {
             program: program.to_owned(),
             args: args.to_vec(),
             exit_code,
-            stdout: finalize_command_output(stdout.bytes, stdout.truncated),
-            stderr: finalize_command_output(stderr.bytes, stderr.truncated),
+            stdout: rendered_stdout,
+            stderr: rendered_stderr,
             stdout_truncated: stdout.truncated,
             stderr_truncated: stderr.truncated,
+            artifact_path,
         }))
     }
 
@@ -500,7 +571,10 @@ fn finalize_command_output(bytes: Vec<u8>, truncated: bool) -> String {
     truncated_text
 }
 
-fn spawn_output_worker<R>(mut reader: R, limit: usize) -> JoinHandle<Result<CollectedOutput, io::Error>>
+fn spawn_output_worker<R>(
+    mut reader: R,
+    limit: usize,
+) -> JoinHandle<Result<CollectedOutput, io::Error>>
 where
     R: Read + Send + 'static,
 {

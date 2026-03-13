@@ -11,6 +11,7 @@ use tokio::sync::Mutex;
 pub const ENV_CODEX_BIN: &str = "AXONRUNNER_CODEX_BIN";
 const DEFAULT_CODEX_BIN: &str = "codex";
 const SESSION_TIMEOUT_SECS: u64 = 120;
+const MIN_SUPPORTED_CODEX_CLI: &str = "0.104.0";
 
 struct ActiveSession {
     client: Client,
@@ -199,13 +200,34 @@ async fn probe_codex_runtime(cli_bin: PathBuf) -> Result<ProviderHealthReport, A
             )));
         }
     };
+    let compatibility = compatibility_for_version(&version);
+    match compatibility {
+        CodexCliCompatibility::Blocked => {
+            return Ok(ProviderHealthReport::blocked(format!(
+                "cli_bin={},version={},compatibility=blocked,min_supported={},reason=below_minimum",
+                resolved.display(),
+                version,
+                MIN_SUPPORTED_CODEX_CLI
+            )));
+        }
+        CodexCliCompatibility::Unknown => {
+            return Ok(ProviderHealthReport::degraded(format!(
+                "cli_bin={},version={},compatibility=unknown,min_supported={},reason=unparseable_version",
+                resolved.display(),
+                version,
+                MIN_SUPPORTED_CODEX_CLI
+            )));
+        }
+        CodexCliCompatibility::Supported => {}
+    }
     let client = match Client::connect(ClientConfig::new().with_cli_bin(&resolved)).await {
         Ok(client) => client,
         Err(error) => {
             return Ok(ProviderHealthReport::blocked(format!(
-                "cli_bin={},version={},handshake_error={}",
+                "cli_bin={},version={},compatibility=supported,min_supported={},handshake_error={}",
                 resolved.display(),
                 version,
+                MIN_SUPPORTED_CODEX_CLI,
                 sanitize_detail(&error.to_string())
             )));
         }
@@ -213,17 +235,54 @@ async fn probe_codex_runtime(cli_bin: PathBuf) -> Result<ProviderHealthReport, A
 
     match client.shutdown().await {
         Ok(()) => Ok(ProviderHealthReport::ready(format!(
-            "cli_bin={},version={},handshake=ok",
-            resolved.display(),
-            version
-        ))),
-        Err(error) => Ok(ProviderHealthReport::degraded(format!(
-            "cli_bin={},version={},shutdown_error={}",
+            "cli_bin={},version={},compatibility=supported,min_supported={},handshake=ok",
             resolved.display(),
             version,
+            MIN_SUPPORTED_CODEX_CLI
+        ))),
+        Err(error) => Ok(ProviderHealthReport::degraded(format!(
+            "cli_bin={},version={},compatibility=supported,min_supported={},shutdown_error={}",
+            resolved.display(),
+            version,
+            MIN_SUPPORTED_CODEX_CLI,
             sanitize_detail(&error.to_string())
         ))),
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CodexCliCompatibility {
+    Supported,
+    Unknown,
+    Blocked,
+}
+
+fn compatibility_for_version(version: &str) -> CodexCliCompatibility {
+    let Some(found) = parse_semver_triplet(version) else {
+        return CodexCliCompatibility::Unknown;
+    };
+    let Some(minimum) = parse_semver_triplet(MIN_SUPPORTED_CODEX_CLI) else {
+        return CodexCliCompatibility::Unknown;
+    };
+    if found >= minimum {
+        CodexCliCompatibility::Supported
+    } else {
+        CodexCliCompatibility::Blocked
+    }
+}
+
+fn parse_semver_triplet(raw: &str) -> Option<(u64, u64, u64)> {
+    for token in raw.split(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '.')) {
+        if token.chars().filter(|ch| *ch == '.').count() < 2 {
+            continue;
+        }
+        let mut parts = token.split('.');
+        let major = parts.next()?.parse().ok()?;
+        let minor = parts.next()?.parse().ok()?;
+        let patch = parts.next()?.parse().ok()?;
+        return Some((major, minor, patch));
+    }
+    None
 }
 
 fn resolve_cli_bin(path: &Path) -> Result<PathBuf, String> {
@@ -298,7 +357,10 @@ fn sanitize_detail(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::CodexRuntimeProvider;
+    use super::{
+        CodexCliCompatibility, CodexRuntimeProvider, compatibility_for_version,
+        parse_semver_triplet,
+    };
     use crate::contracts::{ProviderAdapter, ProviderRequest};
     use crate::test_util::block_on;
     use std::path::PathBuf;
@@ -348,5 +410,35 @@ mod tests {
         let report = block_on(provider.health()).expect("health probe should complete");
         assert_eq!(report.status.as_str(), "blocked");
         assert!(report.detail.contains("reason=binary_not_found"));
+    }
+
+    #[test]
+    fn codex_runtime_version_parser_extracts_semver_triplet() {
+        assert_eq!(parse_semver_triplet("codex 0.104.1"), Some((0, 104, 1)));
+        assert_eq!(
+            parse_semver_triplet("codex-cli version 0.99.0"),
+            Some((0, 99, 0))
+        );
+        assert_eq!(parse_semver_triplet("unknown"), None);
+    }
+
+    #[test]
+    fn codex_runtime_compatibility_uses_minimum_supported_version() {
+        assert_eq!(
+            compatibility_for_version("codex 0.104.0"),
+            CodexCliCompatibility::Supported
+        );
+        assert_eq!(
+            compatibility_for_version("codex 0.105.2"),
+            CodexCliCompatibility::Supported
+        );
+        assert_eq!(
+            compatibility_for_version("codex 0.103.9"),
+            CodexCliCompatibility::Blocked
+        );
+        assert_eq!(
+            compatibility_for_version("codex unknown"),
+            CodexCliCompatibility::Unknown
+        );
     }
 }

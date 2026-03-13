@@ -12,7 +12,7 @@ pub struct OpenAiCompatProvider {
     api_key: Option<String>,
     base_url: String,
     experimental_enabled: bool,
-    http: reqwest::blocking::Client,
+    http: reqwest::Client,
 }
 
 impl OpenAiCompatProvider {
@@ -31,11 +31,11 @@ impl OpenAiCompatProvider {
         base_url: impl Into<String>,
         experimental_enabled: bool,
     ) -> Self {
-        let http = reqwest::blocking::Client::builder()
+        let http = reqwest::Client::builder()
             .connect_timeout(std::time::Duration::from_secs(HTTP_CONNECT_TIMEOUT_SECS))
             .timeout(std::time::Duration::from_secs(HTTP_REQUEST_TIMEOUT_SECS))
             .build()
-            .unwrap_or_else(|_| reqwest::blocking::Client::new());
+            .unwrap_or_else(|_| reqwest::Client::new());
 
         Self {
             id_str,
@@ -121,6 +121,7 @@ impl ProviderAdapter for OpenAiCompatProvider {
                 .header("Content-Type", "application/json")
                 .json(&body)
                 .send()
+                .await
                 .map_err(|error| {
                     AdapterError::failed(
                         "http_send",
@@ -137,7 +138,7 @@ impl ProviderAdapter for OpenAiCompatProvider {
                 ));
             }
 
-            let json: serde_json::Value = response.json().map_err(|error| {
+            let json: serde_json::Value = response.json().await.map_err(|error| {
                 AdapterError::failed(
                     "response_parse",
                     error.to_string(),

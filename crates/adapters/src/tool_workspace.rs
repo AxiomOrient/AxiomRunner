@@ -85,6 +85,7 @@ pub(crate) fn resolve_workspace_path(
 pub(crate) fn collect_files_respecting_gitignore(base: &Path) -> Result<Vec<PathBuf>, io::Error> {
     let mut files = Vec::new();
     let mut first_io_error = None;
+    let internal_root = base.join(".axonrunner");
 
     let walker = WalkBuilder::new(base)
         .hidden(false)
@@ -93,6 +94,7 @@ pub(crate) fn collect_files_respecting_gitignore(base: &Path) -> Result<Vec<Path
         .git_global(true)
         .require_git(false)
         .follow_links(false)
+        .filter_entry(move |entry| !entry.path().starts_with(&internal_root))
         .build();
 
     for result in walker {

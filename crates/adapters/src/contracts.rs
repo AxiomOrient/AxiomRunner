@@ -200,9 +200,13 @@ pub struct SearchFilesOutput {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FileMutationEvidence {
+    pub operation: String,
     pub artifact_path: PathBuf,
     pub before_digest: Option<String>,
-    pub after_digest: String,
+    pub after_digest: Option<String>,
+    pub before_excerpt: Option<String>,
+    pub after_excerpt: Option<String>,
+    pub unified_diff: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -223,6 +227,7 @@ pub struct ReplaceInFileOutput {
 pub struct RemovePathOutput {
     pub path: PathBuf,
     pub removed: bool,
+    pub evidence: Option<FileMutationEvidence>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -234,6 +239,7 @@ pub struct RunCommandOutput {
     pub stderr: String,
     pub stdout_truncated: bool,
     pub stderr_truncated: bool,
+    pub artifact_path: PathBuf,
 }
 
 pub trait ToolAdapter: Send + Sync {

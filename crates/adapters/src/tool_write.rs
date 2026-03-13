@@ -112,7 +112,16 @@ pub(crate) fn existing_digest(path: &Path) -> Result<Option<String>, WritePrepar
     if !path.exists() {
         return Ok(None);
     }
-    digest_path(path).map(Some).map_err(WritePreparationError::Io)
+    digest_path(path)
+        .map(Some)
+        .map_err(WritePreparationError::Io)
+}
+
+pub(crate) fn existing_utf8_contents(path: &Path) -> Result<Option<String>, WritePreparationError> {
+    if !path.exists() {
+        return Ok(None);
+    }
+    read_existing_utf8(path).map(Some)
 }
 
 pub(crate) fn digest_path(path: &Path) -> Result<String, io::Error> {
@@ -134,8 +143,11 @@ pub(crate) fn write_patch_artifact(
     target_path: &Path,
     operation: &str,
     before_digest: Option<&str>,
-    after_digest: &str,
-    bytes_written: usize,
+    after_digest: Option<&str>,
+    bytes_written: Option<usize>,
+    before_excerpt: Option<&str>,
+    after_excerpt: Option<&str>,
+    unified_diff: Option<&str>,
 ) -> Result<PathBuf, io::Error> {
     let patch_dir = workspace_root.join(".axonrunner").join("patches");
     fs::create_dir_all(&patch_dir)?;
@@ -146,13 +158,51 @@ pub(crate) fn write_patch_artifact(
         .display()
         .to_string();
     let payload = json!({
-        "schema": "axonrunner.patch.v1",
+        "schema": "axonrunner.patch.v2",
         "timestamp_ms": now_millis(),
         "operation": operation,
         "target_path": relative_target,
         "before_digest": before_digest,
         "after_digest": after_digest,
         "bytes_written": bytes_written,
+        "before_excerpt": before_excerpt,
+        "after_excerpt": after_excerpt,
+        "unified_diff": unified_diff,
+    });
+    let rendered =
+        serde_json::to_vec_pretty(&payload).map_err(|error| io::Error::other(error.to_string()))?;
+    fs::write(&artifact_path, rendered)?;
+    Ok(artifact_path)
+}
+
+pub(crate) fn write_command_artifact(
+    workspace_root: &Path,
+    program: &str,
+    args: &[String],
+    exit_code: i32,
+    stdout: &str,
+    stderr: &str,
+    stdout_truncated: bool,
+    stderr_truncated: bool,
+) -> Result<PathBuf, io::Error> {
+    let command_dir = workspace_root.join(".axonrunner").join("commands");
+    fs::create_dir_all(&command_dir)?;
+    let artifact_path = command_dir.join(format!(
+        "{}-{}-{}.json",
+        program.replace('/', "_"),
+        std::process::id(),
+        now_millis()
+    ));
+    let payload = json!({
+        "schema": "axonrunner.command.v1",
+        "timestamp_ms": now_millis(),
+        "program": program,
+        "args": args,
+        "exit_code": exit_code,
+        "stdout": bounded_excerpt(stdout, 240),
+        "stderr": bounded_excerpt(stderr, 240),
+        "stdout_truncated": stdout_truncated,
+        "stderr_truncated": stderr_truncated,
     });
     let rendered =
         serde_json::to_vec_pretty(&payload).map_err(|error| io::Error::other(error.to_string()))?;
@@ -195,11 +245,52 @@ fn read_existing_utf8(path: &Path) -> Result<String, WritePreparationError> {
     String::from_utf8(bytes).map_err(|_| WritePreparationError::UnsupportedEncoding)
 }
 
+pub(crate) fn bounded_excerpt(contents: &str, limit: usize) -> Option<String> {
+    if contents.is_empty() {
+        return None;
+    }
+    let normalized = contents.replace('\n', "\\n").replace('\r', "\\r");
+    let excerpt = normalized.chars().take(limit).collect::<String>();
+    if normalized.chars().count() > limit {
+        Some(format!("{excerpt}...<truncated>"))
+    } else {
+        Some(excerpt)
+    }
+}
+
+pub(crate) fn bounded_unified_diff(before: &str, after: &str, limit: usize) -> Option<String> {
+    if before == after {
+        return None;
+    }
+    let before_lines = before.lines().collect::<Vec<_>>();
+    let after_lines = after.lines().collect::<Vec<_>>();
+    if before_lines.len() + after_lines.len() > 80 {
+        return None;
+    }
+
+    let mut diff = String::from("--- before\\n+++ after");
+    for line in before_lines {
+        diff.push_str("\\n-");
+        diff.push_str(line);
+    }
+    for line in after_lines {
+        diff.push_str("\\n+");
+        diff.push_str(line);
+    }
+
+    if diff.chars().count() > limit {
+        let truncated = diff.chars().take(limit).collect::<String>();
+        Some(format!("{truncated}...<truncated>"))
+    } else {
+        Some(diff)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        LineEnding, WritePreparationError, detect_line_ending, normalize_line_endings,
-        prepare_contents_for_existing_file,
+        LineEnding, WritePreparationError, bounded_excerpt, bounded_unified_diff,
+        detect_line_ending, normalize_line_endings, prepare_contents_for_existing_file,
     };
     use std::fs;
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -245,5 +336,22 @@ mod tests {
         assert!(matches!(err, WritePreparationError::UnsupportedEncoding));
 
         let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn bounded_excerpt_marks_truncation() {
+        assert_eq!(
+            bounded_excerpt("alpha\nbeta\ngamma", 8),
+            Some(String::from("alpha\\nb...<truncated>"))
+        );
+    }
+
+    #[test]
+    fn bounded_unified_diff_includes_before_and_after_lines() {
+        let diff = bounded_unified_diff("alpha\nbeta\n", "alpha\ngamma\n", 256)
+            .expect("diff should be present");
+        assert!(diff.contains("--- before"));
+        assert!(diff.contains("-beta"));
+        assert!(diff.contains("+gamma"));
     }
 }

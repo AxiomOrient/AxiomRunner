@@ -225,7 +225,7 @@ fn parse_u64(raw: &str, field: &str, line: usize) -> Result<u64, String> {
 fn parse_mode(raw: &str, line: usize) -> Result<ExecutionMode, String> {
     match raw {
         "active" => Ok(ExecutionMode::Active),
-        "readonly" => Ok(ExecutionMode::ReadOnly),
+        "read_only" | "readonly" => Ok(ExecutionMode::ReadOnly),
         "halted" => Ok(ExecutionMode::Halted),
         _ => Err(format!("invalid mode '{raw}' on line {line}")),
     }
@@ -257,7 +257,7 @@ fn parse_policy_code(raw: &str, line: usize) -> Result<Option<PolicyCode>, Strin
 fn mode_name(mode: ExecutionMode) -> &'static str {
     match mode {
         ExecutionMode::Active => "active",
-        ExecutionMode::ReadOnly => "readonly",
+        ExecutionMode::ReadOnly => "read_only",
         ExecutionMode::Halted => "halted",
     }
 }
@@ -341,5 +341,30 @@ mod tests {
         let decoded = parse_snapshot(&encoded).expect("snapshot should parse");
 
         assert_eq!(decoded, snapshot);
+        assert!(encoded.contains("mode=read_only"));
+    }
+
+    #[test]
+    fn state_snapshot_loads_legacy_readonly_mode() {
+        let raw = "\
+version=axonrunner-state-v1
+next_intent_seq=3
+revision=12
+mode=readonly
+last_intent_id=636c692d33
+last_actor_id=73797374656d
+last_decision=accepted
+last_policy_code=allowed
+denied_count=1
+audit_count=4
+fact.616c706861=3432
+";
+
+        let decoded = parse_snapshot(raw).expect("legacy snapshot should parse");
+
+        assert_eq!(decoded.next_intent_seq, 3);
+        assert_eq!(decoded.state.revision, 12);
+        assert_eq!(decoded.state.mode, ExecutionMode::ReadOnly);
+        assert_eq!(decoded.state.facts.get("alpha"), Some(&String::from("42")));
     }
 }

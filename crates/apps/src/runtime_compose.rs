@@ -4,8 +4,7 @@ use crate::config_loader::AppConfig;
 use crate::env_util::read_env_trimmed;
 use axonrunner_adapters::{
     FileMutationEvidence, FileWriteOutput, MemoryAdapter, ProviderAdapter, ProviderRequest,
-    ToolAdapter, ToolPolicy, ToolRequest, ToolResult, WorkspaceTool,
-    build_contract_memory,
+    ToolAdapter, ToolPolicy, ToolRequest, ToolResult, WorkspaceTool, build_contract_memory,
     build_contract_provider, provider_registry, resolve_provider_id,
 };
 use axonrunner_core::DecisionOutcome;
@@ -80,10 +79,14 @@ pub struct RuntimeComposeExecution {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeComposePatchArtifact {
+    pub operation: String,
     pub target_path: String,
     pub artifact_path: String,
     pub before_digest: Option<String>,
-    pub after_digest: String,
+    pub after_digest: Option<String>,
+    pub before_excerpt: Option<String>,
+    pub after_excerpt: Option<String>,
+    pub unified_diff: Option<String>,
 }
 
 impl RuntimeComposeExecution {
@@ -114,9 +117,8 @@ impl RuntimeComposeConfig {
                 .ok()
                 .map(|home| PathBuf::from(home).join(".axonrunner").join("memory.db"))
         });
-        let tool_workspace = env_path(ENV_RUNTIME_TOOL_WORKSPACE)
-            .or_else(|| config.workspace.clone())
-            .or_else(|| std::env::current_dir().ok());
+        let tool_workspace =
+            env_path(ENV_RUNTIME_TOOL_WORKSPACE).or_else(|| config.workspace.clone());
 
         let tool_log_path = env_string(ENV_RUNTIME_TOOL_LOG_PATH).unwrap_or_else(|| {
             tool_workspace
@@ -203,6 +205,12 @@ impl RuntimeComposeState {
             )
         })?;
         config.provider_id = provider_id.to_owned();
+
+        if config.tool_workspace.is_none() {
+            return Err(String::from(
+                "runtime tool workspace is not configured. set --workspace or AXONRUNNER_RUNTIME_TOOL_WORKSPACE",
+            ));
+        }
 
         if let Some(path) = &config.memory_path
             && let Some(parent) = path.parent()
@@ -355,7 +363,7 @@ impl RuntimeComposeState {
             (
                 format!("{base}.report.md"),
                 format!(
-                    "# Report\n\nintent_id={intent_id}\nkind={}\noutcome={}\npolicy={policy_code}\nprovider={}\nmemory={}\ntool={}\noutputs={}\n",
+                    "# Report\n\nintent_id={intent_id}\nkind={}\noutcome={}\npolicy={policy_code}\nprovider={}\nmemory={}\ntool={}\noutputs={}\nchanged_paths={}\nevidence={}\n",
                     template_kind(template),
                     outcome_name(outcome),
                     step_name(&execution.provider),
@@ -365,6 +373,33 @@ impl RuntimeComposeState {
                         String::from("none")
                     } else {
                         execution.tool_outputs.join(" | ")
+                    },
+                    if execution.patch_artifacts.is_empty() {
+                        String::from("none")
+                    } else {
+                        execution
+                            .patch_artifacts
+                            .iter()
+                            .map(|artifact| artifact.target_path.as_str())
+                            .collect::<Vec<_>>()
+                            .join(" | ")
+                    },
+                    if execution.patch_artifacts.is_empty() {
+                        String::from("none")
+                    } else {
+                        execution
+                            .patch_artifacts
+                            .iter()
+                            .map(|artifact| {
+                                format!(
+                                    "{}:{}:{}",
+                                    artifact.operation,
+                                    artifact.target_path,
+                                    artifact.after_excerpt.as_deref().unwrap_or("no_excerpt")
+                                )
+                            })
+                            .collect::<Vec<_>>()
+                            .join(" | ")
                     }
                 ),
             ),
@@ -372,12 +407,13 @@ impl RuntimeComposeState {
 
         let mut patch_artifacts = Vec::new();
         for (path, contents) in files {
-            let result = tool.execute(ToolRequest::FileWrite {
-                path,
-                contents,
-                append: false,
-            })
-            .map_err(|error| format!("runtime_compose.report: {error}"))?;
+            let result = tool
+                .execute(ToolRequest::FileWrite {
+                    path,
+                    contents,
+                    append: false,
+                })
+                .map_err(|error| format!("runtime_compose.report: {error}"))?;
             let ToolResult::FileWrite(FileWriteOutput { path, evidence, .. }) = result else {
                 return Err(String::from(
                     "runtime_compose.report: unexpected non-file-write result",
@@ -463,7 +499,11 @@ impl RuntimeComposeState {
         &self,
         plan: Option<ToolPlan>,
         provider_output: Option<&str>,
-    ) -> (RuntimeComposeStep, Vec<String>, Vec<RuntimeComposePatchArtifact>) {
+    ) -> (
+        RuntimeComposeStep,
+        Vec<String>,
+        Vec<RuntimeComposePatchArtifact>,
+    ) {
         let Some(plan) = plan else {
             return (RuntimeComposeStep::Skipped, Vec::new(), Vec::new());
         };
@@ -504,12 +544,7 @@ impl RuntimeComposeState {
             .tool_workspace
             .as_ref()
             .and_then(|path| path.to_str().map(str::to_owned))
-            .or_else(|| {
-                std::env::current_dir()
-                    .ok()
-                    .and_then(|path| path.to_str().map(str::to_owned))
-            })
-            .unwrap_or_else(|| String::from("/"))
+            .unwrap_or_default()
     }
 }
 
@@ -564,10 +599,14 @@ fn patch_artifact_from_write_output(
     evidence: FileMutationEvidence,
 ) -> RuntimeComposePatchArtifact {
     RuntimeComposePatchArtifact {
+        operation: evidence.operation,
         target_path: path.display().to_string(),
         artifact_path: evidence.artifact_path.display().to_string(),
         before_digest: evidence.before_digest,
         after_digest: evidence.after_digest,
+        before_excerpt: evidence.before_excerpt,
+        after_excerpt: evidence.after_excerpt,
+        unified_diff: evidence.unified_diff,
     }
 }
 

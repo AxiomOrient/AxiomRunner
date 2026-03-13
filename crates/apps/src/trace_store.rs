@@ -41,10 +41,14 @@ pub struct TraceVerificationSummary {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TracePatchArtifact {
+    pub operation: String,
     pub target_path: String,
     pub artifact_path: String,
     pub before_digest: Option<String>,
-    pub after_digest: String,
+    pub after_digest: Option<String>,
+    pub before_excerpt: Option<String>,
+    pub after_excerpt: Option<String>,
+    pub unified_diff: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -322,18 +326,22 @@ fn verification_summary(
 
 fn trace_patch_artifact(artifact: &RuntimeComposePatchArtifact) -> TracePatchArtifact {
     TracePatchArtifact {
+        operation: artifact.operation.clone(),
         target_path: artifact.target_path.clone(),
         artifact_path: artifact.artifact_path.clone(),
         before_digest: artifact.before_digest.clone(),
         after_digest: artifact.after_digest.clone(),
+        before_excerpt: artifact.before_excerpt.clone(),
+        after_excerpt: artifact.after_excerpt.clone(),
+        unified_diff: artifact.unified_diff.clone(),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        ReplaySummary, TraceArtifacts, TraceFailureBoundary, TraceIntentEvent, TracePatchArtifact,
-        TraceStore, TraceVerificationSummary, TRACE_INTENT_SCHEMA_V1,
+        ReplaySummary, TRACE_INTENT_SCHEMA_V1, TraceArtifacts, TraceFailureBoundary,
+        TraceIntentEvent, TracePatchArtifact, TraceStore, TraceVerificationSummary,
     };
     use std::fs;
     use std::path::PathBuf;
@@ -387,10 +395,14 @@ mod tests {
                 },
             },
             patch_artifacts: vec![TracePatchArtifact {
+                operation: String::from("overwrite"),
                 target_path: String::from("runtime.log"),
                 artifact_path: String::from(".axonrunner/patches/runtime-log.json"),
                 before_digest: None,
-                after_digest: String::from("abcd"),
+                after_digest: Some(String::from("abcd")),
+                before_excerpt: None,
+                after_excerpt: Some(String::from("after")),
+                unified_diff: None,
             }],
             artifacts: TraceArtifacts {
                 plan: format!(".axonrunner/artifacts/{intent_id}.plan.md"),

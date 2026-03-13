@@ -1,7 +1,7 @@
 use crate::cli_command::{CliCommand, IntentTemplate, USAGE};
 use crate::config_loader::AppConfig;
-use crate::doctor::{build_doctor_report, render_doctor_lines};
 use crate::display::mode_name;
+use crate::doctor::{build_doctor_report, render_doctor_lines};
 use crate::runtime_compose::{RuntimeComposeConfig, RuntimeComposeState};
 use crate::state_store::{RuntimeStateSnapshot, StateStore};
 use crate::status::{
@@ -190,16 +190,14 @@ fn execute_intent(runtime: &mut CliRuntime, intent: &IntentTemplate) -> Result<(
     let previous = runtime.runtime_snapshot();
     let applied = runtime.apply_template(intent);
     let execution = runtime.persist_template_result(intent, &applied);
-    let report_result = runtime
-        .compose_state
-        .write_report(
-            intent,
-            &applied.intent_id,
-            applied.outcome,
-            applied.policy_code.as_str(),
-            applied.effect_count,
-            &execution,
-        );
+    let report_result = runtime.compose_state.write_report(
+        intent,
+        &applied.intent_id,
+        applied.outcome,
+        applied.policy_code.as_str(),
+        applied.effect_count,
+        &execution,
+    );
     let report_error = report_result.as_ref().err().cloned();
     let mut patch_artifacts = execution.patch_artifacts.clone();
     if let Ok(report_patch_artifacts) = &report_result {

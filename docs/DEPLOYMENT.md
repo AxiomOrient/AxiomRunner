@@ -8,6 +8,7 @@
 
 - `run`
 - `batch`
+- `doctor`
 - `replay`
 - `status`
 - `health`
@@ -32,7 +33,7 @@ legacy alias:
 | profile | `--profile=<name>` | `profile=...` | `AXONRUNNER_PROFILE` | `prod` |
 | provider | `--provider=<id>` | `provider=...` | `AXONRUNNER_RUNTIME_PROVIDER` | `mock-local` |
 | provider model | `--provider-model=<name>` | `provider_model=...` | `AXONRUNNER_RUNTIME_PROVIDER_MODEL` | provider id |
-| workspace | `--workspace=<path>` | `workspace=...` | `AXONRUNNER_RUNTIME_TOOL_WORKSPACE` | 현재 작업 디렉터리 |
+| workspace | `--workspace=<path>` | `workspace=...` | `AXONRUNNER_RUNTIME_TOOL_WORKSPACE` | 없음. 반드시 명시 |
 | state path | `--state-path=<path>` | `state_path=...` | `AXONRUNNER_RUNTIME_STATE_PATH` | `~/.axonrunner/state.snapshot` |
 
 설정 파일은 `--config-file=<path>` 또는 `--config-file <path>` 로 읽는다.
@@ -49,6 +50,15 @@ legacy alias:
 | `AXONRUNNER_CODEX_BIN` | `codex` | `provider=codek`일 때 사용할 Codex CLI |
 | `AXONRUNNER_EXPERIMENTAL_OPENAI` | unset | `provider=openai`를 experimental로 opt-in 할 때만 사용 |
 | `OPENAI_API_KEY` | unset | `provider=openai` opt-in 후 실제 호출에 필요 |
+
+## `codek` Compatibility Contract
+
+- crate pin: `codex-runtime 0.5.0`
+- minimum supported Codex CLI: `0.104.0`
+- `doctor` health detail은 `cli_bin`, detected `version`, `compatibility`,
+  `min_supported`를 포함한다
+- detected CLI version이 minimum 아래면 `blocked`
+- version을 파싱할 수 없으면 `degraded`
 
 ## Minimal Local Run
 
@@ -95,6 +105,14 @@ CLI surface:
 ./target/debug/axonrunner_apps --help
 ```
 
+doctor JSON probe:
+
+```bash
+./target/debug/axonrunner_apps \
+  --workspace="$PWD" \
+  doctor --json
+```
+
 latest replay:
 
 ```bash
@@ -110,6 +128,12 @@ AXONRUNNER_RUNTIME_PROVIDER=openai \
 AXONRUNNER_EXPERIMENTAL_OPENAI=1 \
 ./target/debug/axonrunner_apps health
 ```
+
+## Runtime Tail Notes
+
+- async runtime host는 init 실패 시 fallback host로 내려가며, 이 상태는 operator-visible output으로 드러나야 한다.
+- `batch --reset-state`는 state snapshot만 초기화한다. trace/events와 artifact 파일은 자동 삭제하지 않는다.
+- `--reset-trace`, `--reset-artifacts`는 현재 별도 CLI flag로 채택하지 않고 ADR/doc contract로 유지한다.
 
 ## Verification
 

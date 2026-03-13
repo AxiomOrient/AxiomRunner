@@ -50,7 +50,16 @@ fn workspace_tool_supports_list_read_search_replace_remove_and_run_command() {
         panic!("expected file write result");
     };
     assert!(write.evidence.before_digest.is_none());
-    assert!(!write.evidence.after_digest.is_empty());
+    assert_eq!(write.evidence.operation, "overwrite");
+    assert!(
+        !write
+            .evidence
+            .after_digest
+            .as_deref()
+            .unwrap_or("")
+            .is_empty()
+    );
+    assert!(write.evidence.after_excerpt.is_some());
     assert!(write.evidence.artifact_path.exists());
 
     let list = tool
@@ -97,6 +106,7 @@ fn workspace_tool_supports_list_read_search_replace_remove_and_run_command() {
     };
     assert_eq!(replace.replacements, 1);
     assert!(replace.evidence.before_digest.is_some());
+    assert!(replace.evidence.unified_diff.is_some());
     assert!(replace.evidence.artifact_path.exists());
 
     let run = tool
@@ -112,6 +122,7 @@ fn workspace_tool_supports_list_read_search_replace_remove_and_run_command() {
     assert!(!run.stdout.trim().is_empty());
     assert!(!run.stdout_truncated);
     assert!(!run.stderr_truncated);
+    assert!(run.artifact_path.exists());
 
     let remove = tool
         .execute(ToolRequest::RemovePath {
@@ -122,6 +133,13 @@ fn workspace_tool_supports_list_read_search_replace_remove_and_run_command() {
         panic!("expected remove result");
     };
     assert!(remove.removed);
+    assert_eq!(
+        remove
+            .evidence
+            .as_ref()
+            .map(|evidence| evidence.operation.as_str()),
+        Some("remove")
+    );
     assert!(!root.join("notes.txt").exists());
 
     let _ = fs::remove_dir_all(root);
@@ -177,12 +195,20 @@ fn workspace_tool_writes_patch_artifact_with_before_and_after_digests() {
     };
 
     assert!(write.evidence.before_digest.is_some());
-    assert!(!write.evidence.after_digest.is_empty());
+    assert!(
+        !write
+            .evidence
+            .after_digest
+            .as_deref()
+            .unwrap_or("")
+            .is_empty()
+    );
     let artifact = fs::read_to_string(&write.evidence.artifact_path)
         .expect("patch artifact should be readable");
-    assert!(artifact.contains("\"schema\": \"axonrunner.patch.v1\""));
+    assert!(artifact.contains("\"schema\": \"axonrunner.patch.v2\""));
     assert!(artifact.contains("\"operation\": \"overwrite\""));
     assert!(artifact.contains("\"target_path\": \"notes.txt\""));
+    assert!(artifact.contains("\"after_excerpt\""));
 
     let _ = fs::remove_dir_all(root);
 }
