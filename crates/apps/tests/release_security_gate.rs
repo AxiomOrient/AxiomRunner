@@ -17,12 +17,20 @@ use common::*;
 use config_loader::AppConfig;
 use dev_guard::{GuardError, enforce_current_build, enforce_release_gate};
 
+fn mock_config(profile: &str) -> AppConfig {
+    AppConfig {
+        profile: String::from(profile),
+        provider: String::from("mock-local"),
+        provider_model: None,
+        workspace: None,
+        state_path: None,
+        command_allowlist: None,
+    }
+}
+
 #[test]
 fn release_security_gate_blocks_dev_profile_in_release() {
-    let config = AppConfig {
-        profile: String::from("dev"),
-        provider: String::from("mock-local"),
-    };
+    let config = mock_config("dev");
 
     let result = enforce_release_gate(&config, true);
 
@@ -31,10 +39,7 @@ fn release_security_gate_blocks_dev_profile_in_release() {
 
 #[test]
 fn release_security_gate_ignores_non_dev_profile_in_release() {
-    let config = AppConfig {
-        profile: String::from("prod"),
-        provider: String::from("mock-local"),
-    };
+    let config = mock_config("prod");
 
     let result = enforce_release_gate(&config, true);
 
@@ -43,10 +48,7 @@ fn release_security_gate_ignores_non_dev_profile_in_release() {
 
 #[test]
 fn release_security_gate_treats_dev_profile_case_insensitively() {
-    let config = AppConfig {
-        profile: String::from("DeV"),
-        provider: String::from("mock-local"),
-    };
+    let config = mock_config("DeV");
 
     let result = enforce_release_gate(&config, true);
 
@@ -55,10 +57,7 @@ fn release_security_gate_treats_dev_profile_case_insensitively() {
 
 #[test]
 fn release_security_gate_current_build_contract_preserves_dev_minimal_mode() {
-    let config = AppConfig {
-        profile: String::from("dev"),
-        provider: String::from("mock-local"),
-    };
+    let config = mock_config("dev");
 
     let result = enforce_current_build(&config);
 
@@ -87,10 +86,10 @@ fn release_security_gate_cli_build_profile_boundary_is_enforced() {
     } else {
         assert_eq!(
             output.status.code(),
-            Some(2),
+            Some(4),
             "stdout:\n{stdout}\n\nstderr:\n{stderr}"
         );
-        assert!(stderr.contains("release gate blocked startup"));
+        assert!(stderr.contains("release gate error:"));
         assert!(stderr.contains("profile=dev is blocked in release builds"));
     }
 }
@@ -101,6 +100,7 @@ fn release_security_gate_rejects_legacy_cli_bypass_flag() {
     let stderr = stderr_of(&output);
 
     assert_eq!(output.status.code(), Some(2), "stderr:\n{stderr}");
+    assert!(stderr.contains("parse error:"));
     assert!(stderr.contains("unknown option '--allow-dev-in-release'"));
 }
 
@@ -122,10 +122,10 @@ fn release_security_gate_legacy_env_bypass_signal_does_not_allow_release_startup
     } else {
         assert_eq!(
             output.status.code(),
-            Some(2),
+            Some(4),
             "stdout:\n{stdout}\n\nstderr:\n{stderr}"
         );
-        assert!(stderr.contains("release gate blocked startup"));
+        assert!(stderr.contains("release gate error:"));
         assert!(stderr.contains("profile=dev is blocked in release builds"));
     }
 }
@@ -143,7 +143,7 @@ fn release_security_gate_rejects_legacy_file_bypass_key() {
 
     let _ = std::fs::remove_file(&config_path);
 
-    assert_eq!(output.status.code(), Some(2), "stderr:\n{stderr}");
+    assert_eq!(output.status.code(), Some(3), "stderr:\n{stderr}");
     assert!(stderr.contains("config error:"));
     assert!(stderr.contains("unknown config key 'allow_dev_in_release'"));
 }

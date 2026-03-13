@@ -1,23 +1,35 @@
 use crate::contracts::{
-    AdapterFuture, AdapterHealth, ProviderAdapter, ProviderRequest, ProviderResponse,
+    AdapterFuture, ProviderAdapter, ProviderHealthReport, ProviderRequest, ProviderResponse,
 };
 use crate::error::{AdapterError, RetryClass, classify_reqwest_error};
 
+pub const ENV_EXPERIMENTAL_OPENAI: &str = "AXONRUNNER_EXPERIMENTAL_OPENAI";
 const HTTP_CONNECT_TIMEOUT_SECS: u64 = 10;
 const HTTP_REQUEST_TIMEOUT_SECS: u64 = 30;
 
 pub struct OpenAiCompatProvider {
     id_str: &'static str,
-    api_key: String,
+    api_key: Option<String>,
     base_url: String,
+    experimental_enabled: bool,
     http: reqwest::blocking::Client,
 }
 
 impl OpenAiCompatProvider {
-    pub fn new(
+    pub fn new(id_str: &'static str, api_key: Option<String>, base_url: impl Into<String>) -> Self {
+        Self::new_with_experimental_enabled(
+            id_str,
+            api_key,
+            base_url,
+            experimental_openai_enabled(),
+        )
+    }
+
+    fn new_with_experimental_enabled(
         id_str: &'static str,
-        api_key: impl Into<String>,
+        api_key: Option<String>,
         base_url: impl Into<String>,
+        experimental_enabled: bool,
     ) -> Self {
         let http = reqwest::blocking::Client::builder()
             .connect_timeout(std::time::Duration::from_secs(HTTP_CONNECT_TIMEOUT_SECS))
@@ -27,8 +39,9 @@ impl OpenAiCompatProvider {
 
         Self {
             id_str,
-            api_key: api_key.into(),
+            api_key,
             base_url: base_url.into(),
+            experimental_enabled,
             http,
         }
     }
@@ -39,12 +52,44 @@ impl ProviderAdapter for OpenAiCompatProvider {
         self.id_str
     }
 
-    fn health(&self) -> AdapterHealth {
-        AdapterHealth::Healthy
+    fn health(&self) -> AdapterFuture<'_, ProviderHealthReport> {
+        if !self.experimental_enabled {
+            return Box::pin(async {
+                Ok(ProviderHealthReport::blocked(
+                    "reason=experimental_provider_disabled,provider=openai",
+                ))
+            });
+        }
+        let has_api_key = self
+            .api_key
+            .as_deref()
+            .is_some_and(|value| !value.trim().is_empty());
+        let detail = if has_api_key {
+            format!(
+                "provider=openai,mode=experimental,base_url={}",
+                self.base_url
+            )
+        } else {
+            String::from("reason=missing_openai_api_key,provider=openai,mode=experimental")
+        };
+        Box::pin(async move {
+            Ok(if has_api_key {
+                ProviderHealthReport::ready(detail)
+            } else {
+                ProviderHealthReport::blocked(detail)
+            })
+        })
     }
 
     fn complete(&self, request: ProviderRequest) -> AdapterFuture<'_, ProviderResponse> {
         Box::pin(async move {
+            if !self.experimental_enabled {
+                return Err(AdapterError::unavailable_with_class(
+                    "openai_experimental",
+                    "AXONRUNNER_EXPERIMENTAL_OPENAI=1 required",
+                    RetryClass::NonRetryable,
+                ));
+            }
             if request.prompt.trim().is_empty() {
                 return Err(AdapterError::invalid_input("prompt", "must not be empty"));
             }
@@ -54,6 +99,13 @@ impl ProviderAdapter for OpenAiCompatProvider {
                     "must be greater than zero",
                 ));
             }
+            let api_key = self.api_key.as_deref().ok_or_else(|| {
+                AdapterError::unavailable_with_class(
+                    "openai_api_key",
+                    "OPENAI_API_KEY not set",
+                    RetryClass::NonRetryable,
+                )
+            })?;
 
             let body = serde_json::json!({
                 "model": request.model,
@@ -65,7 +117,7 @@ impl ProviderAdapter for OpenAiCompatProvider {
             let response = self
                 .http
                 .post(&url)
-                .header("Authorization", format!("Bearer {}", self.api_key))
+                .header("Authorization", format!("Bearer {}", api_key))
                 .header("Content-Type", "application/json")
                 .json(&body)
                 .send()
@@ -93,40 +145,62 @@ impl ProviderAdapter for OpenAiCompatProvider {
                 )
             })?;
 
-            let content = json["choices"][0]["message"]["content"]
-                .as_str()
-                .ok_or_else(|| {
-                    AdapterError::failed(
-                        "response_extract",
-                        "missing choices[0].message.content".to_string(),
-                        RetryClass::NonRetryable,
-                    )
-                })?
-                .to_string();
+            let content = extract_message_content(&json)?;
 
             Ok(ProviderResponse { content })
         })
     }
 }
 
+fn experimental_openai_enabled() -> bool {
+    matches!(
+        std::env::var(ENV_EXPERIMENTAL_OPENAI).ok().as_deref(),
+        Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
+    )
+}
+
+fn extract_message_content(json: &serde_json::Value) -> Result<String, AdapterError> {
+    if let Some(content) = json["choices"][0]["message"]["content"].as_str() {
+        return Ok(content.to_owned());
+    }
+
+    if let Some(parts) = json["choices"][0]["message"]["content"].as_array() {
+        let text = parts
+            .iter()
+            .filter_map(
+                |part| match part.get("type").and_then(serde_json::Value::as_str) {
+                    Some("text") => part.get("text").and_then(serde_json::Value::as_str),
+                    _ => None,
+                },
+            )
+            .collect::<String>();
+        if !text.is_empty() {
+            return Ok(text);
+        }
+    }
+
+    Err(AdapterError::failed(
+        "response_extract",
+        "missing choices[0].message.content".to_string(),
+        RetryClass::NonRetryable,
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::contracts::ProviderRequest;
-    use std::future::Future;
-
-    fn block_on<T>(future: impl Future<Output = T>) -> T {
-        tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("test runtime should initialize")
-            .block_on(future)
-    }
+    use crate::test_util::block_on;
 
     #[test]
     fn openai_compat_rejects_empty_prompt() {
-        let provider = OpenAiCompatProvider::new("openai", "test-key", "https://api.openai.com/v1");
-        let err = block_on(provider.complete(ProviderRequest::new("gpt-4o-mini", "", 100)))
+        let provider = OpenAiCompatProvider::new_with_experimental_enabled(
+            "openai",
+            Some(String::from("test-key")),
+            "https://api.openai.com/v1",
+            true,
+        );
+        let err = block_on(provider.complete(ProviderRequest::new("gpt-4o-mini", "", 100, "/tmp")))
             .expect_err("empty prompt should fail");
         assert!(matches!(
             err,
@@ -139,9 +213,15 @@ mod tests {
 
     #[test]
     fn openai_compat_rejects_zero_max_tokens() {
-        let provider = OpenAiCompatProvider::new("openai", "test-key", "https://api.openai.com/v1");
-        let err = block_on(provider.complete(ProviderRequest::new("gpt-4o-mini", "hello", 0)))
-            .expect_err("zero max_tokens should fail");
+        let provider = OpenAiCompatProvider::new_with_experimental_enabled(
+            "openai",
+            Some(String::from("test-key")),
+            "https://api.openai.com/v1",
+            true,
+        );
+        let err =
+            block_on(provider.complete(ProviderRequest::new("gpt-4o-mini", "hello", 0, "/tmp")))
+                .expect_err("zero max_tokens should fail");
         assert!(matches!(
             err,
             AdapterError::InvalidInput {
@@ -153,7 +233,22 @@ mod tests {
 
     #[test]
     fn openai_compat_id_matches_constructor() {
-        let provider = OpenAiCompatProvider::new("openai", "key", "https://api.openai.com/v1");
+        let provider = OpenAiCompatProvider::new(
+            "openai",
+            Some(String::from("key")),
+            "https://api.openai.com/v1",
+        );
         assert_eq!(provider.id(), "openai");
+    }
+
+    #[test]
+    fn openai_compat_health_is_blocked_without_api_key() {
+        let provider = OpenAiCompatProvider::new("openai", None, "https://api.openai.com/v1");
+        let report = block_on(provider.health()).expect("health probe should succeed");
+        assert_eq!(report.status.as_str(), "blocked");
+        assert_eq!(
+            report.detail,
+            "reason=experimental_provider_disabled,provider=openai"
+        );
     }
 }

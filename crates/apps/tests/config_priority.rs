@@ -60,9 +60,35 @@ fn config_cli_option_grammar_conformance_matrix() {
         config_loader::parse_cli_config_option("--provider=openai"),
         Some((config_loader::CliConfigOption::Provider, "openai"))
     );
+    assert_eq!(
+        config_loader::parse_cli_config_option("--provider-model=gpt-5"),
+        Some((config_loader::CliConfigOption::ProviderModel, "gpt-5"))
+    );
+    assert_eq!(
+        config_loader::parse_cli_config_option("--workspace=/tmp/work"),
+        Some((config_loader::CliConfigOption::Workspace, "/tmp/work"))
+    );
+    assert_eq!(
+        config_loader::parse_cli_config_option("--state-path=/tmp/state"),
+        Some((config_loader::CliConfigOption::StatePath, "/tmp/state"))
+    );
+    assert_eq!(
+        config_loader::parse_cli_config_option("--command-allowlist=git,cargo"),
+        Some((config_loader::CliConfigOption::CommandAllowlist, "git,cargo"))
+    );
 
     assert_eq!(config_loader::parse_cli_config_option("--profile"), None);
     assert_eq!(config_loader::parse_cli_config_option("--provider"), None);
+    assert_eq!(
+        config_loader::parse_cli_config_option("--provider-model"),
+        None
+    );
+    assert_eq!(config_loader::parse_cli_config_option("--workspace"), None);
+    assert_eq!(config_loader::parse_cli_config_option("--state-path"), None);
+    assert_eq!(
+        config_loader::parse_cli_config_option("--command-allowlist"),
+        None
+    );
     assert_eq!(
         config_loader::parse_cli_config_option("--profile dev"),
         None
@@ -86,6 +112,10 @@ fn startup_and_config_parsers_share_config_option_grammar() {
     let startup = cli_args::parse_startup_args(vec![
         String::from("--profile=dev"),
         String::from("--provider=openai"),
+        String::from("--provider-model=gpt-5"),
+        String::from("--workspace=/tmp/work"),
+        String::from("--state-path=/tmp/state"),
+        String::from("--command-allowlist=git,cargo"),
         String::from("status"),
     ])
     .expect("startup args should parse");
@@ -95,6 +125,10 @@ fn startup_and_config_parsers_share_config_option_grammar() {
         vec![
             String::from("--profile=dev"),
             String::from("--provider=openai"),
+            String::from("--provider-model=gpt-5"),
+            String::from("--workspace=/tmp/work"),
+            String::from("--state-path=/tmp/state"),
+            String::from("--command-allowlist=git,cargo"),
         ]
     );
     assert_eq!(startup.command_tokens, vec![String::from("status")]);
@@ -103,6 +137,19 @@ fn startup_and_config_parsers_share_config_option_grammar() {
         config_loader::parse_cli_config(&startup.config_args).expect("CLI config should parse");
     assert_eq!(parsed.profile.as_deref(), Some("dev"));
     assert_eq!(parsed.provider.as_deref(), Some("openai"));
+    assert_eq!(parsed.provider_model.as_deref(), Some("gpt-5"));
+    assert_eq!(
+        parsed.workspace.as_deref(),
+        Some(std::path::Path::new("/tmp/work"))
+    );
+    assert_eq!(
+        parsed.state_path.as_deref(),
+        Some(std::path::Path::new("/tmp/state"))
+    );
+    assert_eq!(
+        parsed.command_allowlist,
+        Some(vec![String::from("git"), String::from("cargo")])
+    );
 }
 
 #[test]
@@ -166,5 +213,12 @@ fn parser_conformance_rejects_invalid_option_spellings() {
     assert_eq!(
         cli_provider_err.to_string(),
         "unknown CLI argument '--provider'"
+    );
+
+    let cli_workspace_err = config_loader::parse_cli_config(&[String::from("--workspace")])
+        .expect_err("bare --workspace should be rejected");
+    assert_eq!(
+        cli_workspace_err.to_string(),
+        "unknown CLI argument '--workspace'"
     );
 }

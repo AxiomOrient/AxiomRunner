@@ -6,15 +6,13 @@ AxonRunner is a minimal event-sourced CLI agent runtime.
 
 ## Retained Surface
 
-- `agent`
-- `read`
-- `write`
-- `remove`
-- `freeze`
-- `halt`
+- `run`
 - `batch`
+- `replay`
 - `status`
 - `health`
+- `help`
+- legacy aliases: `read`, `write`, `remove`, `freeze`, `halt`
 
 ## Non-goals
 
@@ -30,7 +28,7 @@ AxonRunner is a minimal event-sourced CLI agent runtime.
 
 - `crates/core`: domain and policy
 - `crates/apps`: CLI runtime
-- `crates/adapters`: memory/provider/tool/agent implementations
+- `crates/adapters`: memory/provider/tool implementations
 
 ## Rule
 

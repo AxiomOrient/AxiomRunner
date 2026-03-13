@@ -49,6 +49,10 @@ mod tests {
         AppConfig {
             profile: String::from("dev"),
             provider: String::from("mock-local"),
+            provider_model: None,
+            workspace: None,
+            state_path: None,
+            command_allowlist: None,
         }
     }
 
@@ -71,6 +75,10 @@ mod tests {
         let config = AppConfig {
             profile: String::from("DeV"),
             provider: String::from("mock-local"),
+            provider_model: None,
+            workspace: None,
+            state_path: None,
+            command_allowlist: None,
         };
 
         let result = enforce_release_gate(&config, true);

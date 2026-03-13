@@ -78,6 +78,17 @@ fn policy_decision_runtime_halted_rejects_before_control_checks() {
 }
 
 #[test]
+fn policy_decision_halt_is_idempotent_for_system_actor() {
+    let state = AgentState {
+        mode: ExecutionMode::Halted,
+        ..AgentState::default()
+    };
+    let intent = Intent::halt("intent-halt", Some("system".to_owned()));
+
+    assert_verdict(&state, &intent, true, PolicyCode::Allowed, "allowed");
+}
+
+#[test]
 fn policy_decision_read_only_blocks_fact_mutations_but_allows_reads() {
     let state = AgentState {
         mode: ExecutionMode::ReadOnly,

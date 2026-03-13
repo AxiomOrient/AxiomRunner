@@ -82,7 +82,7 @@ pub fn evaluate_policy(state: &AgentState, intent: &Intent) -> PolicyVerdict {
         return PolicyVerdict::deny(PolicyCode::ActorMissing, "actor is required");
     }
 
-    if state.mode == ExecutionMode::Halted {
+    if state.mode == ExecutionMode::Halted && !matches!(intent.kind, IntentKind::Halt) {
         return PolicyVerdict::deny(PolicyCode::RuntimeHalted, "runtime is halted");
     }
 

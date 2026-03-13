@@ -2,63 +2,113 @@
 
 ## Scope
 
-이 문서는 현재 retained surface 기준으로만 설명한다.
+이 문서는 현재 제품면만 다룬다.
 
-남아 있는 실행 표면:
+정식 명령:
+
 - `run`
 - `batch`
+- `replay`
 - `status`
 - `health`
+- `help`
 
-legacy single-intent aliases:
+legacy alias:
+
 - `read`
 - `write`
 - `remove`
 - `freeze`
 - `halt`
 
-채널, 데몬, 게이트웨이, cron, service, onboarding, skills 배포 설명은 제거했다.
+`agent`, daemon, gateway, cron, onboarding, skills 배포 설명은 현재 제품면에서 제외한다.
 
-## Required Environment
+## 정식 설정 표면
+
+다음 값은 CLI 옵션, config file, env 중 하나로 줄 수 있다.
+
+| 의미 | CLI | config file | env | 기본값 |
+|---|---|---|---|---|
+| profile | `--profile=<name>` | `profile=...` | `AXONRUNNER_PROFILE` | `prod` |
+| provider | `--provider=<id>` | `provider=...` | `AXONRUNNER_RUNTIME_PROVIDER` | `mock-local` |
+| provider model | `--provider-model=<name>` | `provider_model=...` | `AXONRUNNER_RUNTIME_PROVIDER_MODEL` | provider id |
+| workspace | `--workspace=<path>` | `workspace=...` | `AXONRUNNER_RUNTIME_TOOL_WORKSPACE` | 현재 작업 디렉터리 |
+| state path | `--state-path=<path>` | `state_path=...` | `AXONRUNNER_RUNTIME_STATE_PATH` | `~/.axonrunner/state.snapshot` |
+
+설정 파일은 `--config-file=<path>` 또는 `--config-file <path>` 로 읽는다.
+
+## Env-only knobs
+
+다음 값은 현재 env-only다.
 
 | 변수 | 기본값 | 설명 |
 |---|---|---|
-| `AXONRUNNER_PROFILE` | `prod` | 실행 프로파일 |
-| `AXONRUNNER_RUNTIME_PROVIDER` | `mock-local` | `mock-local`, `codek`, `openai` |
-| `AXONRUNNER_RUNTIME_PROVIDER_MODEL` | provider id | provider 모델명 |
-| `AXONRUNNER_RUNTIME_MAX_TOKENS` | `4096` | provider 최대 토큰 |
-| `AXONRUNNER_RUNTIME_MEMORY_PATH` | `~/.axonrunner/memory.db` | 메모리 경로 |
-| `AXONRUNNER_RUNTIME_TOOL_WORKSPACE` | `~/.axonrunner/workspace` | tool workspace |
-| `AXONRUNNER_RUNTIME_TOOL_LOG_PATH` | `runtime.log` | tool log 파일 |
-| `AXONRUNNER_CODEX_BIN` | `codex` | `AXONRUNNER_RUNTIME_PROVIDER=codek`일 때 사용할 Codex CLI 경로 |
-| `OPENAI_API_KEY` | unset | `AXONRUNNER_RUNTIME_PROVIDER=openai`일 때 필수 |
+| `AXONRUNNER_RUNTIME_MEMORY_PATH` | `~/.axonrunner/memory.db` | recall memory backend 경로 |
+| `AXONRUNNER_RUNTIME_TOOL_LOG_PATH` | `<workspace>/runtime.log` | tool log 경로 |
+| `AXONRUNNER_RUNTIME_MAX_TOKENS` | `4096` | provider max tokens |
+| `AXONRUNNER_CODEX_BIN` | `codex` | `provider=codek`일 때 사용할 Codex CLI |
+| `AXONRUNNER_EXPERIMENTAL_OPENAI` | unset | `provider=openai`를 experimental로 opt-in 할 때만 사용 |
+| `OPENAI_API_KEY` | unset | `provider=openai` opt-in 후 실제 호출에 필요 |
 
 ## Minimal Local Run
 
-canonical run:
+workspace-bound write:
 
 ```bash
 cargo build
 
-AXONRUNNER_RUNTIME_MEMORY_PATH="$HOME/.axonrunner/memory.md" \
-AXONRUNNER_RUNTIME_TOOL_WORKSPACE="$HOME/.axonrunner/workspace" \
-./target/debug/axonrunner_apps run "write:profile=prod"
-
-./target/debug/axonrunner_apps run "read:profile"
+./target/debug/axonrunner_apps \
+  --workspace="$PWD" \
+  --state-path="$PWD/.axonrunner/state.snapshot" \
+  run "write:profile=prod"
 ```
 
-codek-backed write attempt:
+다른 프로세스에서 persisted read:
 
 ```bash
-AXONRUNNER_RUNTIME_PROVIDER=codek \
-AXONRUNNER_CODEX_BIN="$(command -v codex)" \
-./target/debug/axonrunner_apps run "write:profile=prod"
+./target/debug/axonrunner_apps \
+  --workspace="$PWD" \
+  --state-path="$PWD/.axonrunner/state.snapshot" \
+  run "read:profile"
 ```
 
-single process batch:
+freeze persistence 확인:
 
 ```bash
-./target/debug/axonrunner_apps batch "write:profile=prod" "read:profile" "remove:profile"
+./target/debug/axonrunner_apps --state-path="$PWD/.axonrunner/state.snapshot" freeze
+./target/debug/axonrunner_apps --state-path="$PWD/.axonrunner/state.snapshot" run "write:profile=dev"
+```
+
+codek-backed run:
+
+```bash
+./target/debug/axonrunner_apps \
+  --provider=codek \
+  --workspace="$PWD" \
+  --state-path="$PWD/.axonrunner/state.snapshot" \
+  run "write:profile=prod"
+```
+
+CLI surface:
+
+```bash
+./target/debug/axonrunner_apps --help
+```
+
+latest replay:
+
+```bash
+./target/debug/axonrunner_apps \
+  --workspace="$PWD" \
+  replay latest
+```
+
+experimental openai health probe:
+
+```bash
+AXONRUNNER_RUNTIME_PROVIDER=openai \
+AXONRUNNER_EXPERIMENTAL_OPENAI=1 \
+./target/debug/axonrunner_apps health
 ```
 
 ## Verification
@@ -66,7 +116,8 @@ single process batch:
 배포 전 최소 검증:
 
 ```bash
-cargo check
-cargo test --workspace --no-run
-cargo test -p axonrunner_apps --test e2e_cli
+cargo fmt --all --check
+cargo test -p axonrunner_core
+cargo test -p axonrunner_adapters
+cargo test -p axonrunner_apps
 ```

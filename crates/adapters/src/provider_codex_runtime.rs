@@ -1,18 +1,28 @@
 use crate::contracts::{
-    AdapterFuture, AdapterHealth, ProviderAdapter, ProviderRequest, ProviderResponse,
+    AdapterFuture, ProviderAdapter, ProviderHealthReport, ProviderRequest, ProviderResponse,
 };
 use crate::error::{AdapterError, RetryClass};
 use codex_runtime::runtime::{Client, ClientConfig, SessionConfig};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::time::Duration;
+use tokio::sync::Mutex;
 
 pub const ENV_CODEX_BIN: &str = "AXONRUNNER_CODEX_BIN";
 const DEFAULT_CODEX_BIN: &str = "codex";
-const DEFAULT_SESSION_CWD: &str = ".";
+const SESSION_TIMEOUT_SECS: u64 = 120;
+
+struct ActiveSession {
+    client: Client,
+    session: codex_runtime::runtime::Session,
+    cwd: String,
+    model: String,
+}
 
 pub struct CodexRuntimeProvider {
     id_str: &'static str,
     cli_bin: PathBuf,
+    active_session: Mutex<Option<ActiveSession>>,
 }
 
 impl CodexRuntimeProvider {
@@ -20,6 +30,7 @@ impl CodexRuntimeProvider {
         Self {
             id_str,
             cli_bin: cli_bin_from_env(),
+            active_session: Mutex::new(None),
         }
     }
 
@@ -28,7 +39,75 @@ impl CodexRuntimeProvider {
         Self {
             id_str,
             cli_bin: cli_bin.into(),
+            active_session: Mutex::new(None),
         }
+    }
+
+    async fn session_for_request(
+        &self,
+        request: &ProviderRequest,
+    ) -> Result<codex_runtime::runtime::Session, AdapterError> {
+        let stale_session = {
+            let mut guard = self.active_session.lock().await;
+            if let Some(active) = guard.as_ref()
+                && active.cwd == request.cwd
+                && active.model == request.model
+                && !active.session.is_closed()
+            {
+                return Ok(active.session.clone());
+            }
+            guard.take()
+        };
+
+        if let Some(stale) = stale_session {
+            close_active_session(stale).await?;
+        }
+
+        let client = Client::connect(ClientConfig::new().with_cli_bin(self.cli_bin.clone()))
+            .await
+            .map_err(|error| {
+                AdapterError::failed(
+                    "codex_runtime.connect",
+                    error.to_string(),
+                    RetryClass::NonRetryable,
+                )
+            })?;
+
+        let session = client
+            .start_session(
+                SessionConfig::new(request.cwd.clone())
+                    .with_model(request.model.clone())
+                    .with_timeout(Duration::from_secs(SESSION_TIMEOUT_SECS)),
+            )
+            .await
+            .map_err(|error| {
+                AdapterError::failed(
+                    "codex_runtime.start_session",
+                    error.to_string(),
+                    RetryClass::NonRetryable,
+                )
+            })?;
+
+        let reusable = session.clone();
+        let mut guard = self.active_session.lock().await;
+        *guard = Some(ActiveSession {
+            client,
+            session,
+            cwd: request.cwd.clone(),
+            model: request.model.clone(),
+        });
+        Ok(reusable)
+    }
+
+    async fn drop_cached_session(&self) -> Result<(), AdapterError> {
+        let stale = {
+            let mut guard = self.active_session.lock().await;
+            guard.take()
+        };
+        if let Some(stale) = stale {
+            close_active_session(stale).await?;
+        }
+        Ok(())
     }
 }
 
@@ -43,12 +122,12 @@ impl ProviderAdapter for CodexRuntimeProvider {
         self.id_str
     }
 
-    fn health(&self) -> AdapterHealth {
-        AdapterHealth::Healthy
+    fn health(&self) -> AdapterFuture<'_, ProviderHealthReport> {
+        let cli_bin = self.cli_bin.clone();
+        Box::pin(async move { probe_codex_runtime(cli_bin).await })
     }
 
     fn complete(&self, request: ProviderRequest) -> AdapterFuture<'_, ProviderResponse> {
-        let cli_bin = self.cli_bin.clone();
         Box::pin(async move {
             if request.prompt.trim().is_empty() {
                 return Err(AdapterError::invalid_input("prompt", "must not be empty"));
@@ -59,74 +138,176 @@ impl ProviderAdapter for CodexRuntimeProvider {
                     "must be greater than zero",
                 ));
             }
+            if request.cwd.trim().is_empty() {
+                return Err(AdapterError::invalid_input("cwd", "must not be empty"));
+            }
 
-            let client = Client::connect(ClientConfig::new().with_cli_bin(cli_bin))
-                .await
-                .map_err(|error| {
-                    AdapterError::failed(
-                        "codex_runtime.connect",
+            let session = self.session_for_request(&request).await?;
+            let result = match session.ask(request.prompt).await {
+                Ok(result) => result,
+                Err(error) => {
+                    let _ = self.drop_cached_session().await;
+                    return Err(AdapterError::failed(
+                        "codex_runtime.ask",
                         error.to_string(),
                         RetryClass::NonRetryable,
-                    )
-                })?;
-
-            let session = client
-                .start_session(
-                    SessionConfig::new(DEFAULT_SESSION_CWD)
-                        .with_model(request.model.clone())
-                        .with_timeout(Duration::from_secs(120)),
-                )
-                .await
-                .map_err(|error| {
-                    AdapterError::failed(
-                        "codex_runtime.start_session",
-                        error.to_string(),
-                        RetryClass::NonRetryable,
-                    )
-                })?;
-
-            let result = session.ask(request.prompt).await.map_err(|error| {
-                AdapterError::failed(
-                    "codex_runtime.ask",
-                    error.to_string(),
-                    RetryClass::NonRetryable,
-                )
-            })?;
-
-            session.close().await.map_err(|error| {
-                AdapterError::failed(
-                    "codex_runtime.close",
-                    error.to_string(),
-                    RetryClass::NonRetryable,
-                )
-            })?;
-
-            client.shutdown().await.map_err(|error| {
-                AdapterError::failed(
-                    "codex_runtime.shutdown",
-                    error.to_string(),
-                    RetryClass::NonRetryable,
-                )
-            })?;
+                    ));
+                }
+            };
 
             Ok(ProviderResponse {
                 content: result.assistant_text,
             })
         })
     }
+
+    fn shutdown(&self) -> AdapterFuture<'_, ()> {
+        Box::pin(async move { self.drop_cached_session().await })
+    }
+}
+
+async fn close_active_session(active: ActiveSession) -> Result<(), AdapterError> {
+    active.session.close().await.map_err(|error| {
+        AdapterError::failed(
+            "codex_runtime.close",
+            error.to_string(),
+            RetryClass::NonRetryable,
+        )
+    })?;
+
+    active.client.shutdown().await.map_err(|error| {
+        AdapterError::failed(
+            "codex_runtime.shutdown",
+            error.to_string(),
+            RetryClass::NonRetryable,
+        )
+    })
+}
+
+async fn probe_codex_runtime(cli_bin: PathBuf) -> Result<ProviderHealthReport, AdapterError> {
+    let resolved = match resolve_cli_bin(&cli_bin) {
+        Ok(resolved) => resolved,
+        Err(reason) => return Ok(ProviderHealthReport::blocked(reason)),
+    };
+    let version = match probe_codex_version(&resolved) {
+        Ok(version) => version,
+        Err(error) => {
+            return Ok(ProviderHealthReport::blocked(format!(
+                "cli_bin={},probe_error={}",
+                resolved.display(),
+                sanitize_detail(&error.to_string())
+            )));
+        }
+    };
+    let client = match Client::connect(ClientConfig::new().with_cli_bin(&resolved)).await {
+        Ok(client) => client,
+        Err(error) => {
+            return Ok(ProviderHealthReport::blocked(format!(
+                "cli_bin={},version={},handshake_error={}",
+                resolved.display(),
+                version,
+                sanitize_detail(&error.to_string())
+            )));
+        }
+    };
+
+    match client.shutdown().await {
+        Ok(()) => Ok(ProviderHealthReport::ready(format!(
+            "cli_bin={},version={},handshake=ok",
+            resolved.display(),
+            version
+        ))),
+        Err(error) => Ok(ProviderHealthReport::degraded(format!(
+            "cli_bin={},version={},shutdown_error={}",
+            resolved.display(),
+            version,
+            sanitize_detail(&error.to_string())
+        ))),
+    }
+}
+
+fn resolve_cli_bin(path: &Path) -> Result<PathBuf, String> {
+    if path.components().count() > 1 || path.is_absolute() {
+        return path
+            .try_exists()
+            .map_err(|error| {
+                format!(
+                    "reason=path_probe_failed,error={}",
+                    sanitize_detail(&error.to_string())
+                )
+            })?
+            .then(|| path.canonicalize().unwrap_or_else(|_| path.to_path_buf()))
+            .ok_or_else(|| format!("reason=binary_not_found,path={}", path.display()));
+    }
+
+    let Some(paths) = std::env::var_os("PATH") else {
+        return Err(format!("reason=binary_not_found,path={}", path.display()));
+    };
+
+    for dir in std::env::split_paths(&paths) {
+        let candidate = dir.join(path);
+        if candidate.try_exists().unwrap_or(false) {
+            return Ok(candidate.canonicalize().unwrap_or(candidate));
+        }
+    }
+
+    Err(format!("reason=binary_not_found,path={}", path.display()))
+}
+
+fn probe_codex_version(cli_bin: &Path) -> Result<String, AdapterError> {
+    let output = Command::new(cli_bin)
+        .arg("--version")
+        .output()
+        .map_err(|error| {
+            AdapterError::failed(
+                "codex_version",
+                sanitize_detail(&error.to_string()),
+                RetryClass::NonRetryable,
+            )
+        })?;
+
+    if !output.status.success() {
+        return Err(AdapterError::failed(
+            "codex_version",
+            format!("exit_status={}", output.status),
+            RetryClass::NonRetryable,
+        ));
+    }
+
+    let raw = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    if raw.is_empty() {
+        return Err(AdapterError::failed(
+            "codex_version",
+            "empty_version_output".to_owned(),
+            RetryClass::NonRetryable,
+        ));
+    }
+
+    Ok(sanitize_detail(&raw))
+}
+
+fn sanitize_detail(value: &str) -> String {
+    value
+        .chars()
+        .map(|ch| match ch {
+            'a'..='z' | 'A'..='Z' | '0'..='9' | '.' | ',' | ':' | '/' | '_' | '-' | '=' => ch,
+            _ => '_',
+        })
+        .collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::CodexRuntimeProvider;
     use crate::contracts::{ProviderAdapter, ProviderRequest};
+    use crate::test_util::block_on;
     use std::path::PathBuf;
 
     #[tokio::test]
     async fn codex_runtime_provider_rejects_empty_prompt() {
         let provider = CodexRuntimeProvider::new("codek");
         let err = provider
-            .complete(ProviderRequest::new("gpt-5-codex", "", 100))
+            .complete(ProviderRequest::new("gpt-5-codex", "", 100, "/tmp"))
             .await
             .expect_err("empty prompt should fail");
         assert!(matches!(
@@ -142,7 +323,7 @@ mod tests {
     async fn codex_runtime_provider_rejects_zero_max_tokens() {
         let provider = CodexRuntimeProvider::new("codek");
         let err = provider
-            .complete(ProviderRequest::new("gpt-5-codex", "hello", 0))
+            .complete(ProviderRequest::new("gpt-5-codex", "hello", 0, "/tmp"))
             .await
             .expect_err("zero max_tokens should fail");
         assert!(matches!(
@@ -158,5 +339,14 @@ mod tests {
     fn codex_runtime_provider_uses_explicit_cli_bin_override() {
         let provider = CodexRuntimeProvider::new_with_cli_bin("codek", "/tmp/custom-codex");
         assert_eq!(provider.cli_bin, PathBuf::from("/tmp/custom-codex"));
+    }
+
+    #[test]
+    fn codex_runtime_provider_health_is_blocked_when_binary_is_missing() {
+        let provider =
+            CodexRuntimeProvider::new_with_cli_bin("codek", "/definitely-missing-codex-binary");
+        let report = block_on(provider.health()).expect("health probe should complete");
+        assert_eq!(report.status.as_str(), "blocked");
+        assert!(report.detail.contains("reason=binary_not_found"));
     }
 }

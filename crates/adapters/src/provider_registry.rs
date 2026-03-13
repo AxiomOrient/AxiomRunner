@@ -1,5 +1,5 @@
 use crate::contracts::{
-    AdapterFuture, AdapterHealth, ProviderAdapter, ProviderRequest, ProviderResponse,
+    AdapterFuture, ProviderAdapter, ProviderHealthReport, ProviderRequest, ProviderResponse,
 };
 use crate::provider_codex_runtime::CodexRuntimeProvider;
 use crate::provider_openai::OpenAiCompatProvider;
@@ -9,14 +9,22 @@ pub const DEFAULT_PROVIDER_ID: &str = "mock-local";
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ProviderRegistryEntry {
     pub id: &'static str,
+    pub experimental: bool,
 }
 
 static PROVIDER_REGISTRY: &[ProviderRegistryEntry] = &[
     ProviderRegistryEntry {
         id: DEFAULT_PROVIDER_ID,
+        experimental: false,
     },
-    ProviderRegistryEntry { id: "codek" },
-    ProviderRegistryEntry { id: "openai" },
+    ProviderRegistryEntry {
+        id: "codek",
+        experimental: false,
+    },
+    ProviderRegistryEntry {
+        id: "openai",
+        experimental: true,
+    },
 ];
 
 pub fn provider_registry() -> &'static [ProviderRegistryEntry] {
@@ -47,15 +55,11 @@ pub fn build_contract_provider(id: &str) -> Result<Box<dyn ProviderAdapter>, Str
     match canonical {
         "mock-local" => Ok(Box::new(MockContractProvider)),
         "codek" => Ok(Box::new(CodexRuntimeProvider::new("codek"))),
-        "openai" => {
-            let api_key = std::env::var("OPENAI_API_KEY")
-                .map_err(|_| String::from("OPENAI_API_KEY env var not set"))?;
-            Ok(Box::new(OpenAiCompatProvider::new(
-                "openai",
-                api_key,
-                "https://api.openai.com/v1",
-            )))
-        }
+        "openai" => Ok(Box::new(OpenAiCompatProvider::new(
+            "openai",
+            std::env::var("OPENAI_API_KEY").ok(),
+            "https://api.openai.com/v1",
+        ))),
         _ => Err(String::from("unreachable provider registry state")),
     }
 }
@@ -66,8 +70,8 @@ impl ProviderAdapter for MockContractProvider {
         DEFAULT_PROVIDER_ID
     }
 
-    fn health(&self) -> AdapterHealth {
-        AdapterHealth::Healthy
+    fn health(&self) -> AdapterFuture<'_, ProviderHealthReport> {
+        Box::pin(async { Ok(ProviderHealthReport::ready("provider=mock-local")) })
     }
 
     fn complete(&self, request: ProviderRequest) -> AdapterFuture<'_, ProviderResponse> {
@@ -108,8 +112,11 @@ mod tests {
     fn provider_registry_lists_only_retained_ids() {
         let ids = provider_registry()
             .iter()
-            .map(|entry| entry.id)
+            .map(|entry| (entry.id, entry.experimental))
             .collect::<Vec<_>>();
-        assert_eq!(ids, vec!["mock-local", "codek", "openai"]);
+        assert_eq!(
+            ids,
+            vec![("mock-local", false), ("codek", false), ("openai", true)]
+        );
     }
 }

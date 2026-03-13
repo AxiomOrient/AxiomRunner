@@ -7,13 +7,21 @@ usage:
 global-options:
   --config-file <path>
   --profile=<name>
+  --provider=<id>
+  --provider-model=<name>
+  --workspace=<path>
+  --state-path=<path>
+  --command-allowlist=<cmds>
   --actor=<id>  (default: system)
 
 commands:
   run <intent-spec>
+  doctor [--json]
+  replay <intent-id|latest>
   status
   batch [--reset-state] <intent-spec>...
   health
+  help
 
 intent-spec:
   read:<key>
@@ -29,8 +37,15 @@ pub enum CliCommand {
         intents: Vec<IntentTemplate>,
         reset_state: bool,
     },
+    Replay {
+        target: String,
+    },
+    Doctor {
+        json: bool,
+    },
     Status,
     Health,
+    Help,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -64,10 +79,16 @@ pub fn parse_command(tokens: &[String]) -> Result<CliCommand, String> {
 
     match command.as_str() {
         "run" => parse_run_command(args),
+        "doctor" => parse_doctor_command(args),
+        "replay" => parse_replay_command(args),
         "read" | "write" | "remove" | "freeze" | "halt" => parse_legacy_run_alias(command, args),
         "status" => {
             no_args(command, args)?;
             Ok(CliCommand::Status)
+        }
+        "help" => {
+            no_args(command, args)?;
+            Ok(CliCommand::Help)
         }
         "health" => {
             no_args(command, args)?;
@@ -76,6 +97,21 @@ pub fn parse_command(tokens: &[String]) -> Result<CliCommand, String> {
         "batch" => parse_batch_command(args),
         _ => Err(format!("unknown command '{}'\n{USAGE}", command)),
     }
+}
+
+fn parse_doctor_command(args: &[String]) -> Result<CliCommand, String> {
+    match args {
+        [] => Ok(CliCommand::Doctor { json: false }),
+        [arg] if arg == "--json" => Ok(CliCommand::Doctor { json: true }),
+        _ => Err(format!(
+            "command 'doctor' accepts only optional --json\n{USAGE}"
+        )),
+    }
+}
+
+fn parse_replay_command(args: &[String]) -> Result<CliCommand, String> {
+    let target = exactly_one_arg("replay", args)?;
+    Ok(CliCommand::Replay { target })
 }
 
 fn parse_run_command(args: &[String]) -> Result<CliCommand, String> {

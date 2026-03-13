@@ -1,0 +1,345 @@
+use crate::config_loader::AppConfig;
+use crate::env_util::read_env_trimmed;
+use axonrunner_core::{AgentState, DecisionOutcome, ExecutionMode, PolicyCode};
+use std::collections::BTreeMap;
+use std::fs;
+use std::io::ErrorKind;
+use std::path::PathBuf;
+
+pub const ENV_RUNTIME_STATE_PATH: &str = "AXONRUNNER_RUNTIME_STATE_PATH";
+
+const FORMAT_VERSION: &str = "axonrunner-state-v1";
+const NONE_SENTINEL: &str = "-";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeStateSnapshot {
+    pub state: AgentState,
+    pub next_intent_seq: u64,
+}
+
+impl Default for RuntimeStateSnapshot {
+    fn default() -> Self {
+        Self {
+            state: AgentState::default(),
+            next_intent_seq: 0,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct StateStore {
+    path: PathBuf,
+}
+
+impl StateStore {
+    pub fn from_app_config(config: &AppConfig) -> Result<Self, String> {
+        let path = read_env_trimmed(ENV_RUNTIME_STATE_PATH)
+            .ok()
+            .flatten()
+            .map(PathBuf::from)
+            .or_else(|| config.state_path.clone())
+            .or_else(|| {
+                std::env::var("HOME").ok().map(|home| {
+                    PathBuf::from(home)
+                        .join(".axonrunner")
+                        .join("state.snapshot")
+                })
+            })
+            .ok_or_else(|| String::from("runtime state path is not available"))?;
+
+        Ok(Self { path })
+    }
+
+    pub fn load_snapshot(&self) -> Result<RuntimeStateSnapshot, String> {
+        match fs::read_to_string(&self.path) {
+            Ok(raw) => parse_snapshot(&raw),
+            Err(error) if error.kind() == ErrorKind::NotFound => {
+                Ok(RuntimeStateSnapshot::default())
+            }
+            Err(error) => Err(format!(
+                "read state snapshot '{}' failed: {error}",
+                self.path.display()
+            )),
+        }
+    }
+
+    pub fn save_snapshot(&self, snapshot: &RuntimeStateSnapshot) -> Result<(), String> {
+        if let Some(parent) = self.path.parent() {
+            fs::create_dir_all(parent).map_err(|error| {
+                format!(
+                    "create state snapshot directory '{}' failed: {error}",
+                    parent.display()
+                )
+            })?;
+        }
+
+        let temp_path = self.path.with_extension("tmp");
+        fs::write(&temp_path, serialize_snapshot(snapshot)).map_err(|error| {
+            format!(
+                "write state snapshot '{}' failed: {error}",
+                temp_path.display()
+            )
+        })?;
+
+        match fs::rename(&temp_path, &self.path) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == ErrorKind::AlreadyExists => {
+                fs::remove_file(&self.path).map_err(|remove_error| {
+                    format!(
+                        "replace state snapshot '{}' failed while removing previous file: {remove_error}",
+                        self.path.display()
+                    )
+                })?;
+                fs::rename(&temp_path, &self.path).map_err(|rename_error| {
+                    format!(
+                        "replace state snapshot '{}' failed: {rename_error}",
+                        self.path.display()
+                    )
+                })
+            }
+            Err(error) => {
+                let _ = fs::remove_file(&temp_path);
+                Err(format!(
+                    "move state snapshot '{}' into place failed: {error}",
+                    self.path.display()
+                ))
+            }
+        }
+    }
+
+    pub fn path(&self) -> &PathBuf {
+        &self.path
+    }
+}
+
+fn serialize_snapshot(snapshot: &RuntimeStateSnapshot) -> String {
+    let mut lines = vec![
+        format!("version={FORMAT_VERSION}"),
+        format!("next_intent_seq={}", snapshot.next_intent_seq),
+        format!("revision={}", snapshot.state.revision),
+        format!("mode={}", mode_name(snapshot.state.mode)),
+        format!(
+            "last_intent_id={}",
+            encode_optional(snapshot.state.last_intent_id.as_deref())
+        ),
+        format!(
+            "last_actor_id={}",
+            encode_optional(snapshot.state.last_actor_id.as_deref())
+        ),
+        format!(
+            "last_decision={}",
+            decision_name(snapshot.state.last_decision)
+        ),
+        format!(
+            "last_policy_code={}",
+            policy_code_name(snapshot.state.last_policy_code)
+        ),
+        format!("denied_count={}", snapshot.state.denied_count),
+        format!("audit_count={}", snapshot.state.audit_count),
+    ];
+
+    for (key, value) in &snapshot.state.facts {
+        lines.push(format!(
+            "fact.{}={}",
+            hex_encode(key.as_bytes()),
+            hex_encode(value.as_bytes())
+        ));
+    }
+
+    lines.push(String::new());
+    lines.join("\n")
+}
+
+fn parse_snapshot(raw: &str) -> Result<RuntimeStateSnapshot, String> {
+    let mut snapshot = RuntimeStateSnapshot::default();
+    let mut saw_version = false;
+    let mut facts = BTreeMap::new();
+
+    for (index, raw_line) in raw.lines().enumerate() {
+        let line = raw_line.trim();
+        if line.is_empty() {
+            continue;
+        }
+
+        let (key, value) = line
+            .split_once('=')
+            .ok_or_else(|| format!("invalid state snapshot line {}: '{}'", index + 1, raw_line))?;
+
+        if let Some(encoded_key) = key.strip_prefix("fact.") {
+            let key = decode_hex_utf8(encoded_key)
+                .ok_or_else(|| format!("invalid fact key encoding on line {}", index + 1))?;
+            let value = decode_hex_utf8(value)
+                .ok_or_else(|| format!("invalid fact value encoding on line {}", index + 1))?;
+            facts.insert(key, value);
+            continue;
+        }
+
+        match key {
+            "version" => {
+                if value != FORMAT_VERSION {
+                    return Err(format!(
+                        "unsupported state snapshot version '{value}' on line {}",
+                        index + 1
+                    ));
+                }
+                saw_version = true;
+            }
+            "next_intent_seq" => snapshot.next_intent_seq = parse_u64(value, key, index + 1)?,
+            "revision" => snapshot.state.revision = parse_u64(value, key, index + 1)?,
+            "mode" => snapshot.state.mode = parse_mode(value, index + 1)?,
+            "last_intent_id" => {
+                snapshot.state.last_intent_id = decode_optional_hex_utf8(value, index + 1)?
+            }
+            "last_actor_id" => {
+                snapshot.state.last_actor_id = decode_optional_hex_utf8(value, index + 1)?
+            }
+            "last_decision" => snapshot.state.last_decision = parse_decision(value, index + 1)?,
+            "last_policy_code" => {
+                snapshot.state.last_policy_code = parse_policy_code(value, index + 1)?
+            }
+            "denied_count" => snapshot.state.denied_count = parse_u64(value, key, index + 1)?,
+            "audit_count" => snapshot.state.audit_count = parse_u64(value, key, index + 1)?,
+            _ => {
+                return Err(format!(
+                    "unknown state snapshot key '{}' on line {}",
+                    key,
+                    index + 1
+                ));
+            }
+        }
+    }
+
+    if !saw_version {
+        return Err(String::from("state snapshot is missing version header"));
+    }
+
+    snapshot.state.facts = facts;
+    Ok(snapshot)
+}
+
+fn parse_u64(raw: &str, field: &str, line: usize) -> Result<u64, String> {
+    raw.parse::<u64>()
+        .map_err(|error| format!("invalid {field} on line {line}: {error}"))
+}
+
+fn parse_mode(raw: &str, line: usize) -> Result<ExecutionMode, String> {
+    match raw {
+        "active" => Ok(ExecutionMode::Active),
+        "readonly" => Ok(ExecutionMode::ReadOnly),
+        "halted" => Ok(ExecutionMode::Halted),
+        _ => Err(format!("invalid mode '{raw}' on line {line}")),
+    }
+}
+
+fn parse_decision(raw: &str, line: usize) -> Result<Option<DecisionOutcome>, String> {
+    match raw {
+        NONE_SENTINEL => Ok(None),
+        "accepted" => Ok(Some(DecisionOutcome::Accepted)),
+        "rejected" => Ok(Some(DecisionOutcome::Rejected)),
+        _ => Err(format!("invalid decision '{raw}' on line {line}")),
+    }
+}
+
+fn parse_policy_code(raw: &str, line: usize) -> Result<Option<PolicyCode>, String> {
+    let code = match raw {
+        NONE_SENTINEL => return Ok(None),
+        "allowed" => PolicyCode::Allowed,
+        "actor_missing" => PolicyCode::ActorMissing,
+        "runtime_halted" => PolicyCode::RuntimeHalted,
+        "readonly_mutation" => PolicyCode::ReadOnlyMutation,
+        "unauthorized_control" => PolicyCode::UnauthorizedControl,
+        "payload_too_large" => PolicyCode::PayloadTooLarge,
+        _ => return Err(format!("invalid policy code '{raw}' on line {line}")),
+    };
+    Ok(Some(code))
+}
+
+fn mode_name(mode: ExecutionMode) -> &'static str {
+    match mode {
+        ExecutionMode::Active => "active",
+        ExecutionMode::ReadOnly => "readonly",
+        ExecutionMode::Halted => "halted",
+    }
+}
+
+fn decision_name(decision: Option<DecisionOutcome>) -> &'static str {
+    match decision {
+        Some(DecisionOutcome::Accepted) => "accepted",
+        Some(DecisionOutcome::Rejected) => "rejected",
+        None => NONE_SENTINEL,
+    }
+}
+
+fn policy_code_name(code: Option<PolicyCode>) -> &'static str {
+    match code {
+        Some(code) => code.as_str(),
+        None => NONE_SENTINEL,
+    }
+}
+
+fn encode_optional(value: Option<&str>) -> String {
+    value
+        .map(|value| hex_encode(value.as_bytes()))
+        .unwrap_or_else(|| NONE_SENTINEL.to_owned())
+}
+
+fn decode_optional_hex_utf8(raw: &str, line: usize) -> Result<Option<String>, String> {
+    if raw == NONE_SENTINEL {
+        return Ok(None);
+    }
+
+    decode_hex_utf8(raw)
+        .map(Some)
+        .ok_or_else(|| format!("invalid optional utf8 field on line {line}"))
+}
+
+fn decode_hex_utf8(raw: &str) -> Option<String> {
+    let bytes = hex_decode(raw)?;
+    String::from_utf8(bytes).ok()
+}
+
+fn hex_encode(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+fn hex_decode(hex: &str) -> Option<Vec<u8>> {
+    if !hex.len().is_multiple_of(2) {
+        return None;
+    }
+
+    (0..hex.len())
+        .step_by(2)
+        .map(|index| u8::from_str_radix(&hex[index..index + 2], 16).ok())
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{RuntimeStateSnapshot, parse_snapshot, serialize_snapshot};
+    use axonrunner_core::{AgentState, DecisionOutcome, ExecutionMode, PolicyCode};
+
+    #[test]
+    fn state_snapshot_round_trips() {
+        let snapshot = RuntimeStateSnapshot {
+            state: AgentState {
+                revision: 12,
+                mode: ExecutionMode::ReadOnly,
+                facts: [("alpha".to_owned(), "42".to_owned())]
+                    .into_iter()
+                    .collect(),
+                last_intent_id: Some(String::from("cli-3")),
+                last_actor_id: Some(String::from("system")),
+                last_decision: Some(DecisionOutcome::Accepted),
+                last_policy_code: Some(PolicyCode::Allowed),
+                denied_count: 1,
+                audit_count: 4,
+            },
+            next_intent_seq: 3,
+        };
+
+        let encoded = serialize_snapshot(&snapshot);
+        let decoded = parse_snapshot(&encoded).expect("snapshot should parse");
+
+        assert_eq!(decoded, snapshot);
+    }
+}

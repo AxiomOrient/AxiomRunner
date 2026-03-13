@@ -8,6 +8,8 @@ pub mod provider_codex_runtime;
 pub mod provider_openai;
 pub mod provider_registry;
 pub mod tool;
+pub(crate) mod tool_workspace;
+pub(crate) mod tool_write;
 
 pub use contracts::*;
 pub use error::*;
@@ -16,4 +18,15 @@ pub use provider_registry::{
     DEFAULT_PROVIDER_ID, ProviderRegistryEntry, build_contract_provider, provider_registry,
     resolve_provider_id,
 };
-pub use tool::{ToolPolicy, WorkspaceTool};
+pub use tool::WorkspaceTool;
+
+#[cfg(test)]
+pub(crate) mod test_util {
+    pub(crate) fn block_on<T>(future: impl std::future::Future<Output = T>) -> T {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("test runtime should initialize")
+            .block_on(future)
+    }
+}

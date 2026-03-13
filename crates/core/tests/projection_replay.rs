@@ -134,3 +134,15 @@ fn projection_replay_is_pure_for_state_and_event_inputs() {
     assert_eq!(events, events_snapshot);
     assert_ne!(projected, initial);
 }
+
+#[test]
+fn golden_projection_replay_preserves_readonly_control_state_contract() {
+    let projected = project_from(&AgentState::default(), &replay_event_stream());
+
+    assert_eq!(projected.mode, ExecutionMode::ReadOnly);
+    assert_eq!(projected.last_intent_id.as_deref(), Some("intent-3"));
+    assert_eq!(projected.last_actor_id.as_deref(), Some("alice"));
+    assert_eq!(projected.denied_count, 1);
+    assert_eq!(projected.audit_count, 3);
+    assert_eq!(projected.facts.get("alpha").map(String::as_str), Some("42"));
+}

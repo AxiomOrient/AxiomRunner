@@ -21,6 +21,12 @@ pub fn parse_startup_args(args: Vec<String>) -> Result<StartupArgs, String> {
     let mut command_started = false;
 
     while let Some(arg) = iter.next() {
+        if !command_started && (arg == "--help" || arg == "-h") {
+            command_started = true;
+            command_tokens.push(String::from("help"));
+            continue;
+        }
+
         if command_started {
             command_tokens.push(arg);
             continue;

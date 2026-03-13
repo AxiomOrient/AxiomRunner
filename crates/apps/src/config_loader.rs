@@ -1,14 +1,23 @@
 use std::fmt::{Display, Formatter};
+use std::path::PathBuf;
 
 use crate::env_util::read_env_trimmed;
 
 const ENV_PROFILE: &str = "AXONRUNNER_PROFILE";
 const ENV_PROVIDER: &str = "AXONRUNNER_RUNTIME_PROVIDER";
+const ENV_PROVIDER_MODEL: &str = "AXONRUNNER_RUNTIME_PROVIDER_MODEL";
+const ENV_WORKSPACE: &str = "AXONRUNNER_RUNTIME_TOOL_WORKSPACE";
+const ENV_STATE_PATH: &str = "AXONRUNNER_RUNTIME_STATE_PATH";
+const ENV_COMMAND_ALLOWLIST: &str = "AXONRUNNER_RUNTIME_COMMAND_ALLOWLIST";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AppConfig {
     pub profile: String,
     pub provider: String,
+    pub provider_model: Option<String>,
+    pub workspace: Option<PathBuf>,
+    pub state_path: Option<PathBuf>,
+    pub command_allowlist: Option<Vec<String>>,
 }
 
 impl Default for AppConfig {
@@ -16,6 +25,10 @@ impl Default for AppConfig {
         Self {
             profile: String::from("prod"),
             provider: String::from("mock-local"),
+            provider_model: None,
+            workspace: None,
+            state_path: None,
+            command_allowlist: None,
         }
     }
 }
@@ -24,6 +37,10 @@ impl Default for AppConfig {
 pub struct PartialConfig {
     pub profile: Option<String>,
     pub provider: Option<String>,
+    pub provider_model: Option<String>,
+    pub workspace: Option<PathBuf>,
+    pub state_path: Option<PathBuf>,
+    pub command_allowlist: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -97,6 +114,24 @@ pub fn resolve_config(file: PartialConfig, env: PartialConfig, cli: PartialConfi
         )
         .expect("provider default must always exist")
         .value,
+        provider_model: merge_optional(
+            None,
+            file.provider_model,
+            env.provider_model,
+            cli.provider_model,
+        )
+        .map(|selected| selected.value),
+        workspace: merge_optional(None, file.workspace, env.workspace, cli.workspace)
+            .map(|selected| selected.value),
+        state_path: merge_optional(None, file.state_path, env.state_path, cli.state_path)
+            .map(|selected| selected.value),
+        command_allowlist: merge_optional(
+            None,
+            file.command_allowlist,
+            env.command_allowlist,
+            cli.command_allowlist,
+        )
+        .map(|selected| selected.value),
     }
 }
 
@@ -122,6 +157,10 @@ pub fn parse_file_config(contents: &str) -> Result<PartialConfig, ConfigError> {
         match key {
             "profile" => partial.profile = Some(value.to_string()),
             "provider" => partial.provider = Some(value.to_string()),
+            "provider_model" => partial.provider_model = Some(value.to_string()),
+            "workspace" => partial.workspace = Some(PathBuf::from(value)),
+            "state_path" => partial.state_path = Some(PathBuf::from(value)),
+            "command_allowlist" => partial.command_allowlist = Some(parse_command_allowlist(value)?),
             _ => {
                 return Err(ConfigError::new(format!(
                     "unknown config key '{}' on line {}",
@@ -146,6 +185,18 @@ pub fn parse_env_config(
     if let Some(value) = read_env(ENV_PROVIDER) {
         partial.provider = Some(value);
     }
+    if let Some(value) = read_env(ENV_PROVIDER_MODEL) {
+        partial.provider_model = Some(value);
+    }
+    if let Some(value) = read_env(ENV_WORKSPACE) {
+        partial.workspace = Some(PathBuf::from(value));
+    }
+    if let Some(value) = read_env(ENV_STATE_PATH) {
+        partial.state_path = Some(PathBuf::from(value));
+    }
+    if let Some(value) = read_env(ENV_COMMAND_ALLOWLIST) {
+        partial.command_allowlist = Some(parse_command_allowlist(&value)?);
+    }
 
     Ok(partial)
 }
@@ -154,6 +205,10 @@ pub fn parse_env_config(
 pub(crate) enum CliConfigOption {
     Profile,
     Provider,
+    ProviderModel,
+    Workspace,
+    StatePath,
+    CommandAllowlist,
 }
 
 pub(crate) fn parse_cli_config_option(arg: &str) -> Option<(CliConfigOption, &str)> {
@@ -162,6 +217,18 @@ pub(crate) fn parse_cli_config_option(arg: &str) -> Option<(CliConfigOption, &st
     }
     if let Some(value) = arg.strip_prefix("--provider=") {
         return Some((CliConfigOption::Provider, value));
+    }
+    if let Some(value) = arg.strip_prefix("--provider-model=") {
+        return Some((CliConfigOption::ProviderModel, value));
+    }
+    if let Some(value) = arg.strip_prefix("--workspace=") {
+        return Some((CliConfigOption::Workspace, value));
+    }
+    if let Some(value) = arg.strip_prefix("--state-path=") {
+        return Some((CliConfigOption::StatePath, value));
+    }
+    if let Some(value) = arg.strip_prefix("--command-allowlist=") {
+        return Some((CliConfigOption::CommandAllowlist, value));
     }
     None
 }
@@ -177,6 +244,18 @@ pub fn parse_cli_config(args: &[String]) -> Result<PartialConfig, ConfigError> {
             Some((CliConfigOption::Provider, value)) => {
                 partial.provider = Some(value.to_string());
             }
+            Some((CliConfigOption::ProviderModel, value)) => {
+                partial.provider_model = Some(value.to_string());
+            }
+            Some((CliConfigOption::Workspace, value)) => {
+                partial.workspace = Some(PathBuf::from(value));
+            }
+            Some((CliConfigOption::StatePath, value)) => {
+                partial.state_path = Some(PathBuf::from(value));
+            }
+            Some((CliConfigOption::CommandAllowlist, value)) => {
+                partial.command_allowlist = Some(parse_command_allowlist(value)?);
+            }
             None => {
                 return Err(ConfigError::new(format!("unknown CLI argument '{arg}'")));
             }
@@ -186,26 +265,54 @@ pub fn parse_cli_config(args: &[String]) -> Result<PartialConfig, ConfigError> {
     Ok(partial)
 }
 
+fn parse_command_allowlist(raw: &str) -> Result<Vec<String>, ConfigError> {
+    let values = raw
+        .split(',')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    if values.is_empty() {
+        return Err(ConfigError::new(
+            "command_allowlist requires at least one non-empty command",
+        ));
+    }
+    Ok(values)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         AppConfig, CliConfigOption, PartialConfig, parse_cli_config, parse_cli_config_option,
         parse_env_config, parse_file_config, resolve_config,
     };
+    use std::path::PathBuf;
 
     #[test]
     fn resolve_config_uses_provider_precedence() {
         let file = PartialConfig {
             profile: Some(String::from("dev")),
             provider: Some(String::from("openai")),
+            provider_model: None,
+            workspace: None,
+            state_path: None,
+            command_allowlist: None,
         };
         let env = PartialConfig {
             profile: None,
             provider: Some(String::from("openrouter")),
+            provider_model: None,
+            workspace: None,
+            state_path: None,
+            command_allowlist: None,
         };
         let cli = PartialConfig {
             profile: None,
             provider: Some(String::from("ollama")),
+            provider_model: None,
+            workspace: None,
+            state_path: None,
+            command_allowlist: None,
         };
 
         let resolved = resolve_config(file, env, cli);
@@ -216,27 +323,62 @@ mod tests {
     #[test]
     fn parse_file_config_accepts_provider_key() {
         let parsed =
-            parse_file_config("profile=prod\nprovider=gemini\n").expect("file config should parse");
+            parse_file_config("profile=prod\nprovider=gemini\nprovider_model=gpt-5\nworkspace=/tmp/work\nstate_path=/tmp/state\ncommand_allowlist=git,cargo,rg\n").expect("file config should parse");
 
         assert_eq!(parsed.provider.as_deref(), Some("gemini"));
+        assert_eq!(parsed.provider_model.as_deref(), Some("gpt-5"));
+        assert_eq!(parsed.workspace, Some(PathBuf::from("/tmp/work")));
+        assert_eq!(parsed.state_path, Some(PathBuf::from("/tmp/state")));
+        assert_eq!(
+            parsed.command_allowlist,
+            Some(vec![
+                String::from("git"),
+                String::from("cargo"),
+                String::from("rg")
+            ])
+        );
     }
 
     #[test]
     fn parse_env_config_reads_provider() {
         let parsed = parse_env_config(|key| match key {
             "AXONRUNNER_RUNTIME_PROVIDER" => Some(String::from("openrouter")),
+            "AXONRUNNER_RUNTIME_PROVIDER_MODEL" => Some(String::from("gpt-5-mini")),
+            "AXONRUNNER_RUNTIME_TOOL_WORKSPACE" => Some(String::from("/tmp/work")),
+            "AXONRUNNER_RUNTIME_STATE_PATH" => Some(String::from("/tmp/state")),
+            "AXONRUNNER_RUNTIME_COMMAND_ALLOWLIST" => Some(String::from("git,cargo")),
             _ => None,
         })
         .expect("env parse should succeed");
 
         assert_eq!(parsed.provider.as_deref(), Some("openrouter"));
+        assert_eq!(parsed.provider_model.as_deref(), Some("gpt-5-mini"));
+        assert_eq!(parsed.workspace, Some(PathBuf::from("/tmp/work")));
+        assert_eq!(parsed.state_path, Some(PathBuf::from("/tmp/state")));
+        assert_eq!(
+            parsed.command_allowlist,
+            Some(vec![String::from("git"), String::from("cargo")])
+        );
     }
 
     #[test]
     fn parse_cli_config_parses_provider_option() {
-        let args = vec![String::from("--provider=openai")];
+        let args = vec![
+            String::from("--provider=openai"),
+            String::from("--provider-model=gpt-5"),
+            String::from("--workspace=/tmp/work"),
+            String::from("--state-path=/tmp/state"),
+            String::from("--command-allowlist=git,cargo"),
+        ];
         let parsed = parse_cli_config(&args).expect("cli config should parse");
         assert_eq!(parsed.provider.as_deref(), Some("openai"));
+        assert_eq!(parsed.provider_model.as_deref(), Some("gpt-5"));
+        assert_eq!(parsed.workspace, Some(PathBuf::from("/tmp/work")));
+        assert_eq!(parsed.state_path, Some(PathBuf::from("/tmp/state")));
+        assert_eq!(
+            parsed.command_allowlist,
+            Some(vec![String::from("git"), String::from("cargo")])
+        );
     }
 
     #[test]
@@ -248,9 +390,33 @@ mod tests {
     }
 
     #[test]
+    fn parse_cli_config_option_marks_runtime_paths_as_config_options() {
+        let model = parse_cli_config_option("--provider-model=gpt-5")
+            .expect("provider model option should be recognized");
+        assert_eq!(model.0, CliConfigOption::ProviderModel);
+        assert_eq!(model.1, "gpt-5");
+
+        let workspace = parse_cli_config_option("--workspace=/tmp/work")
+            .expect("workspace option should be recognized");
+        assert_eq!(workspace.0, CliConfigOption::Workspace);
+        assert_eq!(workspace.1, "/tmp/work");
+
+        let state_path = parse_cli_config_option("--state-path=/tmp/state")
+            .expect("state path option should be recognized");
+        assert_eq!(state_path.0, CliConfigOption::StatePath);
+        assert_eq!(state_path.1, "/tmp/state");
+
+        let allowlist = parse_cli_config_option("--command-allowlist=git,cargo")
+            .expect("command allowlist option should be recognized");
+        assert_eq!(allowlist.0, CliConfigOption::CommandAllowlist);
+        assert_eq!(allowlist.1, "git,cargo");
+    }
+
+    #[test]
     fn default_config_keeps_mock_local_provider() {
         let config = AppConfig::default();
         assert_eq!(config.provider, "mock-local");
+        assert_eq!(config.provider_model, None);
     }
 
     #[test]

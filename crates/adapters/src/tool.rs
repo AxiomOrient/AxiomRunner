@@ -1,74 +1,26 @@
-use std::fmt;
+use crate::contracts::{
+    AdapterHealth, FileMutationEvidence, FileWriteOutput, ListFilesOutput, ReadFileOutput,
+    RemovePathOutput, ReplaceInFileOutput, RunCommandOutput, SearchFilesOutput, SearchMatch,
+    SearchMode, ToolAdapter, ToolPolicy, ToolRequest, ToolResult,
+};
+use crate::error::{AdapterError, AdapterResult, RetryClass};
+use regex::Regex;
+use crate::tool_workspace::{
+    WorkspacePathError, canonicalize_workspace_root, collect_files_respecting_gitignore,
+    resolve_workspace_path,
+};
+use crate::tool_write::{
+    WritePreparationError, atomic_overwrite, digest_path, existing_digest,
+    prepare_contents_for_existing_file, write_patch_artifact,
+};
 use std::fs::{self, OpenOptions};
-use std::io::{self, Write};
-use std::path::{Path, PathBuf};
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ToolPolicy {
-    pub max_file_write_bytes: usize,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ToolRequest<'a> {
-    FileWrite {
-        path: &'a str,
-        contents: &'a str,
-        append: bool,
-    },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ToolResult {
-    FileWrite(FileWriteOutput),
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FileWriteOutput {
-    pub path: PathBuf,
-    pub bytes_written: usize,
-}
-
-#[derive(Debug)]
-pub enum ToolError {
-    InvalidInput(&'static str),
-    InputTooLarge {
-        limit: usize,
-        actual: usize,
-    },
-    WorkspaceEscape {
-        requested: String,
-    },
-    Io {
-        operation: &'static str,
-        source: io::Error,
-    },
-}
-
-impl fmt::Display for ToolError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            ToolError::InvalidInput(reason) => write!(f, "invalid tool input: {reason}"),
-            ToolError::InputTooLarge { limit, actual } => {
-                write!(f, "file_write exceeds limit ({actual} > {limit})")
-            }
-            ToolError::WorkspaceEscape { requested } => {
-                write!(f, "path escapes workspace boundary: {requested}")
-            }
-            ToolError::Io { operation, source } => {
-                write!(f, "{operation} failed: {source}")
-            }
-        }
-    }
-}
-
-impl std::error::Error for ToolError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            ToolError::Io { source, .. } => Some(source),
-            _ => None,
-        }
-    }
-}
+use std::io::{self, Read, Write};
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
+use std::path::PathBuf;
+use std::process::{Child, Command, Stdio};
+use std::thread::{self, JoinHandle};
+use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone)]
 pub struct WorkspaceTool {
@@ -78,28 +30,8 @@ pub struct WorkspaceTool {
 
 impl WorkspaceTool {
     pub fn new(workspace_root: impl Into<PathBuf>, policy: ToolPolicy) -> Result<Self, ToolError> {
-        let mut root = workspace_root.into();
-        if root.as_os_str().is_empty() {
-            return Err(ToolError::InvalidInput("workspace root is required"));
-        }
-
-        if !root.is_absolute() {
-            let cwd = std::env::current_dir().map_err(|error| ToolError::Io {
-                operation: "read_current_dir",
-                source: error,
-            })?;
-            root = cwd.join(root);
-        }
-
-        let canonical_root = fs::canonicalize(&root).map_err(|error| ToolError::Io {
-            operation: "canonicalize_workspace_root",
-            source: error,
-        })?;
-        if !canonical_root.is_dir() {
-            return Err(ToolError::InvalidInput(
-                "workspace root must be a directory",
-            ));
-        }
+        let canonical_root =
+            canonicalize_workspace_root(workspace_root).map_err(map_workspace_path_error)?;
 
         Ok(Self {
             workspace_root: canonical_root,
@@ -107,17 +39,110 @@ impl WorkspaceTool {
         })
     }
 
-    pub fn execute(&self, request: ToolRequest<'_>) -> Result<ToolResult, ToolError> {
-        match request {
-            ToolRequest::FileWrite {
-                path,
-                contents,
-                append,
-            } => self.execute_file_write(path, contents, append),
+    fn list_files(&self, path: &str) -> Result<ToolResult, ToolError> {
+        let base = self.resolve_workspace_path(path)?;
+        if !base.exists() {
+            return Err(ToolError::NotFound {
+                path: path.to_owned(),
+            });
         }
+
+        let paths = collect_files_respecting_gitignore(&base).map_err(|error| ToolError::Io {
+            operation: "list_files",
+            source: error,
+        })?;
+
+        Ok(ToolResult::ListFiles(ListFilesOutput { base, paths }))
     }
 
-    fn execute_file_write(
+    fn read_file(&self, path: &str) -> Result<ToolResult, ToolError> {
+        let resolved_path = self.resolve_workspace_path(path)?;
+        let metadata = fs::metadata(&resolved_path).map_err(|error| ToolError::Io {
+            operation: "stat_file",
+            source: error,
+        })?;
+        if !metadata.is_file() {
+            return Err(ToolError::InvalidInput("read path must be a file"));
+        }
+        if metadata.len() as usize > self.policy.max_file_read_bytes {
+            return Err(ToolError::InputTooLarge {
+                limit: self.policy.max_file_read_bytes,
+                actual: metadata.len() as usize,
+            });
+        }
+
+        let mut contents = String::new();
+        fs::File::open(&resolved_path)
+            .and_then(|mut file| file.read_to_string(&mut contents))
+            .map_err(|error| ToolError::Io {
+                operation: "read_file",
+                source: error,
+            })?;
+
+        Ok(ToolResult::ReadFile(ReadFileOutput {
+            path: resolved_path,
+            contents,
+        }))
+    }
+
+    fn search_files(
+        &self,
+        path: &str,
+        needle: &str,
+        mode: SearchMode,
+    ) -> Result<ToolResult, ToolError> {
+        if needle.trim().is_empty() {
+            return Err(ToolError::InvalidInput("search needle"));
+        }
+        let regex = match mode {
+            SearchMode::Substring => None,
+            SearchMode::Regex => Some(
+                Regex::new(needle)
+                    .map_err(|error| ToolError::InvalidPattern(error.to_string()))?,
+            ),
+        };
+
+        let base = self.resolve_workspace_path(path)?;
+        if !base.exists() {
+            return Err(ToolError::NotFound {
+                path: path.to_owned(),
+            });
+        }
+
+        let files = collect_files_respecting_gitignore(&base).map_err(|error| ToolError::Io {
+            operation: "search_files",
+            source: error,
+        })?;
+
+        let mut matches = Vec::new();
+        for file in files {
+            if matches.len() >= self.policy.max_search_results {
+                break;
+            }
+            if let Ok(contents) = fs::read_to_string(&file) {
+                for (index, line) in contents.lines().enumerate() {
+                    let matched = match &regex {
+                        Some(regex) => regex.is_match(line),
+                        None => line.contains(needle),
+                    };
+                    if matched {
+                        matches.push(SearchMatch {
+                            path: file.clone(),
+                            line_number: index + 1,
+                            line: line.to_owned(),
+                        });
+                        if matches.len() >= self.policy.max_search_results {
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(ToolResult::SearchFiles(SearchFilesOutput { base, matches }))
+    }
+
+    fn file_write(
         &self,
         path: &str,
         contents: &str,
@@ -144,76 +169,487 @@ impl WorkspaceTool {
             })?;
         }
 
-        let mut options = OpenOptions::new();
-        options.create(true);
-        if append {
-            options.append(true);
-        } else {
-            options.write(true).truncate(true);
-        }
+        let before_digest = existing_digest(&resolved_path).map_err(map_write_preparation_error)?;
 
-        let mut file = options
-            .open(&resolved_path)
-            .map_err(|error| ToolError::Io {
-                operation: "open_file_for_write",
+        let bytes_written = if append {
+            let contents = prepare_contents_for_existing_file(&resolved_path, contents)
+                .map_err(map_write_preparation_error)?;
+            let bytes_written = contents.len();
+            let mut options = OpenOptions::new();
+            options.create(true).append(true);
+            let mut file = options
+                .open(&resolved_path)
+                .map_err(|error| ToolError::Io {
+                    operation: "open_file_for_write",
+                    source: error,
+                })?;
+            file.write_all(contents.as_bytes())
+                .map_err(|error| ToolError::Io {
+                    operation: "write_file",
+                    source: error,
+                })?;
+            bytes_written
+        } else {
+            let contents = prepare_contents_for_existing_file(&resolved_path, contents)
+                .map_err(map_write_preparation_error)?;
+            let bytes_written = contents.len();
+            atomic_overwrite(&resolved_path, &contents).map_err(|error| ToolError::Io {
+                operation: "atomic_overwrite",
                 source: error,
             })?;
-        file.write_all(contents.as_bytes())
-            .map_err(|error| ToolError::Io {
-                operation: "write_file",
-                source: error,
-            })?;
+            bytes_written
+        };
+        let after_digest = digest_path(&resolved_path).map_err(|error| ToolError::Io {
+            operation: "digest_file_after_write",
+            source: error,
+        })?;
+        let artifact_path = write_patch_artifact(
+            &self.workspace_root,
+            &resolved_path,
+            if append { "append" } else { "overwrite" },
+            before_digest.as_deref(),
+            &after_digest,
+            bytes_written,
+        )
+        .map_err(|error| ToolError::Io {
+            operation: "write_patch_artifact",
+            source: error,
+        })?;
 
         Ok(ToolResult::FileWrite(FileWriteOutput {
             path: resolved_path,
-            bytes_written: contents.len(),
+            bytes_written,
+            evidence: FileMutationEvidence {
+                artifact_path,
+                before_digest,
+                after_digest,
+            },
+        }))
+    }
+
+    fn replace_in_file(
+        &self,
+        path: &str,
+        needle: &str,
+        replacement: &str,
+    ) -> Result<ToolResult, ToolError> {
+        if needle.is_empty() {
+            return Err(ToolError::InvalidInput("replace needle"));
+        }
+        let resolved_path = self.resolve_workspace_path(path)?;
+        let contents = match fs::read(&resolved_path).map_err(|error| ToolError::Io {
+            operation: "read_file_for_replace",
+            source: error,
+        }) {
+            Ok(bytes) => String::from_utf8(bytes).map_err(|_| ToolError::UnsupportedEncoding {
+                path: resolved_path.clone(),
+            })?,
+            Err(error) => return Err(error),
+        };
+        let replacements = contents.matches(needle).count();
+        if replacements == 0 {
+            return Err(ToolError::NotFound {
+                path: format!("{path}::{needle}"),
+            });
+        }
+        let updated = contents.replace(needle, replacement);
+        let write_result = self.file_write(path, &updated, false)?;
+        let ToolResult::FileWrite(write_output) = write_result else {
+            return Err(ToolError::Io {
+                operation: "replace_in_file_write_result",
+                source: io::Error::other("unexpected tool result"),
+            });
+        };
+        Ok(ToolResult::ReplaceInFile(ReplaceInFileOutput {
+            path: resolved_path,
+            replacements,
+            evidence: write_output.evidence,
+        }))
+    }
+
+    fn remove_path(&self, path: &str) -> Result<ToolResult, ToolError> {
+        let resolved_path = self.resolve_workspace_path(path)?;
+        if !resolved_path.exists() {
+            return Ok(ToolResult::RemovePath(RemovePathOutput {
+                path: resolved_path,
+                removed: false,
+            }));
+        }
+
+        let metadata = fs::metadata(&resolved_path).map_err(|error| ToolError::Io {
+            operation: "stat_remove_path",
+            source: error,
+        })?;
+        if metadata.is_dir() {
+            fs::remove_dir_all(&resolved_path).map_err(|error| ToolError::Io {
+                operation: "remove_dir_all",
+                source: error,
+            })?;
+        } else {
+            fs::remove_file(&resolved_path).map_err(|error| ToolError::Io {
+                operation: "remove_file",
+                source: error,
+            })?;
+        }
+
+        Ok(ToolResult::RemovePath(RemovePathOutput {
+            path: resolved_path,
+            removed: true,
+        }))
+    }
+
+    fn run_command(&self, program: &str, args: &[String]) -> Result<ToolResult, ToolError> {
+        if program.trim().is_empty() {
+            return Err(ToolError::InvalidInput("run command program"));
+        }
+        if is_forbidden_shell_program(program) {
+            return Err(ToolError::CommandDenied {
+                program: program.to_owned(),
+            });
+        }
+        if !self
+            .policy
+            .command_allowlist
+            .iter()
+            .any(|allowed| allowed == program)
+        {
+            return Err(ToolError::CommandDenied {
+                program: program.to_owned(),
+            });
+        }
+
+        let mut command = Command::new(program);
+        command
+            .args(args)
+            .current_dir(&self.workspace_root)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        configure_command(&mut command);
+        let mut child = command.spawn().map_err(|error| ToolError::Io {
+            operation: "run_command",
+            source: error,
+        })?;
+
+        let stdout_worker = spawn_output_worker(
+            child.stdout.take().ok_or_else(|| ToolError::Io {
+                operation: "capture_command_stdout",
+                source: io::Error::other("stdout pipe not available"),
+            })?,
+            self.policy.max_command_output_bytes,
+        );
+        let stderr_worker = spawn_output_worker(
+            child.stderr.take().ok_or_else(|| ToolError::Io {
+                operation: "capture_command_stderr",
+                source: io::Error::other("stderr pipe not available"),
+            })?,
+            self.policy.max_command_output_bytes,
+        );
+
+        let timeout = Duration::from_millis(self.policy.command_timeout_ms.max(1));
+        let started_at = Instant::now();
+        let exit_code = loop {
+            match child.try_wait().map_err(|error| ToolError::Io {
+                operation: "run_command_try_wait",
+                source: error,
+            })? {
+                Some(status) => break status.code().unwrap_or(-1),
+                None if started_at.elapsed() >= timeout => {
+                    let _ = terminate_child(&mut child);
+                    let _ = child.wait();
+                    let _ = join_output_worker(stdout_worker, "read_command_stdout");
+                    let _ = join_output_worker(stderr_worker, "read_command_stderr");
+                    return Err(ToolError::Timeout {
+                        program: program.to_owned(),
+                        timeout_ms: timeout.as_millis() as u64,
+                    });
+                }
+                None => thread::sleep(Duration::from_millis(10)),
+            }
+        };
+
+        let stdout = join_output_worker(stdout_worker, "read_command_stdout")?;
+        let stderr = join_output_worker(stderr_worker, "read_command_stderr")?;
+
+        Ok(ToolResult::RunCommand(RunCommandOutput {
+            program: program.to_owned(),
+            args: args.to_vec(),
+            exit_code,
+            stdout: finalize_command_output(stdout.bytes, stdout.truncated),
+            stderr: finalize_command_output(stderr.bytes, stderr.truncated),
+            stdout_truncated: stdout.truncated,
+            stderr_truncated: stderr.truncated,
         }))
     }
 
     fn resolve_workspace_path(&self, requested_path: &str) -> Result<PathBuf, ToolError> {
-        let requested = Path::new(requested_path);
-        let joined = if requested.is_absolute() {
-            requested.to_path_buf()
-        } else {
-            self.workspace_root.join(requested)
-        };
-
-        let normalized = normalize_path(&joined);
-        let mut existing_ancestor = normalized.clone();
-        while !existing_ancestor.exists() {
-            if !existing_ancestor.pop() {
-                return Err(ToolError::WorkspaceEscape {
-                    requested: requested_path.to_owned(),
-                });
-            }
-        }
-
-        let canonical_ancestor =
-            fs::canonicalize(&existing_ancestor).map_err(|error| ToolError::Io {
-                operation: "canonicalize_existing_ancestor",
-                source: error,
-            })?;
-
-        if !canonical_ancestor.starts_with(&self.workspace_root) {
-            return Err(ToolError::WorkspaceEscape {
-                requested: requested_path.to_owned(),
-            });
-        }
-
-        Ok(normalized)
+        resolve_workspace_path(&self.workspace_root, requested_path)
+            .map_err(map_workspace_path_error)
     }
 }
 
-fn normalize_path(path: &Path) -> PathBuf {
-    let mut normalized = PathBuf::new();
-    for component in path.components() {
-        match component {
-            std::path::Component::CurDir => {}
-            std::path::Component::ParentDir => {
-                normalized.pop();
-            }
-            other => normalized.push(other.as_os_str()),
+impl ToolAdapter for WorkspaceTool {
+    fn id(&self) -> &str {
+        "tool.workspace"
+    }
+
+    fn health(&self) -> AdapterHealth {
+        if self.workspace_root.is_dir() {
+            AdapterHealth::Healthy
+        } else {
+            AdapterHealth::Unavailable
         }
     }
-    normalized
+
+    fn execute(&self, request: ToolRequest) -> AdapterResult<ToolResult> {
+        let result = match request {
+            ToolRequest::ListFiles { path } => self.list_files(&path),
+            ToolRequest::ReadFile { path } => self.read_file(&path),
+            ToolRequest::SearchFiles { path, needle, mode } => {
+                self.search_files(&path, &needle, mode)
+            }
+            ToolRequest::FileWrite {
+                path,
+                contents,
+                append,
+            } => self.file_write(&path, &contents, append),
+            ToolRequest::ReplaceInFile {
+                path,
+                needle,
+                replacement,
+            } => self.replace_in_file(&path, &needle, &replacement),
+            ToolRequest::RemovePath { path } => self.remove_path(&path),
+            ToolRequest::RunCommand { program, args } => self.run_command(&program, &args),
+        };
+
+        result.map_err(map_tool_error)
+    }
+}
+
+#[derive(Debug)]
+pub enum ToolError {
+    InvalidInput(&'static str),
+    NotFound {
+        path: String,
+    },
+    InputTooLarge {
+        limit: usize,
+        actual: usize,
+    },
+    WorkspaceEscape {
+        requested: String,
+    },
+    InvalidPattern(String),
+    CommandDenied {
+        program: String,
+    },
+    UnsupportedEncoding {
+        path: PathBuf,
+    },
+    Timeout {
+        program: String,
+        timeout_ms: u64,
+    },
+    Io {
+        operation: &'static str,
+        source: io::Error,
+    },
+}
+
+impl std::fmt::Display for ToolError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidInput(reason) => write!(f, "invalid tool input: {reason}"),
+            Self::NotFound { path } => write!(f, "tool path not found: {path}"),
+            Self::InputTooLarge { limit, actual } => {
+                write!(f, "tool input exceeds limit ({actual} > {limit})")
+            }
+            Self::WorkspaceEscape { requested } => {
+                write!(f, "path escapes workspace boundary: {requested}")
+            }
+            Self::InvalidPattern(pattern) => write!(f, "invalid search pattern: {pattern}"),
+            Self::CommandDenied { program } => write!(f, "command not allowed: {program}"),
+            Self::UnsupportedEncoding { path } => {
+                write!(f, "unsupported file encoding: {}", path.display())
+            }
+            Self::Timeout {
+                program,
+                timeout_ms,
+            } => write!(f, "command timed out: {program} after {timeout_ms}ms"),
+            Self::Io { operation, source } => write!(f, "{operation} failed: {source}"),
+        }
+    }
+}
+
+fn finalize_command_output(bytes: Vec<u8>, truncated: bool) -> String {
+    let text = String::from_utf8_lossy(&bytes).into_owned();
+    if !truncated {
+        return text;
+    }
+
+    let marker = "...[truncated]";
+    let budget = bytes.len().saturating_sub(marker.len());
+    let mut truncated_text = String::new();
+    for ch in text.chars() {
+        let len = ch.len_utf8();
+        if truncated_text.len() + len > budget {
+            break;
+        }
+        truncated_text.push(ch);
+    }
+    truncated_text.push_str(marker);
+    truncated_text
+}
+
+fn spawn_output_worker<R>(mut reader: R, limit: usize) -> JoinHandle<Result<CollectedOutput, io::Error>>
+where
+    R: Read + Send + 'static,
+{
+    thread::spawn(move || {
+        let mut collected = Vec::new();
+        let mut buffer = [0_u8; 4096];
+        let mut truncated = false;
+        loop {
+            let bytes_read = reader.read(&mut buffer)?;
+            if bytes_read == 0 {
+                break;
+            }
+            let available = limit.saturating_sub(collected.len());
+            if available > 0 {
+                let kept = available.min(bytes_read);
+                collected.extend_from_slice(&buffer[..kept]);
+                if kept < bytes_read {
+                    truncated = true;
+                }
+            } else {
+                truncated = true;
+            }
+        }
+        Ok(CollectedOutput {
+            bytes: collected,
+            truncated,
+        })
+    })
+}
+
+fn join_output_worker(
+    worker: JoinHandle<Result<CollectedOutput, io::Error>>,
+    operation: &'static str,
+) -> Result<CollectedOutput, ToolError> {
+    match worker.join() {
+        Ok(Ok(output)) => Ok(output),
+        Ok(Err(source)) => Err(ToolError::Io { operation, source }),
+        Err(_) => Err(ToolError::Io {
+            operation,
+            source: io::Error::other("command output worker panicked"),
+        }),
+    }
+}
+
+#[derive(Debug)]
+struct CollectedOutput {
+    bytes: Vec<u8>,
+    truncated: bool,
+}
+
+fn configure_command(command: &mut Command) {
+    #[cfg(unix)]
+    {
+        command.process_group(0);
+    }
+}
+
+fn is_forbidden_shell_program(program: &str) -> bool {
+    matches!(
+        program.trim(),
+        "sh" | "bash" | "zsh" | "fish" | "dash" | "ksh"
+    )
+}
+
+fn terminate_child(child: &mut Child) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        let group_id = child.id() as i32;
+        let status = Command::new("kill")
+            .args(["-KILL", &format!("-{group_id}")])
+            .status()?;
+        if status.success() {
+            return Ok(());
+        }
+        return child.kill();
+    }
+
+    #[cfg(not(unix))]
+    {
+        child.kill()
+    }
+}
+
+impl std::error::Error for ToolError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Io { source, .. } => Some(source),
+            _ => None,
+        }
+    }
+}
+
+fn map_tool_error(error: ToolError) -> AdapterError {
+    match error {
+        ToolError::InvalidInput(reason) => AdapterError::invalid_input("tool", reason),
+        ToolError::NotFound { path } => AdapterError::not_found("tool_path", path),
+        ToolError::InputTooLarge { limit, actual } => AdapterError::failed(
+            "tool.input_too_large",
+            format!("{actual}>{limit}"),
+            RetryClass::NonRetryable,
+        ),
+        ToolError::WorkspaceEscape { requested } => {
+            AdapterError::failed("tool.workspace_escape", requested, RetryClass::PolicyDenied)
+        }
+        ToolError::InvalidPattern(pattern) => AdapterError::failed(
+            "tool.invalid_search_pattern",
+            pattern,
+            RetryClass::NonRetryable,
+        ),
+        ToolError::CommandDenied { program } => {
+            AdapterError::failed("tool.command_denied", program, RetryClass::PolicyDenied)
+        }
+        ToolError::UnsupportedEncoding { path } => AdapterError::failed(
+            "tool.unsupported_encoding",
+            path.display().to_string(),
+            RetryClass::NonRetryable,
+        ),
+        ToolError::Timeout {
+            program,
+            timeout_ms,
+        } => AdapterError::failed(
+            "tool.command_timeout",
+            format!("{program}@{timeout_ms}ms"),
+            RetryClass::Retryable,
+        ),
+        ToolError::Io { operation, source } => {
+            AdapterError::failed(operation, source.to_string(), RetryClass::Retryable)
+        }
+    }
+}
+
+fn map_workspace_path_error(error: WorkspacePathError) -> ToolError {
+    match error {
+        WorkspacePathError::InvalidInput(reason) => ToolError::InvalidInput(reason),
+        WorkspacePathError::WorkspaceEscape { requested } => {
+            ToolError::WorkspaceEscape { requested }
+        }
+        WorkspacePathError::Io { operation, source } => ToolError::Io { operation, source },
+    }
+}
+
+fn map_write_preparation_error(error: WritePreparationError) -> ToolError {
+    match error {
+        WritePreparationError::Io(source) => ToolError::Io {
+            operation: "prepare_file_contents",
+            source,
+        },
+        WritePreparationError::UnsupportedEncoding => {
+            ToolError::InvalidInput("text write requires an existing UTF-8 file")
+        }
+    }
 }

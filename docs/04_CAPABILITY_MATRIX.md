@@ -2,116 +2,118 @@
 
 ## 1. 원칙
 
-제품 capability는 3종류로만 분류한다.
+제품 capability는 세 종류로만 분류한다.
 
-- **Core**: release blocker
-- **Experimental**: 빌드 가능하더라도 제품 약속에 포함되지 않음
-- **Removed from product surface**: 저장소에 남아도 제품 문서/README/doctor에서 기본 노출하지 않음
+- **Core**: 현재 제품 계약에 포함되며 release blocker다.
+- **Experimental**: 저장소에는 남아도 기본 제품 약속에는 포함되지 않는다.
+- **Removed from product surface**: 문서, help, 기본 운영 경로에서 숨긴다.
 
 ## 2. v1 Core Capability
 
 | 영역 | capability | 상태 | release 기준 |
 |---|---|---|---|
-| Task | `run` | Core | must pass |
-| Task | `doctor` | Core | must pass |
-| Task | `replay` | Core | must pass |
-| Workspace | list/read/search | Core | must pass |
-| Editing | atomic patch apply | Core | must pass |
-| Commands | allowlisted execution | Core | must pass |
-| Backend | `codek` | Core | must pass |
-| Backend | `mock` | Core | must pass |
-| Trace | sqlite/jsonl event log | Core | must pass |
-| Safety | path boundary / shell=false / timeout | Core | must pass |
-| Validation | golden tasks / regression suite | Core | must pass |
+| CLI | `run` | Core | must pass |
+| CLI | `batch` | Core | must pass |
+| CLI | `replay` | Core | must pass |
+| CLI | `status` | Core | must pass |
+| CLI | `health` | Core | must pass |
+| CLI | `help` | Core | must pass |
+| CLI alias | `read/write/remove/freeze/halt` | Core | must pass |
+| State | persisted state snapshot (`revision/mode/facts`) | Core | must pass |
+| Provider | `codek` | Core | must pass |
+| Provider | `mock-local` | Core | must pass |
+| Tool | list/read/search/write/replace/remove/run-command | Core | must pass |
+| Safety | workspace boundary / allowlist / failure propagation | Core | must pass |
+| Reports | plan/apply/verify/report artifact | Core | must pass |
+| Validation | core/adapters/apps regression suite | Core | must pass |
 
 ## 3. Experimental Capability
 
 | 영역 | capability | 이유 |
 |---|---|---|
-| Provider | direct openai-compatible provider | product default를 흐림 |
-| Provider | anthropic direct adapter | backend 다변화는 v1 목표 아님 |
-| Tools | browser | 제품 핵심과 거리 있음 |
-| Tools | composio | scope 과확장 |
-| Tools | delegate | multi-agent로 범위 확장 |
-| Memory | markdown long-term memory | 정합성/드리프트 위험 |
-| Memory | hybrid/axiomme/context | 외부 의존과 복잡성 증가 |
-| Ops | metrics HTTP | 없어도 제품 핵심 가능 |
-| Ops | cron | 장기 자동화는 v1 목표 아님 |
-| Ops | daemon/service | 제품 경로를 흐림 |
-| Channels | telegram/discord/slack/irc/matrix/whatsapp | 작업 완료 제품과 다른 면 |
-| Gateway | signing/webhook ingress | 제품 핵심 경로가 아님 |
+| Provider | `openai` compat provider | 기본 제품 경로를 흐리므로 opt-in fallback으로만 유지 |
+| Tools | browser/composio/delegate | 범위를 과도하게 넓힘 |
+| Memory | markdown/sqlite 외 장기 memory 확장 | 제품 의미를 흐릴 위험 |
+| Ops | daemon/service/cron/metrics HTTP | 현재 retained CLI surface와 무관 |
+| Channels | telegram/discord/slack/irc/matrix/whatsapp | 현재 제품 목표와 다른 면 |
+| Gateway | ingress/signing/webhook | 현재 제품 핵심 경로가 아님 |
 
 ## 4. Removed From Product Surface
 
-아래는 저장소에 남아도 release README/CLI 도움말/doctor default output에서는 숨긴다.
+현재 README, help, DEPLOYMENT, charter에서 기본 노출하지 않는 것:
 
-- `channel serve`
+- `agent`
+- `doctor`
 - `daemon`
 - `gateway`
 - `service`
 - `cron`
 - `skills`
 - `integrations` 카탈로그 전면 노출
-- `metrics_http`
 
 ## 5. CLI Surface Contract
 
 ### 허용
 
 ```bash
-axonrunner run ...
-axonrunner doctor ...
-axonrunner replay ...
+axonrunner_apps run <intent-spec>
+axonrunner_apps batch [--reset-state] <intent-spec>...
+axonrunner_apps replay <intent-id|latest>
+axonrunner_apps status
+axonrunner_apps health
+axonrunner_apps help
 ```
 
-### 제품 도움말에서 숨김 또는 feature-gated
+### 유지되는 thin alias
 
 ```bash
-axonrunner experimental channel ...
-axonrunner experimental gateway ...
-axonrunner experimental daemon ...
+axonrunner_apps read <key>
+axonrunner_apps write <key> <value>
+axonrunner_apps remove <key>
+axonrunner_apps freeze
+axonrunner_apps halt
 ```
 
 ## 6. Tool Surface Contract
 
-v1 tool surface는 명시적으로 아래만 보장한다.
+현재 tool surface는 아래만 보장한다.
 
-| tool | 기능 |
+| tool operation | 기능 |
 |---|---|
-| `workspace.list` | 파일 인벤토리 |
-| `workspace.read` | 파일 읽기 |
-| `workspace.search` | 문자열 검색 |
-| `workspace.write_patch` | atomic patch apply |
-| `command.run` | allowlisted command 실행 |
+| `list_files` | 파일 인벤토리 |
+| `read_file` | 파일 읽기 |
+| `search_files` | 문자열 검색 |
+| `file_write` | bounded file write/append |
+| `replace_in_file` | bounded text replacement |
+| `remove_path` | 파일/디렉터리 제거 |
+| `run_command` | allowlisted command 실행 |
 
-핵심은 tool 수가 아니라, 이 다섯 개가 **정확하게 잘 동작하는 것**이다.
+핵심은 도구 수가 아니라, 이 표면이 workspace boundary와 failure semantics를 지키면서 끝까지 동작하는 것이다.
 
 ## 7. Backend Matrix
 
 | backend | 역할 | status |
 |---|---|---|
-| `codek` | production backend | Core |
-| `mock` | deterministic tests | Core |
-| `openai-direct` | optional adapter | Experimental |
-| `anthropic-direct` | optional adapter | Experimental |
+| `codek` | primary workspace automation substrate | Core |
+| `mock-local` | deterministic contract path | Core |
+| `openai` | opt-in compat fallback | Experimental |
 
 ## 8. Documentation Truth Rules
 
-1. README에 적힌 기능은 반드시 `Core` 또는 명시적 `Experimental`로 표시한다.
-2. doctor 출력은 현재 build feature와 정확히 일치해야 한다.
+1. README/help/DEPLOYMENT/charter는 같은 CLI surface를 말해야 한다.
+2. Experimental capability는 기본 제품 경로처럼 쓰면 안 된다.
 3. hidden fallback backend를 두지 않는다.
-4. `available`은 실제 실행 가능함을 뜻한다.
-5. `partial`은 제품 약속에서 제외된다.
+4. `ready/degraded/blocked` health 의미는 문서와 출력이 같아야 한다.
+5. artifact 경로와 failure semantics는 e2e evidence로 잠가야 한다.
 
-## 9. Release blocker 조건
+## 9. Release Blocker 조건
 
-아래 중 하나라도 깨지면 release 금지.
+아래 중 하나라도 깨지면 release 금지다.
 
-- `run` 실패
-- `doctor` 오류 진단 불가
-- `replay` 불가
-- path escape 가능
+- `run` 또는 `batch` 또는 `replay` 핵심 경로 실패
+- provider blocked/failure가 success처럼 보임
+- persisted `freeze`/`halt` 의미가 깨짐
+- workspace boundary 우회 가능
 - allowlist 우회 가능
-- `codek` backend session lifecycle 깨짐
-- trace 저장/로딩 실패
-- 문서/CLI/capability 불일치
+- report artifact가 남지 않음
+- README/help/DEPLOYMENT/charter/capability matrix 불일치

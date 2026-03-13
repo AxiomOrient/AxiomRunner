@@ -14,6 +14,8 @@ pub struct StateStatusInput {
 pub struct RuntimeStatusInput {
     pub provider_id: String,
     pub provider_model: String,
+    pub provider_state: String,
+    pub provider_detail: String,
     pub memory_enabled: bool,
     pub memory_state: String,
     pub tool_enabled: bool,
@@ -45,6 +47,8 @@ pub struct StateSnapshot {
 pub struct RuntimeSnapshot {
     pub provider_id: String,
     pub provider_model: String,
+    pub provider_state: String,
+    pub provider_detail: String,
     pub memory_enabled: bool,
     pub memory_state: String,
     pub tool_enabled: bool,
@@ -64,6 +68,8 @@ impl From<StatusInput> for StatusSnapshot {
             runtime: RuntimeSnapshot {
                 provider_id: input.runtime.provider_id,
                 provider_model: input.runtime.provider_model,
+                provider_state: input.runtime.provider_state,
+                provider_detail: input.runtime.provider_detail,
                 memory_enabled: input.runtime.memory_enabled,
                 memory_state: input.runtime.memory_state,
                 tool_enabled: input.runtime.tool_enabled,
@@ -84,9 +90,11 @@ pub fn render_status_lines(snapshot: &StatusSnapshot) -> Vec<String> {
             snapshot.state.audit
         ),
         format!(
-            "status runtime provider_id={} provider_model={} memory_enabled={} memory_state={} tool_enabled={} tool_state={}",
+            "status runtime provider_id={} provider_model={} provider_state={} provider_detail={} memory_enabled={} memory_state={} tool_enabled={} tool_state={}",
             snapshot.runtime.provider_id,
             snapshot.runtime.provider_model,
+            snapshot.runtime.provider_state,
+            snapshot.runtime.provider_detail,
             snapshot.runtime.memory_enabled,
             snapshot.runtime.memory_state,
             snapshot.runtime.tool_enabled,
