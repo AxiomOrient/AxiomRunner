@@ -127,12 +127,8 @@ env-only runtime knobs:
 
 ## 문서
 
-- 배포/운영 설정: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)
+- capability matrix: [docs/CAPABILITY_MATRIX.md](docs/CAPABILITY_MATRIX.md)
 - substrate contract: [docs/CODEK_RUNTIME_CONTRACT.md](docs/CODEK_RUNTIME_CONTRACT.md)
 - runbook: [docs/RUNBOOK.md](docs/RUNBOOK.md)
-- release checklist: [docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md)
 - versioning policy: [docs/VERSIONING.md](docs/VERSIONING.md)
 - 제품 charter: [docs/project-charter.md](docs/project-charter.md)
-- 현재 실행 계획: [plans/IMPLEMENTATION-PLAN.md](plans/IMPLEMENTATION-PLAN.md)
-- 현재 태스크 ledger: [plans/TASKS.md](plans/TASKS.md)
-- review input bundle은 `plans/docs/*`, `plans/data/*`에 남아 있으며 현재 제품 README의 source of truth는 아니다.

@@ -155,7 +155,8 @@ fn release_security_gate_rejects_legacy_file_bypass_key() {
 #[test]
 fn release_security_gate_truth_surface_docs_match_retained_commands() {
     let readme = include_str!("../../../README.md");
-    let deployment = include_str!("../../../docs/DEPLOYMENT.md");
+    let capability_matrix = include_str!("../../../docs/CAPABILITY_MATRIX.md");
+    let runbook = include_str!("../../../docs/RUNBOOK.md");
     let charter = include_str!("../../../docs/project-charter.md");
 
     for command in [
@@ -170,8 +171,12 @@ fn release_security_gate_truth_surface_docs_match_retained_commands() {
             "README missing command: {command}"
         );
         assert!(
-            deployment.contains(command),
-            "DEPLOYMENT missing command: {command}"
+            capability_matrix.contains(command),
+            "capability matrix missing command: {command}"
+        );
+        assert!(
+            runbook.contains(command),
+            "runbook missing command: {command}"
         );
         assert!(
             charter.contains(command),

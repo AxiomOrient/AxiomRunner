@@ -46,6 +46,14 @@ cargo build
 
 ## 5. Batch Reset Semantics
 
+기본 CLI surface:
+
+```bash
+./target/debug/axonrunner_apps --workspace="$PWD" status
+./target/debug/axonrunner_apps --workspace="$PWD" health
+./target/debug/axonrunner_apps --workspace="$PWD" help
+```
+
 - `batch --reset-state`는 persisted domain state snapshot만 초기화한다.
 - trace/events와 기존 artifact 파일을 자동 삭제하지 않는다.
 - trace/artifact reset surface 분리는 아직 별도 CLI flag로 채택하지 않았다.
