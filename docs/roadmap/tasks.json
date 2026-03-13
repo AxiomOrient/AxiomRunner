@@ -1,0 +1,521 @@
+[
+  {
+    "id": "AR-001",
+    "phase": "P0",
+    "priority": "P0",
+    "status": "TODO",
+    "task": "autonomous product spec 추가",
+    "files": [
+      "README.md",
+      "docs/project-charter.md",
+      "docs/CAPABILITY_MATRIX.md"
+    ],
+    "done_condition": "public surface를 goal/run 중심으로 재정의",
+    "verification": "docs truth-surface review + release gate"
+  },
+  {
+    "id": "AR-002",
+    "phase": "P0",
+    "priority": "P0",
+    "status": "TODO",
+    "task": "run contract 문서화",
+    "files": [
+      "docs/AUTONOMOUS_AGENT_SPEC.md"
+    ],
+    "done_condition": "goal/done/budget/approval schema가 문서화됨",
+    "verification": "doc review"
+  },
+  {
+    "id": "AR-003",
+    "phase": "P0",
+    "priority": "P1",
+    "status": "TODO",
+    "task": "release gate를 새 surface에 맞게 수정",
+    "files": [
+      "crates/apps/tests/release_security_gate.rs"
+    ],
+    "done_condition": "README/help/docs/charter 불일치 차단",
+    "verification": "cargo test -p axonrunner_apps --test release_security_gate"
+  },
+  {
+    "id": "AR-004",
+    "phase": "P1",
+    "priority": "P0",
+    "status": "TODO",
+    "task": "goal/run domain type 추가",
+    "files": [
+      "crates/core/src/intent.rs",
+      "crates/core/src/state.rs",
+      "crates/core/src/event.rs"
+    ],
+    "done_condition": "RunGoal/RunPhase/RunOutcome 도입",
+    "verification": "cargo test -p axonrunner_core"
+  },
+  {
+    "id": "AR-005",
+    "phase": "P1",
+    "priority": "P0",
+    "status": "TODO",
+    "task": "goal lifecycle reducer/projection 구현",
+    "files": [
+      "crates/core/src/reducer.rs",
+      "crates/core/src/projection.rs"
+    ],
+    "done_condition": "plan/execute/verify/repair state 전이가 표현됨",
+    "verification": "cargo test -p axonrunner_core"
+  },
+  {
+    "id": "AR-006",
+    "phase": "P1",
+    "priority": "P1",
+    "status": "TODO",
+    "task": "legacy fact intent를 compatibility shim으로 격리",
+    "files": [
+      "crates/core/src/intent.rs",
+      "crates/apps/src/cli_command.rs"
+    ],
+    "done_condition": "legacy alias가 public truth를 흐리지 않음",
+    "verification": "e2e migration tests"
+  },
+  {
+    "id": "AR-007",
+    "phase": "P1",
+    "priority": "P1",
+    "status": "TODO",
+    "task": "run invariant 테스트 추가",
+    "files": [
+      "crates/core/tests/state_invariants.rs",
+      "crates/core/tests/domain_flow.rs"
+    ],
+    "done_condition": "budget/approval/terminal state invariant 잠금",
+    "verification": "cargo test -p axonrunner_core"
+  },
+  {
+    "id": "AR-008",
+    "phase": "P2",
+    "priority": "P0",
+    "status": "TODO",
+    "task": "CLI를 goal 중심으로 전환",
+    "files": [
+      "crates/apps/src/cli_command.rs",
+      "crates/apps/src/cli_args.rs"
+    ],
+    "done_condition": "run/resume/abort/status/replay/doctor surface 고정",
+    "verification": "cargo test -p axonrunner_apps --test e2e_cli"
+  },
+  {
+    "id": "AR-009",
+    "phase": "P2",
+    "priority": "P1",
+    "status": "TODO",
+    "task": "help/display 출력 재정리",
+    "files": [
+      "crates/apps/src/display.rs",
+      "crates/apps/src/cli_command.rs"
+    ],
+    "done_condition": "operator-facing usage가 concise하고 정확함",
+    "verification": "golden output tests"
+  },
+  {
+    "id": "AR-010",
+    "phase": "P2",
+    "priority": "P1",
+    "status": "TODO",
+    "task": "legacy alias를 hidden/debug path로 전환",
+    "files": [
+      "crates/apps/src/cli_command.rs",
+      "README.md"
+    ],
+    "done_condition": "public docs에서 legacy 비중 축소",
+    "verification": "doc + help review"
+  },
+  {
+    "id": "AR-011",
+    "phase": "P3",
+    "priority": "P0",
+    "status": "TODO",
+    "task": "planner 단계 구현",
+    "files": [
+      "crates/apps/src/cli_runtime.rs",
+      "crates/apps/src/runtime_compose.rs"
+    ],
+    "done_condition": "goal→bounded plan 생성",
+    "verification": "planner unit tests"
+  },
+  {
+    "id": "AR-012",
+    "phase": "P3",
+    "priority": "P0",
+    "status": "TODO",
+    "task": "executor 단계 구현",
+    "files": [
+      "crates/apps/src/cli_runtime.rs",
+      "crates/apps/src/runtime_compose.rs"
+    ],
+    "done_condition": "한 step씩 tool/provider 실행",
+    "verification": "e2e step execution tests"
+  },
+  {
+    "id": "AR-013",
+    "phase": "P3",
+    "priority": "P0",
+    "status": "TODO",
+    "task": "verifier 단계 구현",
+    "files": [
+      "crates/apps/src/cli_runtime.rs",
+      "crates/apps/src/runtime_compose.rs"
+    ],
+    "done_condition": "done_when / verification contract 실행",
+    "verification": "verification golden tests"
+  },
+  {
+    "id": "AR-014",
+    "phase": "P3",
+    "priority": "P0",
+    "status": "TODO",
+    "task": "repair loop 구현",
+    "files": [
+      "crates/apps/src/cli_runtime.rs"
+    ],
+    "done_condition": "verify 실패 시 repair step 재시도",
+    "verification": "fault injection tests"
+  },
+  {
+    "id": "AR-015",
+    "phase": "P3",
+    "priority": "P0",
+    "status": "TODO",
+    "task": "terminal outcomes 정리",
+    "files": [
+      "crates/apps/src/cli_runtime.rs",
+      "crates/apps/src/status.rs"
+    ],
+    "done_condition": "success/failed/blocked/approval_required/aborted 분리",
+    "verification": "status + replay tests"
+  },
+  {
+    "id": "AR-016",
+    "phase": "P3",
+    "priority": "P1",
+    "status": "TODO",
+    "task": "run-id 및 step-id schema 고정",
+    "files": [
+      "crates/apps/src/state_store.rs",
+      "crates/apps/src/trace_store.rs"
+    ],
+    "done_condition": "resume/replay 가능한 stable ids",
+    "verification": "trace schema tests"
+  },
+  {
+    "id": "AR-017",
+    "phase": "P4",
+    "priority": "P0",
+    "status": "TODO",
+    "task": "run-scoped workspace binding 강화",
+    "files": [
+      "crates/adapters/src/provider_codex_runtime.rs",
+      "crates/apps/src/runtime_compose.rs"
+    ],
+    "done_condition": "provider cwd가 명시적 workspace/worktree에 묶임",
+    "verification": "provider integration tests"
+  },
+  {
+    "id": "AR-018",
+    "phase": "P4",
+    "priority": "P0",
+    "status": "TODO",
+    "task": "codex compatibility probe 강화",
+    "files": [
+      "crates/adapters/src/provider_codex_runtime.rs",
+      "crates/apps/src/doctor.rs"
+    ],
+    "done_condition": "doctor가 binary/version/compatibility를 일관되게 노출",
+    "verification": "doctor tests"
+  },
+  {
+    "id": "AR-019",
+    "phase": "P4",
+    "priority": "P1",
+    "status": "TODO",
+    "task": "session reuse contract 테스트 추가",
+    "files": [
+      "crates/adapters/src/provider_codex_runtime.rs"
+    ],
+    "done_condition": "cwd/model 변경 시 재사용 금지 보장",
+    "verification": "provider unit tests"
+  },
+  {
+    "id": "AR-020",
+    "phase": "P4",
+    "priority": "P1",
+    "status": "TODO",
+    "task": "git worktree isolation 옵션 도입",
+    "files": [
+      "crates/apps/src/runtime_compose.rs",
+      "crates/adapters/src/tool.rs"
+    ],
+    "done_condition": "run마다 reviewable diff isolation 가능",
+    "verification": "git repo e2e tests"
+  },
+  {
+    "id": "AR-021",
+    "phase": "P5",
+    "priority": "P0",
+    "status": "TODO",
+    "task": "tool contract를 public schema로 잠금",
+    "files": [
+      "crates/adapters/src/contracts.rs",
+      "docs/CAPABILITY_MATRIX.md"
+    ],
+    "done_condition": "tool input/output/evidence schema 명시",
+    "verification": "contract tests"
+  },
+  {
+    "id": "AR-022",
+    "phase": "P5",
+    "priority": "P0",
+    "status": "TODO",
+    "task": "list/read/search/write/replace/remove/run-command 전체 완성도 점검",
+    "files": [
+      "crates/adapters/src/tool.rs",
+      "crates/adapters/src/tool_workspace.rs"
+    ],
+    "done_condition": "essential tool surface end-to-end green",
+    "verification": "cargo test -p axonrunner_adapters --test tool"
+  },
+  {
+    "id": "AR-023",
+    "phase": "P5",
+    "priority": "P0",
+    "status": "TODO",
+    "task": "run_command verifier profiles 추가",
+    "files": [
+      "crates/adapters/src/tool.rs",
+      "crates/apps/src/runtime_compose.rs"
+    ],
+    "done_condition": "build/test/lint runner contract 표준화",
+    "verification": "command verifier tests"
+  },
+  {
+    "id": "AR-024",
+    "phase": "P5",
+    "priority": "P1",
+    "status": "TODO",
+    "task": "patch evidence를 digest+excerpt 수준으로 강화",
+    "files": [
+      "crates/adapters/src/tool.rs",
+      "crates/apps/src/replay.rs"
+    ],
+    "done_condition": "operator가 diff 의미를 바로 읽을 수 있음",
+    "verification": "replay golden tests"
+  },
+  {
+    "id": "AR-025",
+    "phase": "P5",
+    "priority": "P1",
+    "status": "TODO",
+    "task": "high-risk operations risk tier 정의",
+    "files": [
+      "crates/adapters/src/tool.rs",
+      "docs/RUNBOOK.md"
+    ],
+    "done_condition": "remove/large replace/dangerous command 분류",
+    "verification": "risk policy tests"
+  },
+  {
+    "id": "AR-026",
+    "phase": "P6",
+    "priority": "P0",
+    "status": "TODO",
+    "task": "working memory vs recall memory 분리",
+    "files": [
+      "crates/apps/src/runtime_compose.rs",
+      "crates/adapters/src/memory.rs"
+    ],
+    "done_condition": "hot context와 durable recall이 분리됨",
+    "verification": "memory integration tests"
+  },
+  {
+    "id": "AR-027",
+    "phase": "P6",
+    "priority": "P1",
+    "status": "TODO",
+    "task": "artifact index 추가",
+    "files": [
+      "crates/apps/src/trace_store.rs",
+      "crates/apps/src/replay.rs"
+    ],
+    "done_condition": "plan/apply/verify/report/patch artifact 빠른 조회",
+    "verification": "replay tests"
+  },
+  {
+    "id": "AR-028",
+    "phase": "P6",
+    "priority": "P1",
+    "status": "TODO",
+    "task": "context compaction 규칙 구현",
+    "files": [
+      "crates/apps/src/cli_runtime.rs",
+      "crates/apps/src/runtime_compose.rs"
+    ],
+    "done_condition": "긴 run에서도 context budget 유지",
+    "verification": "long-run simulation"
+  },
+  {
+    "id": "AR-029",
+    "phase": "P6",
+    "priority": "P1",
+    "status": "TODO",
+    "task": "AGENTS.md ingestion 추가",
+    "files": [
+      "crates/apps/src/runtime_compose.rs",
+      "crates/apps/src/doctor.rs"
+    ],
+    "done_condition": "durable repo guidance를 run context에 반영",
+    "verification": "fixture repo tests"
+  },
+  {
+    "id": "AR-030",
+    "phase": "P7",
+    "priority": "P0",
+    "status": "TODO",
+    "task": "approval policy 구현",
+    "files": [
+      "crates/apps/src/cli_command.rs",
+      "crates/apps/src/cli_runtime.rs"
+    ],
+    "done_condition": "never/on-risk/always 동작",
+    "verification": "approval e2e tests"
+  },
+  {
+    "id": "AR-031",
+    "phase": "P7",
+    "priority": "P0",
+    "status": "TODO",
+    "task": "budget policy 구현",
+    "files": [
+      "crates/apps/src/cli_runtime.rs",
+      "crates/core/src/state.rs"
+    ],
+    "done_condition": "step/time/token budget 강제",
+    "verification": "budget exhaustion tests"
+  },
+  {
+    "id": "AR-032",
+    "phase": "P7",
+    "priority": "P0",
+    "status": "TODO",
+    "task": "resume semantics 구현",
+    "files": [
+      "crates/apps/src/state_store.rs",
+      "crates/apps/src/cli_runtime.rs",
+      "crates/apps/src/status.rs"
+    ],
+    "done_condition": "중단된 run 재개 가능",
+    "verification": "resume e2e tests"
+  },
+  {
+    "id": "AR-033",
+    "phase": "P7",
+    "priority": "P0",
+    "status": "TODO",
+    "task": "abort semantics 구현",
+    "files": [
+      "crates/apps/src/cli_runtime.rs",
+      "crates/apps/src/status.rs"
+    ],
+    "done_condition": "operator abort가 안전하게 종료됨",
+    "verification": "abort e2e tests"
+  },
+  {
+    "id": "AR-034",
+    "phase": "P7",
+    "priority": "P1",
+    "status": "TODO",
+    "task": "rollback/checkpoint contract 추가",
+    "files": [
+      "crates/apps/src/runtime_compose.rs",
+      "crates/apps/src/replay.rs"
+    ],
+    "done_condition": "고위험 변경 전 복원 가능 지점 확보",
+    "verification": "checkpoint tests"
+  },
+  {
+    "id": "AR-035",
+    "phase": "P8",
+    "priority": "P0",
+    "status": "TODO",
+    "task": "autonomy golden corpus 설계",
+    "files": [
+      "crates/apps/tests/e2e_cli.rs",
+      "crates/adapters/tests/tool.rs"
+    ],
+    "done_condition": "대표 작업군 시나리오 잠금",
+    "verification": "golden suite"
+  },
+  {
+    "id": "AR-036",
+    "phase": "P8",
+    "priority": "P0",
+    "status": "TODO",
+    "task": "false-success / false-done metric 추가",
+    "files": [
+      "crates/apps/tests/e2e_cli.rs",
+      "crates/apps/src/replay.rs"
+    ],
+    "done_condition": "성공 판정 오류를 계량화",
+    "verification": "eval report"
+  },
+  {
+    "id": "AR-037",
+    "phase": "P8",
+    "priority": "P0",
+    "status": "TODO",
+    "task": "blocked/degraded provider path eval 추가",
+    "files": [
+      "crates/adapters/tests/*",
+      "crates/apps/tests/e2e_cli.rs"
+    ],
+    "done_condition": "substrate failure가 안전하게 노출",
+    "verification": "provider failure tests"
+  },
+  {
+    "id": "AR-038",
+    "phase": "P8",
+    "priority": "P1",
+    "status": "TODO",
+    "task": "nightly dogfood workflow 추가",
+    "files": [
+      "GitHub Actions",
+      "docs/RUNBOOK.md"
+    ],
+    "done_condition": "실사용 회귀 점검 자동화",
+    "verification": "CI/nightly run"
+  },
+  {
+    "id": "AR-039",
+    "phase": "P8",
+    "priority": "P1",
+    "status": "TODO",
+    "task": "release gate를 autonomy 기준으로 갱신",
+    "files": [
+      "docs/CAPABILITY_MATRIX.md",
+      "release tests"
+    ],
+    "done_condition": "release blocker가 autonomy 중심으로 재정의",
+    "verification": "release gate tests"
+  },
+  {
+    "id": "AR-040",
+    "phase": "P8",
+    "priority": "P1",
+    "status": "TODO",
+    "task": "example repos와 operator runbook 보강",
+    "files": [
+      "docs/RUNBOOK.md",
+      "examples/*"
+    ],
+    "done_condition": "실제 사용 진입장벽 축소",
+    "verification": "manual smoke + docs review"
+  }
+]

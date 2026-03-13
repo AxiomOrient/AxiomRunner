@@ -1,5 +1,7 @@
 use axonrunner_adapters::{MemoryAdapter, memory::MarkdownMemoryAdapter};
 use std::fs;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -133,6 +135,19 @@ fn path_str(path: &Path) -> &str {
     path.to_str().expect("path should be UTF-8")
 }
 
+fn fake_cli_script(label: &str, stdout: &str) -> PathBuf {
+    let path = unique_path(label, "sh");
+    fs::write(&path, format!("#!/bin/sh\nprintf '%s\\n' '{}'\n", stdout))
+        .expect("fake cli should be written");
+    #[cfg(unix)]
+    {
+        let mut perms = fs::metadata(&path).expect("metadata should exist").permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&path, perms).expect("permissions should be updated");
+    }
+    path
+}
+
 #[test]
 fn e2e_cli_batch_pipeline_flow() {
     let output = run_cli(&[
@@ -150,6 +165,7 @@ fn e2e_cli_batch_pipeline_flow() {
     assert!(output.status.success(), "stderr:\n{stderr}");
     assert!(stderr.is_empty());
     assert!(stdout.contains("intent id=cli-1 kind=write outcome=accepted"));
+    assert!(stdout.contains("run intent_id=cli-1 phase=completed outcome=success"));
     assert!(stdout.contains("query intent_id=cli-2 key=alpha value=42"));
     assert!(stdout.contains("batch completed count=6"));
 }
@@ -205,7 +221,13 @@ fn e2e_cli_run_composes_provider_memory_and_tool() {
         .get("alpha")
         .expect("memory read should succeed")
         .expect("alpha should be persisted");
+    let recall = reader
+        .get("recall:last_run/cli-1")
+        .expect("recall read should succeed")
+        .expect("recall summary should be persisted");
     assert_eq!(record.value, "42");
+    assert!(recall.value.contains("run_id=run-1"));
+    assert!(recall.value.contains("outcome=success"));
 
     let log_path = workspace.join("runtime.log");
     let log = fs::read_to_string(&log_path).expect("tool log should exist");
@@ -219,9 +241,14 @@ fn e2e_cli_run_composes_provider_memory_and_tool() {
     let trace = fs::read_to_string(workspace.join(".axonrunner/trace/events.jsonl"))
         .expect("trace event log should exist");
     assert!(report.contains("kind=write"));
+    assert!(report.contains("run_phase=completed"));
+    assert!(report.contains("run_outcome=success"));
     assert!(report.contains("outcome=accepted"));
     assert!(plan.contains("policy=allowed"));
+    assert!(plan.contains("planned_steps=4"));
     assert!(verify.contains("first_failure=none"));
+    assert!(verify.contains("status=passed"));
+    assert!(verify.contains("repair_status=skipped"));
     let trace_event: serde_json::Value =
         serde_json::from_str(trace.lines().last().expect("trace line should exist"))
             .expect("trace line should be valid json");
@@ -229,6 +256,11 @@ fn e2e_cli_run_composes_provider_memory_and_tool() {
     assert_eq!(trace_event["tool"], "applied");
     assert_eq!(trace_event["report_written"], true);
     assert_eq!(trace_event["verification"]["status"], "passed");
+    assert_eq!(trace_event["run"]["run_id"], "run-1");
+    assert_eq!(trace_event["run"]["phase"], "completed");
+    assert_eq!(trace_event["run"]["outcome"], "success");
+    assert_eq!(trace_event["run"]["planned_steps"], 4);
+    assert_eq!(trace_event["run"]["step_ids"][0], "run-1/step-1-planning");
     assert!(trace_event["patch_artifacts"].as_array().is_some());
     assert!(
         trace_event["patch_artifacts"]
@@ -267,8 +299,15 @@ fn e2e_cli_replay_latest_summarizes_recent_trace() {
     assert!(stdout.contains("kind=write"));
     assert!(stdout.contains("policy=allowed"));
     assert!(stdout.contains("replay verification status=passed"));
+    assert!(stdout.contains("replay run run_id=run-1 phase=completed outcome=success"));
+    assert!(stdout.contains("replay repair attempted=false status=skipped"));
+    assert!(stdout.contains("run-1/step-1-planning"));
     assert!(stdout.contains("artifacts"));
+    assert!(stdout.contains("replay artifact_index count=1"));
     assert!(stdout.contains("replay patch target="));
+    assert!(stdout.contains("before="));
+    assert!(stdout.contains("after="));
+    assert!(stdout.contains("replay patch after_excerpt="));
     assert!(stdout.contains("replay summary failed_intents=0"));
 
     let _ = fs::remove_dir_all(workspace);
@@ -276,7 +315,17 @@ fn e2e_cli_replay_latest_summarizes_recent_trace() {
 
 #[test]
 fn e2e_cli_status_and_health_are_minimal() {
-    let status = run_cli(&["status"]);
+    let workspace = unique_path("status-run-workspace", "dir");
+    let _run = run_cli_with_env(
+        &["run", "write:alpha=42"],
+        &[("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
+        "status-run-write",
+    );
+    let status = run_cli_with_env(
+        &["status"],
+        &[("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
+        "status-run-status",
+    );
     let health = run_cli(&["health"]);
 
     let status_stdout = stdout_of(&status);
@@ -286,9 +335,49 @@ fn e2e_cli_status_and_health_are_minimal() {
     assert!(health.status.success());
     assert!(status_stdout.contains("status revision="));
     assert!(status_stdout.contains("status runtime provider_id="));
+    assert!(status_stdout.contains("status run run_id=run-1 phase=completed outcome=success"));
     assert!(status_stdout.contains("provider_state=ready"));
     assert!(health_stdout.contains("health ok=true"));
     assert!(health_stdout.contains("provider_state=ready"));
+
+    let _ = fs::remove_dir_all(workspace);
+}
+
+#[test]
+fn e2e_cli_rejected_control_action_surfaces_approval_required_outcome() {
+    let workspace = unique_path("approval-required-workspace", "dir");
+    let state_path = unique_path("approval-required-state", "snapshot");
+    let run = run_cli_with_env(
+        &["--actor=alice", "freeze"],
+        &[
+            ("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace)),
+            ("AXONRUNNER_RUNTIME_STATE_PATH", path_str(&state_path)),
+        ],
+        "approval-required-run",
+    );
+    let status = run_cli_with_env(
+        &["status"],
+        &[
+            ("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace)),
+            ("AXONRUNNER_RUNTIME_STATE_PATH", path_str(&state_path)),
+        ],
+        "approval-required-status",
+    );
+    let replay = run_cli_with_env(
+        &["replay", "latest"],
+        &[("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
+        "approval-required-replay",
+    );
+
+    assert!(run.status.success());
+    assert!(status.status.success());
+    assert!(replay.status.success());
+    assert!(stdout_of(&run).contains("run intent_id=cli-1 phase=waiting_approval outcome=approval_required"));
+    assert!(stdout_of(&status).contains("status run run_id=run-1 phase=waiting_approval outcome=approval_required"));
+    assert!(stdout_of(&replay).contains("replay run run_id=run-1 phase=waiting_approval outcome=approval_required"));
+
+    let _ = fs::remove_dir_all(workspace);
+    let _ = fs::remove_file(state_path);
 }
 
 #[test]
@@ -337,6 +426,35 @@ fn e2e_cli_doctor_reports_blocked_codek_binary_and_paths() {
 
     let _ = fs::remove_dir_all(workspace);
     let _ = fs::remove_file(state_path);
+}
+
+#[test]
+fn e2e_cli_doctor_reports_codex_version_and_compatibility_for_old_binary() {
+    let workspace = unique_path("doctor-old-codek-workspace", "dir");
+    let state_path = unique_path("doctor-old-codek-state", "snapshot");
+    let fake_cli = fake_cli_script("doctor-old-codek", "codex 0.103.9");
+    let output = run_cli_with_env(
+        &["doctor"],
+        &[
+            ("AXONRUNNER_RUNTIME_PROVIDER", "codek"),
+            ("AXONRUNNER_CODEX_BIN", path_str(&fake_cli)),
+            ("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace)),
+            ("AXONRUNNER_RUNTIME_STATE_PATH", path_str(&state_path)),
+        ],
+        "doctor-old-codek",
+    );
+    let stdout = stdout_of(&output);
+    let stderr = stderr_of(&output);
+
+    assert!(output.status.success(), "stderr:\n{stderr}");
+    assert!(stdout.contains("doctor ok=false"));
+    assert!(stdout.contains("provider_state=blocked"));
+    assert!(stdout.contains("version=codex_0.103.9") || stdout.contains("version=codex 0.103.9"));
+    assert!(stdout.contains("compatibility=blocked"));
+
+    let _ = fs::remove_dir_all(workspace);
+    let _ = fs::remove_file(state_path);
+    let _ = fs::remove_file(fake_cli);
 }
 
 #[test]
@@ -591,6 +709,8 @@ fn e2e_cli_run_uses_codek_provider_selection() {
         .expect("failed run trace event log should exist");
     assert!(failed_report.contains("tool=skipped"));
     assert!(failed_report.contains("outcome=accepted"));
+    assert!(failed_report.contains("run_phase=blocked"));
+    assert!(failed_report.contains("run_outcome=blocked"));
     let failed_event: serde_json::Value = serde_json::from_str(
         failed_trace
             .lines()
@@ -603,6 +723,9 @@ fn e2e_cli_run_uses_codek_provider_selection() {
     assert_eq!(failed_event["report_written"], true);
     assert_eq!(failed_event["first_failure"]["stage"], "provider");
     assert_eq!(failed_event["verification"]["status"], "failed");
+    assert_eq!(failed_event["run"]["run_id"], "run-1");
+    assert_eq!(failed_event["run"]["phase"], "blocked");
+    assert_eq!(failed_event["run"]["outcome"], "blocked");
     assert!(
         failed_event["patch_artifacts"]
             .as_array()
@@ -655,7 +778,11 @@ fn e2e_cli_replay_specific_intent_reports_failure_boundary() {
     assert!(stdout.contains("replay intent_id=cli-1 count=1"));
     assert!(stdout.contains("replay failure stage=provider"));
     assert!(stdout.contains("replay verification status=failed"));
+    assert!(stdout.contains("replay run run_id=run-1 phase=blocked outcome=blocked"));
+    assert!(stdout.contains("replay artifact_index count=1"));
     assert!(stdout.contains("replay patch target="));
+    assert!(stdout.contains("before="));
+    assert!(stdout.contains("after="));
     assert!(stdout.contains("replay summary failed_intents=1"));
 
     let _ = fs::remove_dir_all(workspace);
@@ -737,6 +864,80 @@ fn golden_schema_legacy_trace_replay_remains_compatible() {
 }
 
 #[test]
+fn e2e_cli_status_and_replay_render_aborted_outcome_from_trace() {
+    let workspace = unique_path("aborted-trace-workspace", "dir");
+    fs::create_dir_all(workspace.join(".axonrunner/trace")).expect("trace dir should exist");
+    let trace = serde_json::json!({
+        "schema": "axonrunner.trace.intent.v1",
+        "timestamp_ms": 1_u64,
+        "actor_id": "system",
+        "intent_id": "cli-abort",
+        "kind": "write",
+        "outcome": "accepted",
+        "policy_code": "allowed",
+        "effect_count": 1,
+        "revision": 1,
+        "mode": "active",
+        "provider": "applied",
+        "memory": "applied",
+        "tool": "applied",
+        "tool_outputs": ["log=runtime.log"],
+        "first_failure": serde_json::Value::Null,
+        "verification": {
+            "status": "passed",
+            "summary": "report_written=true"
+        },
+        "patch_artifacts": [],
+        "run": {
+            "run_id": "run-abort",
+            "step_ids": ["run-abort/step-1-planning"],
+            "provider_cwd": "/tmp/aborted-workspace",
+            "phase": "aborted",
+            "outcome": "aborted",
+            "reason": "operator_abort",
+            "plan_summary": "intent_id=cli-abort legacy_write key=alpha outcome=accepted",
+            "planned_steps": 4,
+            "repair": {
+                "attempted": false,
+                "status": "skipped",
+                "summary": "not_needed"
+            }
+        },
+        "artifacts": {
+            "plan": ".axonrunner/artifacts/cli-abort.plan.md",
+            "apply": ".axonrunner/artifacts/cli-abort.apply.md",
+            "verify": ".axonrunner/artifacts/cli-abort.verify.md",
+            "report": ".axonrunner/artifacts/cli-abort.report.md"
+        },
+        "report_written": true,
+        "report_error": serde_json::Value::Null
+    });
+    fs::write(
+        workspace.join(".axonrunner/trace/events.jsonl"),
+        format!("{}\n", serde_json::to_string(&trace).expect("trace should serialize")),
+    )
+    .expect("trace log should be written");
+
+    let status = run_cli_with_env(
+        &["status"],
+        &[("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
+        "aborted-status",
+    );
+    let replay = run_cli_with_env(
+        &["replay", "latest"],
+        &[("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
+        "aborted-replay",
+    );
+
+    assert!(status.status.success());
+    assert!(replay.status.success());
+    assert!(stdout_of(&status).contains("status run run_id=run-abort phase=aborted outcome=aborted"));
+    assert!(stdout_of(&replay).contains("replay run run_id=run-abort phase=aborted outcome=aborted"));
+
+    let _ = fs::remove_dir_all(workspace);
+}
+
+#[test]
 fn golden_replay_legacy_text_contract_is_stable() {
     let workspace = unique_path("replay-legacy-golden-workspace", "dir");
     fs::create_dir_all(workspace.join(".axonrunner/trace")).expect("trace dir should exist");
@@ -797,6 +998,9 @@ fn golden_replay_legacy_text_contract_is_stable() {
             ),
             String::from(
                 "replay artifacts plan=.axonrunner/artifacts/cli-legacy.plan.md apply=.axonrunner/artifacts/cli-legacy.apply.md verify=.axonrunner/artifacts/cli-legacy.verify.md report=.axonrunner/artifacts/cli-legacy.report.md",
+            ),
+            String::from(
+                "replay artifact_index count=1 latest_report=.axonrunner/artifacts/cli-legacy.report.md",
             ),
             String::from("replay summary failed_intents=0"),
         ]

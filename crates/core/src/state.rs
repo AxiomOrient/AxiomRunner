@@ -1,4 +1,5 @@
 use crate::decision::DecisionOutcome;
+use crate::intent::{RunBudget, RunGoal};
 use crate::policy_codes::PolicyCode;
 use std::collections::BTreeMap;
 
@@ -8,6 +9,54 @@ pub enum ExecutionMode {
     Active,
     ReadOnly,
     Halted,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RunPhase {
+    Planning,
+    ExecutingStep,
+    Verifying,
+    Repairing,
+    WaitingApproval,
+    Blocked,
+    Completed,
+    Failed,
+    Aborted,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RunOutcome {
+    Success,
+    Blocked,
+    BudgetExhausted,
+    ApprovalRequired,
+    Failed,
+    Aborted,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RunStatus {
+    pub run_id: String,
+    pub goal: RunGoal,
+    pub phase: RunPhase,
+    pub outcome: Option<RunOutcome>,
+    pub completed_steps: u64,
+    pub budget: RunBudget,
+    pub last_blocker: Option<String>,
+}
+
+impl RunStatus {
+    pub fn new(run_id: impl Into<String>, goal: RunGoal) -> Self {
+        Self {
+            run_id: run_id.into(),
+            phase: RunPhase::Planning,
+            outcome: None,
+            completed_steps: 0,
+            budget: goal.budget.clone(),
+            goal,
+            last_blocker: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

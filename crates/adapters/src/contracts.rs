@@ -162,6 +162,25 @@ pub enum SearchMode {
     Regex,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RunCommandProfile {
+    Generic,
+    Build,
+    Test,
+    Lint,
+}
+
+impl RunCommandProfile {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Generic => "generic",
+            Self::Build => "build",
+            Self::Test => "test",
+            Self::Lint => "lint",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ToolResult {
     ListFiles(ListFilesOutput),
@@ -234,6 +253,7 @@ pub struct RemovePathOutput {
 pub struct RunCommandOutput {
     pub program: String,
     pub args: Vec<String>,
+    pub profile: RunCommandProfile,
     pub exit_code: i32,
     pub stdout: String,
     pub stderr: String,

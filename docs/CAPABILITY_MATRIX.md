@@ -8,6 +8,12 @@
 - **Experimental**: 저장소에는 남아도 기본 제품 약속에는 포함되지 않는다.
 - **Removed from product surface**: 문서, help, 기본 운영 경로에서 숨긴다.
 
+추가 문서 규칙:
+
+- `docs/AUTONOMOUS_AGENT_TARGET.md`와 `docs/AUTONOMOUS_AGENT_SPEC.md`는 다음 단계의 target contract를 설명한다.
+- current truth와 target contract가 다를 때는 current truth가 release 기준이다.
+- `docs/DOCS_ALIGNMENT.md`는 현재 contract와 전환 계획을 함께 읽을 때의 해석 규칙을 제공한다.
+
 ## 2. v1 Core Capability
 
 | 영역 | capability | 상태 | release 기준 |
@@ -91,6 +97,44 @@ axonrunner_apps halt
 
 핵심은 도구 수가 아니라, 이 표면이 workspace boundary와 failure semantics를 지키면서 끝까지 동작하는 것이다.
 
+### Tool Request Schema
+
+| operation | required input | contract |
+|---|---|---|
+| `list_files` | `path` | workspace 안의 경로만 허용 |
+| `read_file` | `path` | 파일만 허용, 크기 제한 준수 |
+| `search_files` | `path`, `needle`, `mode` | substring / regex 검색만 허용 |
+| `file_write` | `path`, `contents`, `append` | bounded write/append만 허용 |
+| `replace_in_file` | `path`, `needle`, `replacement` | 최소 1회 치환이 있어야 함 |
+| `remove_path` | `path` | workspace boundary 안 경로만 허용 |
+| `run_command` | `program`, `args` | allowlist, timeout, output truncation 적용 |
+
+### Tool Result Schema
+
+| operation | required output |
+|---|---|
+| `list_files` | `base`, `paths` |
+| `read_file` | `path`, `contents` |
+| `search_files` | `base`, `matches[path,line_number,line]` |
+| `file_write` | `path`, `bytes_written`, `evidence` |
+| `replace_in_file` | `path`, `replacements`, `evidence` |
+| `remove_path` | `path`, `removed`, `evidence?` |
+| `run_command` | `program`, `args`, `exit_code`, `stdout`, `stderr`, `stdout_truncated`, `stderr_truncated`, `artifact_path` |
+
+### Evidence Schema
+
+모든 mutation evidence는 아래 필드를 기준으로 읽는다.
+
+| evidence field | meaning |
+|---|---|
+| `operation` | overwrite / append / remove 등 mutation 종류 |
+| `artifact_path` | patch 또는 command artifact 경로 |
+| `before_digest` | 변경 전 digest |
+| `after_digest` | 변경 후 digest |
+| `before_excerpt` | 변경 전 일부 내용 |
+| `after_excerpt` | 변경 후 일부 내용 |
+| `unified_diff` | bounded diff text |
+
 ## 7. Backend Matrix
 
 | backend | 역할 | status |
@@ -118,3 +162,11 @@ axonrunner_apps halt
 - allowlist 우회 가능
 - report artifact가 남지 않음
 - README/help/DEPLOYMENT/charter/capability matrix 불일치
+
+## 10. Transition References
+
+현재 제품 truth를 유지한 상태에서 다음 전환 목표를 추적하는 문서:
+
+- `docs/AUTONOMOUS_AGENT_TARGET.md`
+- `docs/AUTONOMOUS_AGENT_SPEC.md`
+- `docs/DOCS_ALIGNMENT.md`

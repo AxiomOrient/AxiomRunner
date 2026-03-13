@@ -17,10 +17,13 @@ pub use audit::{
 };
 pub use decision::{Decision, DecisionOutcome, decide};
 pub use effect::{Effect, effects_for_intent};
-pub use event::DomainEvent;
-pub use intent::{Intent, IntentKind};
+pub use event::{DomainEvent, RunEvent};
+pub use intent::{
+    DoneCondition, Intent, IntentKind, IntentSurface, RunApprovalMode, RunBudget, RunConstraint,
+    RunGoal, VerificationCheck,
+};
 pub use policy::{PolicyVerdict, evaluate_policy};
 pub use policy_codes::PolicyCode;
-pub use projection::{project, project_from};
-pub use reducer::reduce;
-pub use state::{AgentState, ExecutionMode};
+pub use projection::{project, project_from, project_run, project_run_from};
+pub use reducer::{reduce, reduce_run_status};
+pub use state::{AgentState, ExecutionMode, RunOutcome, RunPhase, RunStatus};

@@ -1,5 +1,63 @@
 use crate::validation::ensure_not_blank;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RunApprovalMode {
+    Never,
+    OnRisk,
+    Always,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RunBudget {
+    pub max_steps: u64,
+    pub max_minutes: u64,
+    pub max_tokens: u64,
+}
+
+impl RunBudget {
+    pub fn bounded(max_steps: u64, max_minutes: u64, max_tokens: u64) -> Self {
+        Self {
+            max_steps,
+            max_minutes,
+            max_tokens,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RunConstraint {
+    pub label: String,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DoneCondition {
+    pub label: String,
+    pub evidence: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VerificationCheck {
+    pub label: String,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RunGoal {
+    pub summary: String,
+    pub workspace_root: String,
+    pub constraints: Vec<RunConstraint>,
+    pub done_conditions: Vec<DoneCondition>,
+    pub verification_checks: Vec<VerificationCheck>,
+    pub budget: RunBudget,
+    pub approval_mode: RunApprovalMode,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IntentSurface {
+    LegacyFact,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IntentKind {
     ReadFact { key: String },
@@ -106,6 +164,10 @@ impl Intent {
 
     pub fn is_control_action(&self) -> bool {
         matches!(self.kind, IntentKind::FreezeWrites | IntentKind::Halt)
+    }
+
+    pub fn surface(&self) -> IntentSurface {
+        IntentSurface::LegacyFact
     }
 
     pub fn to_payload(&self) -> IntentPayload {

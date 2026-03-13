@@ -1,7 +1,22 @@
 use crate::audit::{PolicyAuditPayload, PolicyAuditPayloadError, PolicyAuditRecord};
 use crate::decision::{Decision, DecisionPayload, DecisionPayloadError};
 use crate::effect::{Effect, EffectPayload, EffectPayloadError};
-use crate::intent::{Intent, IntentPayload, IntentPayloadError};
+use crate::intent::{Intent, IntentPayload, IntentPayloadError, RunGoal};
+use crate::state::{RunOutcome, RunPhase};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RunEvent {
+    RunCreated { run_id: String, goal: RunGoal },
+    PhaseUpdated { run_id: String, phase: RunPhase },
+    BudgetConsumed {
+        run_id: String,
+        consumed_steps: u64,
+        consumed_minutes: u64,
+        consumed_tokens: u64,
+    },
+    ApprovalRequested { run_id: String, reason: String },
+    OutcomeRecorded { run_id: String, outcome: RunOutcome },
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DomainEvent {

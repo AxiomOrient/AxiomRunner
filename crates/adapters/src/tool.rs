@@ -1,7 +1,7 @@
 use crate::contracts::{
     AdapterHealth, FileMutationEvidence, FileWriteOutput, ListFilesOutput, ReadFileOutput,
-    RemovePathOutput, ReplaceInFileOutput, RunCommandOutput, SearchFilesOutput, SearchMatch,
-    SearchMode, ToolAdapter, ToolPolicy, ToolRequest, ToolResult,
+    RemovePathOutput, ReplaceInFileOutput, RunCommandOutput, RunCommandProfile,
+    SearchFilesOutput, SearchMatch, SearchMode, ToolAdapter, ToolPolicy, ToolRequest, ToolResult,
 };
 use crate::error::{AdapterError, AdapterResult, RetryClass};
 use crate::tool_workspace::{
@@ -23,10 +23,57 @@ use std::process::{Child, Command, Stdio};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolRiskTier {
+    Low,
+    Medium,
+    High,
+}
+
+impl ToolRiskTier {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Low => "low",
+            Self::Medium => "medium",
+            Self::High => "high",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct WorkspaceTool {
     workspace_root: PathBuf,
     policy: ToolPolicy,
+}
+
+pub fn classify_tool_request_risk(request: &ToolRequest) -> ToolRiskTier {
+    match request {
+        ToolRequest::ListFiles { .. }
+        | ToolRequest::ReadFile { .. }
+        | ToolRequest::SearchFiles { .. } => ToolRiskTier::Low,
+        ToolRequest::FileWrite { contents, .. } => {
+            if contents.len() > 4 * 1024 {
+                ToolRiskTier::High
+            } else {
+                ToolRiskTier::Medium
+            }
+        }
+        ToolRequest::ReplaceInFile { needle, replacement, .. } => {
+            if needle.len() > 256 || replacement.len() > 4 * 1024 {
+                ToolRiskTier::High
+            } else {
+                ToolRiskTier::Medium
+            }
+        }
+        ToolRequest::RemovePath { .. } => ToolRiskTier::High,
+        ToolRequest::RunCommand { program, .. } => {
+            if matches!(program.as_str(), "git" | "rm" | "mv") {
+                ToolRiskTier::High
+            } else {
+                ToolRiskTier::Medium
+            }
+        }
+    }
 }
 
 impl WorkspaceTool {
@@ -372,6 +419,7 @@ impl WorkspaceTool {
             });
         }
 
+        let profile = classify_run_command_profile(program, args);
         let mut command = Command::new(program);
         command
             .args(args)
@@ -429,6 +477,7 @@ impl WorkspaceTool {
             &self.workspace_root,
             program,
             args,
+            profile.as_str(),
             exit_code,
             &rendered_stdout,
             &rendered_stderr,
@@ -443,6 +492,7 @@ impl WorkspaceTool {
         Ok(ToolResult::RunCommand(RunCommandOutput {
             program: program.to_owned(),
             args: args.to_vec(),
+            profile,
             exit_code,
             stdout: rendered_stdout,
             stderr: rendered_stderr,
@@ -455,6 +505,26 @@ impl WorkspaceTool {
     fn resolve_workspace_path(&self, requested_path: &str) -> Result<PathBuf, ToolError> {
         resolve_workspace_path(&self.workspace_root, requested_path)
             .map_err(map_workspace_path_error)
+    }
+}
+
+fn classify_run_command_profile(program: &str, args: &[String]) -> RunCommandProfile {
+    match (program, args.first().map(String::as_str), args.get(1).map(String::as_str)) {
+        ("cargo", Some("build"), _) => RunCommandProfile::Build,
+        ("cargo", Some("test"), _) => RunCommandProfile::Test,
+        ("cargo", Some("clippy"), _) => RunCommandProfile::Lint,
+        ("cargo", Some("fmt"), Some("--check")) => RunCommandProfile::Lint,
+        ("cargo", Some("fmt"), _) => RunCommandProfile::Lint,
+        ("npm", Some("test"), _) | ("pnpm", Some("test"), _) | ("yarn", Some("test"), _) => {
+            RunCommandProfile::Test
+        }
+        ("npm", Some("run"), Some("lint"))
+        | ("pnpm", Some("run"), Some("lint"))
+        | ("yarn", Some("lint"), _) => RunCommandProfile::Lint,
+        ("npm", Some("run"), Some("build"))
+        | ("pnpm", Some("run"), Some("build"))
+        | ("yarn", Some("build"), _) => RunCommandProfile::Build,
+        _ => RunCommandProfile::Generic,
     }
 }
 

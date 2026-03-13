@@ -19,6 +19,16 @@ pub fn execute_replay(config: &AppConfig, target: &str) -> Result<(), String> {
             .ok_or_else(|| format!("replay target not found: {target}"))?;
         (summary, latest)
     };
+    let artifact_index = if target == "latest" {
+        store.artifact_index()?
+    } else {
+        let latest_entry = store
+            .artifact_index_for_intent(target)?
+            .ok_or_else(|| format!("replay target not found: {target}"))?;
+        crate::trace_store::TraceArtifactIndex {
+            entries: vec![latest_entry],
+        }
+    };
 
     println!(
         "replay intent_id={} count={} revision={} mode={} kind={} outcome={} policy={}",
@@ -38,12 +48,38 @@ pub fn execute_replay(config: &AppConfig, target: &str) -> Result<(), String> {
         "replay verification status={} summary={}",
         latest.verification.status, latest.verification.summary,
     );
+    if let Some(run) = &latest.run {
+        println!(
+            "replay run run_id={} phase={} outcome={} reason={} planned_steps={} summary={}",
+            run.run_id, run.phase, run.outcome, run.reason, run.planned_steps, run.plan_summary
+        );
+        println!(
+            "replay repair attempted={} status={} summary={} step_ids={}",
+            run.repair.attempted,
+            run.repair.status,
+            run.repair.summary,
+            if run.step_ids.is_empty() {
+                String::from("none")
+            } else {
+                run.step_ids.join(",")
+            }
+        );
+    }
     println!(
         "replay artifacts plan={} apply={} verify={} report={}",
         latest.artifacts.plan,
         latest.artifacts.apply,
         latest.artifacts.verify,
         latest.artifacts.report,
+    );
+    println!(
+        "replay artifact_index count={} latest_report={}",
+        artifact_index.entries.len(),
+        artifact_index
+            .entries
+            .last()
+            .map(|entry| entry.report.as_str())
+            .unwrap_or("none")
     );
     if !latest.patch_artifacts.is_empty() {
         let changed_paths = latest

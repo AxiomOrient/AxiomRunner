@@ -1,4 +1,5 @@
 use crate::display::mode_name;
+use crate::trace_store::TraceRunSummary;
 use axonrunner_core::ExecutionMode;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -20,6 +21,7 @@ pub struct RuntimeStatusInput {
     pub memory_state: String,
     pub tool_enabled: bool,
     pub tool_state: String,
+    pub latest_run: Option<TraceRunSummary>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -53,6 +55,7 @@ pub struct RuntimeSnapshot {
     pub memory_state: String,
     pub tool_enabled: bool,
     pub tool_state: String,
+    pub latest_run: Option<TraceRunSummary>,
 }
 
 impl From<StatusInput> for StatusSnapshot {
@@ -74,13 +77,14 @@ impl From<StatusInput> for StatusSnapshot {
                 memory_state: input.runtime.memory_state,
                 tool_enabled: input.runtime.tool_enabled,
                 tool_state: input.runtime.tool_state,
+                latest_run: input.runtime.latest_run,
             },
         }
     }
 }
 
 pub fn render_status_lines(snapshot: &StatusSnapshot) -> Vec<String> {
-    vec![
+    let mut lines = vec![
         format!(
             "status revision={} mode={} facts={} denied={} audit={}",
             snapshot.state.revision,
@@ -100,5 +104,17 @@ pub fn render_status_lines(snapshot: &StatusSnapshot) -> Vec<String> {
             snapshot.runtime.tool_enabled,
             snapshot.runtime.tool_state
         ),
-    ]
+    ];
+    if let Some(run) = &snapshot.runtime.latest_run {
+        lines.push(format!(
+            "status run run_id={} phase={} outcome={} reason={} planned_steps={} step_count={}",
+            run.run_id,
+            run.phase,
+            run.outcome,
+            run.reason,
+            run.planned_steps,
+            run.step_ids.len()
+        ));
+    }
+    lines
 }

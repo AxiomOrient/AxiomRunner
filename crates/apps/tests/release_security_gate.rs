@@ -184,3 +184,41 @@ fn release_security_gate_truth_surface_docs_match_retained_commands() {
         );
     }
 }
+
+#[test]
+fn release_security_gate_transition_docs_lock_autonomous_target_contract() {
+    let target = include_str!("../../../docs/AUTONOMOUS_AGENT_TARGET.md");
+    let spec = include_str!("../../../docs/AUTONOMOUS_AGENT_SPEC.md");
+    let alignment = include_str!("../../../docs/DOCS_ALIGNMENT.md");
+
+    for token in ["run <goal>", "resume", "abort", "goal", "approval", "trace"] {
+        assert!(
+            target.contains(token) || spec.contains(token),
+            "transition docs missing token: {token}"
+        );
+    }
+
+    for token in [
+        "goal",
+        "done condition",
+        "budget",
+        "approval",
+        "verification",
+        "artifacts",
+        "success",
+        "failed",
+        "aborted",
+    ] {
+        assert!(
+            spec.contains(token),
+            "autonomous spec missing token: {token}"
+        );
+    }
+
+    for token in ["current truth", "future", "run <intent-spec>", "run <goal>"] {
+        assert!(
+            alignment.contains(token),
+            "docs alignment missing token: {token}"
+        );
+    }
+}

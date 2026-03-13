@@ -32,9 +32,9 @@ intent-spec:
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum CliCommand {
-    Run(IntentTemplate),
+    Run(RunTemplate),
     Batch {
-        intents: Vec<IntentTemplate>,
+        intents: Vec<RunTemplate>,
         reset_state: bool,
     },
     Replay {
@@ -49,7 +49,7 @@ pub enum CliCommand {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum IntentTemplate {
+pub enum LegacyIntentTemplate {
     Read { key: String },
     Write { key: String, value: String },
     Remove { key: String },
@@ -57,16 +57,35 @@ pub enum IntentTemplate {
     Halt,
 }
 
-impl IntentTemplate {
+impl LegacyIntentTemplate {
     pub fn to_intent(&self, intent_id: String, actor_id: Option<String>) -> Intent {
         match self {
-            IntentTemplate::Read { key } => Intent::read(intent_id, actor_id, key.clone()),
-            IntentTemplate::Write { key, value } => {
+            LegacyIntentTemplate::Read { key } => Intent::read(intent_id, actor_id, key.clone()),
+            LegacyIntentTemplate::Write { key, value } => {
                 Intent::write(intent_id, actor_id, key.clone(), value.clone())
             }
-            IntentTemplate::Remove { key } => Intent::remove(intent_id, actor_id, key.clone()),
-            IntentTemplate::Freeze => Intent::freeze_writes(intent_id, actor_id),
-            IntentTemplate::Halt => Intent::halt(intent_id, actor_id),
+            LegacyIntentTemplate::Remove { key } => Intent::remove(intent_id, actor_id, key.clone()),
+            LegacyIntentTemplate::Freeze => Intent::freeze_writes(intent_id, actor_id),
+            LegacyIntentTemplate::Halt => Intent::halt(intent_id, actor_id),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RunTemplate {
+    LegacyIntent(LegacyIntentTemplate),
+}
+
+impl RunTemplate {
+    pub fn to_intent(&self, intent_id: String, actor_id: Option<String>) -> Intent {
+        match self {
+            Self::LegacyIntent(template) => template.to_intent(intent_id, actor_id),
+        }
+    }
+
+    pub fn legacy_intent(&self) -> &LegacyIntentTemplate {
+        match self {
+            Self::LegacyIntent(template) => template,
         }
     }
 }
@@ -116,7 +135,9 @@ fn parse_replay_command(args: &[String]) -> Result<CliCommand, String> {
 
 fn parse_run_command(args: &[String]) -> Result<CliCommand, String> {
     let intent_spec = exactly_one_arg("run", args)?;
-    Ok(CliCommand::Run(parse_intent_spec(&intent_spec)?))
+    Ok(CliCommand::Run(RunTemplate::LegacyIntent(
+        parse_legacy_intent_spec(&intent_spec)?,
+    )))
 }
 
 fn parse_legacy_run_alias(command: &str, args: &[String]) -> Result<CliCommand, String> {
@@ -158,7 +179,7 @@ fn parse_batch_command(args: &[String]) -> Result<CliCommand, String> {
             reset_state = true;
             continue;
         }
-        intents.push(parse_intent_spec(arg)?);
+        intents.push(RunTemplate::LegacyIntent(parse_legacy_intent_spec(arg)?));
     }
 
     if intents.is_empty() {
@@ -173,9 +194,9 @@ fn parse_batch_command(args: &[String]) -> Result<CliCommand, String> {
     })
 }
 
-fn parse_intent_spec(raw: &str) -> Result<IntentTemplate, String> {
+fn parse_legacy_intent_spec(raw: &str) -> Result<LegacyIntentTemplate, String> {
     if let Some(key) = raw.strip_prefix("read:") {
-        return Ok(IntentTemplate::Read {
+        return Ok(LegacyIntentTemplate::Read {
             key: parse_intent_key(key, "read")?,
         });
     }
@@ -189,21 +210,21 @@ fn parse_intent_spec(raw: &str) -> Result<IntentTemplate, String> {
                 "batch write intent requires a non-empty value",
             ));
         }
-        return Ok(IntentTemplate::Write {
+        return Ok(LegacyIntentTemplate::Write {
             key,
             value: value.trim().to_owned(),
         });
     }
     if let Some(key) = raw.strip_prefix("remove:") {
-        return Ok(IntentTemplate::Remove {
+        return Ok(LegacyIntentTemplate::Remove {
             key: parse_intent_key(key, "remove")?,
         });
     }
     if raw == "freeze" {
-        return Ok(IntentTemplate::Freeze);
+        return Ok(LegacyIntentTemplate::Freeze);
     }
     if raw == "halt" {
-        return Ok(IntentTemplate::Halt);
+        return Ok(LegacyIntentTemplate::Halt);
     }
 
     Err(format!(

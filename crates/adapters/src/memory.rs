@@ -10,6 +10,33 @@ mod memory_sqlite;
 pub use memory_markdown::MarkdownMemoryAdapter;
 pub use memory_sqlite::SqliteMemoryAdapter;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MemoryTier {
+    Working,
+    Recall,
+}
+
+impl MemoryTier {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Working => "working",
+            Self::Recall => "recall",
+        }
+    }
+}
+
+pub fn tiered_memory_key(tier: MemoryTier, key: &str) -> String {
+    format!("{}:{key}", tier.as_str())
+}
+
+pub fn detect_memory_tier(key: &str) -> MemoryTier {
+    if key.starts_with("recall:") {
+        MemoryTier::Recall
+    } else {
+        MemoryTier::Working
+    }
+}
+
 pub(crate) type MemoryResult<T> = Result<T, MemoryError>;
 
 pub fn build_contract_memory(

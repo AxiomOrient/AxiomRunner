@@ -1,11 +1,12 @@
 use crate::async_runtime_host::global_async_runtime_host;
-use crate::cli_command::IntentTemplate;
+use crate::cli_command::{LegacyIntentTemplate, RunTemplate};
 use crate::config_loader::AppConfig;
 use crate::env_util::read_env_trimmed;
 use axonrunner_adapters::{
-    FileMutationEvidence, FileWriteOutput, MemoryAdapter, ProviderAdapter, ProviderRequest,
-    ToolAdapter, ToolPolicy, ToolRequest, ToolResult, WorkspaceTool, build_contract_memory,
-    build_contract_provider, provider_registry, resolve_provider_id,
+    FileMutationEvidence, FileWriteOutput, MemoryAdapter, MemoryTier, ProviderAdapter,
+    ProviderRequest, ToolAdapter, ToolPolicy, ToolRequest, ToolResult, WorkspaceTool,
+    build_contract_memory, build_contract_provider, provider_registry, resolve_provider_id,
+    tiered_memory_key,
 };
 use axonrunner_core::DecisionOutcome;
 use std::fs;
@@ -14,8 +15,11 @@ use std::sync::Arc;
 
 mod plan;
 
+pub use self::plan::RuntimeRunPlan;
+
 use self::plan::{
     MemoryPlan, ProviderPlan, RuntimeComposePlan, ToolPlan, build_runtime_compose_plan,
+    build_runtime_run_plan,
 };
 
 const ENV_RUNTIME_MEMORY_PATH: &str = "AXONRUNNER_RUNTIME_MEMORY_PATH";
@@ -33,6 +37,7 @@ const TOOL_READ_LIMIT_BYTES: usize = 64 * 1024;
 const TOOL_MAX_SEARCH_RESULTS: usize = 64;
 const TOOL_MAX_COMMAND_OUTPUT_BYTES: usize = 32 * 1024;
 const TOOL_COMMAND_TIMEOUT_MS: u64 = 5_000;
+const HOT_CONTEXT_MAX_CHARS: usize = 512;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeComposeConfig {
@@ -70,11 +75,62 @@ pub enum RuntimeComposeStep {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeComposeExecution {
+    pub provider_output: Option<String>,
+    pub provider_cwd: String,
     pub provider: RuntimeComposeStep,
     pub memory: RuntimeComposeStep,
     pub tool: RuntimeComposeStep,
     pub tool_outputs: Vec<String>,
     pub patch_artifacts: Vec<RuntimeComposePatchArtifact>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeRunVerification {
+    pub status: &'static str,
+    pub summary: String,
+    pub checks: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeRunRepair {
+    pub attempted: bool,
+    pub status: &'static str,
+    pub summary: String,
+    pub tool: RuntimeComposeStep,
+    pub tool_outputs: Vec<String>,
+    pub patch_artifacts: Vec<RuntimeComposePatchArtifact>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeRunPhase {
+    Planning,
+    ExecutingStep,
+    Verifying,
+    Repairing,
+    WaitingApproval,
+    Blocked,
+    Completed,
+    Failed,
+    Aborted,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeRunOutcome {
+    Success,
+    Blocked,
+    ApprovalRequired,
+    Failed,
+    Aborted,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeRunRecord {
+    pub plan: RuntimeRunPlan,
+    pub verification: RuntimeRunVerification,
+    pub repair: RuntimeRunRepair,
+    pub phase: RuntimeRunPhase,
+    pub outcome: RuntimeRunOutcome,
+    pub reason: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -100,6 +156,31 @@ impl RuntimeComposeExecution {
                     _ => None,
                 },
             },
+        }
+    }
+
+    pub fn with_repair(&self, repair: &RuntimeRunRepair) -> Self {
+        if !repair.attempted || !matches!(repair.tool, RuntimeComposeStep::Applied) {
+            return self.clone();
+        }
+
+        let mut next = self.clone();
+        next.tool = RuntimeComposeStep::Applied;
+        next.tool_outputs.extend(repair.tool_outputs.clone());
+        next.patch_artifacts.extend(repair.patch_artifacts.clone());
+        next
+    }
+}
+
+impl RuntimeRunRepair {
+    pub fn skipped(summary: impl Into<String>) -> Self {
+        Self {
+            attempted: false,
+            status: "skipped",
+            summary: summary.into(),
+            tool: RuntimeComposeStep::Skipped,
+            tool_outputs: Vec::new(),
+            patch_artifacts: Vec::new(),
         }
     }
 }
@@ -176,6 +257,7 @@ pub struct RuntimeComposeState {
     provider: Arc<dyn ProviderAdapter>,
     tool: Option<Arc<dyn ToolAdapter>>,
     tool_init: RuntimeComposeInitState,
+    agents_path: Option<PathBuf>,
 }
 
 fn try_init_component<T>(
@@ -250,6 +332,7 @@ impl RuntimeComposeState {
             build_contract_provider(provider_id)
                 .map_err(|error| format!("provider init failed for '{provider_id}': {error}"))?,
         );
+        let agents_path = find_agents_md(config.tool_workspace.as_deref());
 
         Ok(Self {
             config,
@@ -258,12 +341,13 @@ impl RuntimeComposeState {
             provider,
             tool: tool.map(|tool| Arc::new(tool) as Arc<dyn ToolAdapter>),
             tool_init,
+            agents_path,
         })
     }
 
     pub fn apply_template(
         &mut self,
-        template: &IntentTemplate,
+        template: &RunTemplate,
         intent_id: &str,
         outcome: DecisionOutcome,
     ) -> RuntimeComposeExecution {
@@ -275,6 +359,62 @@ impl RuntimeComposeState {
             self.config.max_tokens,
             &self.config.tool_log_path,
         ))
+    }
+
+    pub fn plan_template(
+        &self,
+        template: &RunTemplate,
+        run_id: &str,
+        intent_id: &str,
+        outcome: DecisionOutcome,
+    ) -> RuntimeRunPlan {
+        build_runtime_run_plan(template, run_id, intent_id, outcome)
+    }
+
+    pub fn repair_template(
+        &self,
+        template: &RunTemplate,
+        intent_id: &str,
+        outcome: DecisionOutcome,
+        prior: &RuntimeComposeExecution,
+    ) -> RuntimeRunRepair {
+        if !matches!(prior.tool, RuntimeComposeStep::Failed(_)) {
+            return RuntimeRunRepair::skipped("tool_step_not_failed");
+        }
+
+        let plan = build_runtime_compose_plan(
+            template,
+            intent_id,
+            outcome,
+            &self.config.provider_model,
+            self.config.max_tokens,
+            &self.config.tool_log_path,
+        );
+        if plan.tool.is_none() {
+            return RuntimeRunRepair::skipped("no_tool_plan");
+        }
+
+        let (tool, tool_outputs, patch_artifacts) =
+            self.execute_tool(plan.tool, prior.provider_output.as_deref());
+        let status = match &tool {
+            RuntimeComposeStep::Applied => "repaired",
+            RuntimeComposeStep::Failed(_) => "failed",
+            RuntimeComposeStep::Skipped => "skipped",
+        };
+        let summary = match &tool {
+            RuntimeComposeStep::Applied => String::from("tool_step_retried_successfully"),
+            RuntimeComposeStep::Failed(message) => format!("tool_repair_failed:{message}"),
+            RuntimeComposeStep::Skipped => String::from("tool_repair_skipped"),
+        };
+
+        RuntimeRunRepair {
+            attempted: true,
+            status,
+            summary,
+            tool,
+            tool_outputs,
+            patch_artifacts,
+        }
     }
 
     pub fn clear(&mut self) -> Result<usize, String> {
@@ -299,6 +439,50 @@ impl RuntimeComposeState {
         Ok(removed)
     }
 
+    pub fn remember_run_summary(
+        &mut self,
+        run: &RuntimeRunRecord,
+        intent_id: &str,
+    ) -> Result<(), String> {
+        let Some(memory) = self.memory.as_mut() else {
+            return Ok(());
+        };
+
+        let key = tiered_memory_key(MemoryTier::Recall, &format!("last_run/{intent_id}"));
+        let value = Self::compact_hot_context(&[
+            format!("run_id={}", run.plan.run_id),
+            format!("phase={}", run_phase_name(run.phase)),
+            format!("outcome={}", run_outcome_name(run.outcome)),
+            format!("reason={}", run.reason),
+            format!("goal={}", run.plan.goal),
+            format!("summary={}", run.plan.summary),
+            format!(
+                "agents={}",
+                self.agents_path
+                    .as_ref()
+                    .map(|path| path.display().to_string())
+                    .unwrap_or_else(|| String::from("none"))
+            ),
+        ]);
+        memory
+            .store(&key, &value)
+            .map_err(|error| format!("store recall summary failed: {error}"))
+    }
+
+    fn compact_hot_context(entries: &[String]) -> String {
+        let joined = entries.join(" | ");
+        if joined.chars().count() <= HOT_CONTEXT_MAX_CHARS {
+            return joined;
+        }
+
+        let mut compact = joined
+            .chars()
+            .take(HOT_CONTEXT_MAX_CHARS.saturating_sub(16))
+            .collect::<String>();
+        compact.push_str("...<compacted>");
+        compact
+    }
+
     pub fn health(&self) -> RuntimeComposeHealth {
         let provider = probe_provider_health(Arc::clone(&self.provider));
         RuntimeComposeHealth {
@@ -313,19 +497,23 @@ impl RuntimeComposeState {
             tool: RuntimeComposeComponentHealth {
                 enabled: self.tool.is_some(),
                 state: self.tool_init.state_name(),
-                detail: self.tool_init.detail(),
+                detail: match &self.agents_path {
+                    Some(path) => format!("{},agents={}", self.tool_init.detail(), path.display()),
+                    None => self.tool_init.detail(),
+                },
             },
         }
     }
 
     pub fn write_report(
         &self,
-        template: &IntentTemplate,
+        template: &RunTemplate,
         intent_id: &str,
         outcome: DecisionOutcome,
         policy_code: &str,
         effect_count: usize,
         execution: &RuntimeComposeExecution,
+        run: &RuntimeRunRecord,
     ) -> Result<Vec<RuntimeComposePatchArtifact>, String> {
         let Some(tool) = self.tool.as_ref() else {
             return Ok(Vec::new());
@@ -336,24 +524,48 @@ impl RuntimeComposeState {
             (
                 format!("{base}.plan.md"),
                 format!(
-                    "# Plan\n\nintent_id={intent_id}\nkind={}\noutcome={}\npolicy={policy_code}\n",
+                    "# Plan\n\nintent_id={intent_id}\nkind={}\noutcome={}\npolicy={policy_code}\ngoal={}\nsummary={}\ndone_when={}\nplanned_steps={}\nsteps={}\n",
                     template_kind(template),
                     outcome_name(outcome),
+                    run.plan.goal,
+                    run.plan.summary,
+                    run.plan.done_when,
+                    run.plan.planned_steps,
+                    run.plan
+                        .steps
+                        .iter()
+                        .map(|step| format!("{}:{}:{}", step.phase, step.label, step.done_when))
+                        .collect::<Vec<_>>()
+                        .join(" | "),
                 ),
             ),
             (
                 format!("{base}.apply.md"),
                 format!(
-                    "# Apply\n\nprovider={}\nmemory={}\ntool={}\neffects={effect_count}\n",
+                    "# Apply\n\nphase={}\nprovider={}\nmemory={}\ntool={}\neffects={effect_count}\nprovider_cwd={}\nprovider_output={}\n",
+                    run_phase_name(RuntimeRunPhase::ExecutingStep),
                     step_name(&execution.provider),
                     step_name(&execution.memory),
                     step_name(&execution.tool),
+                    execution.provider_cwd,
+                    execution.provider_output.as_deref().unwrap_or("<none>"),
                 ),
             ),
             (
                 format!("{base}.verify.md"),
                 format!(
-                    "# Verify\n\nfirst_failure={}\n",
+                    "# Verify\n\nphase={}\nstatus={}\nsummary={}\nchecks={}\nrepair_attempted={}\nrepair_status={}\nrepair_summary={}\nfirst_failure={}\n",
+                    run_phase_name(RuntimeRunPhase::Verifying),
+                    run.verification.status,
+                    run.verification.summary,
+                    if run.verification.checks.is_empty() {
+                        String::from("none")
+                    } else {
+                        run.verification.checks.join(" | ")
+                    },
+                    run.repair.attempted,
+                    run.repair.status,
+                    run.repair.summary,
                     execution
                         .first_failure()
                         .map(|(stage, message)| format!("{stage}:{message}"))
@@ -363,10 +575,14 @@ impl RuntimeComposeState {
             (
                 format!("{base}.report.md"),
                 format!(
-                    "# Report\n\nintent_id={intent_id}\nkind={}\noutcome={}\npolicy={policy_code}\nprovider={}\nmemory={}\ntool={}\noutputs={}\nchanged_paths={}\nevidence={}\n",
+                    "# Report\n\nintent_id={intent_id}\nkind={}\noutcome={}\npolicy={policy_code}\nrun_phase={}\nrun_outcome={}\nrun_reason={}\nprovider={}\nprovider_cwd={}\nmemory={}\ntool={}\noutputs={}\nchanged_paths={}\nevidence={}\n",
                     template_kind(template),
                     outcome_name(outcome),
+                    run_phase_name(run.phase),
+                    run_outcome_name(run.outcome),
+                    run.reason,
                     step_name(&execution.provider),
+                    execution.provider_cwd,
                     step_name(&execution.memory),
                     step_name(&execution.tool),
                     if execution.tool_outputs.is_empty() {
@@ -429,6 +645,8 @@ impl RuntimeComposeState {
         let (provider_output, provider) = self.execute_provider(plan.provider);
         if matches!(provider, RuntimeComposeStep::Failed(_)) {
             return RuntimeComposeExecution {
+                provider_output,
+                provider_cwd: self.provider_cwd(),
                 provider,
                 memory: RuntimeComposeStep::Skipped,
                 tool: RuntimeComposeStep::Skipped,
@@ -440,6 +658,8 @@ impl RuntimeComposeState {
         let memory = self.execute_memory(plan.memory);
         if matches!(memory, RuntimeComposeStep::Failed(_)) {
             return RuntimeComposeExecution {
+                provider_output,
+                provider_cwd: self.provider_cwd(),
                 provider,
                 memory,
                 tool: RuntimeComposeStep::Skipped,
@@ -451,6 +671,8 @@ impl RuntimeComposeState {
         let (tool, tool_outputs, patch_artifacts) =
             self.execute_tool(plan.tool, provider_output.as_deref());
         RuntimeComposeExecution {
+            provider_output,
+            provider_cwd: self.provider_cwd(),
             provider,
             memory,
             tool,
@@ -569,6 +791,19 @@ fn build_tool_adapter(
     .map_err(|error| format!("tool adapter init failed: {error}"))
 }
 
+fn find_agents_md(start: Option<&Path>) -> Option<PathBuf> {
+    let mut current = start?.to_path_buf();
+    loop {
+        let candidate = current.join("AGENTS.md");
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+        if !current.pop() {
+            return None;
+        }
+    }
+}
+
 fn default_command_allowlist() -> Vec<String> {
     vec![
         String::from("pwd"),
@@ -655,13 +890,57 @@ fn probe_provider_health(provider: Arc<dyn ProviderAdapter>) -> RuntimeComposeCo
     }
 }
 
-fn template_kind(template: &IntentTemplate) -> &'static str {
-    match template {
-        IntentTemplate::Read { .. } => "read",
-        IntentTemplate::Write { .. } => "write",
-        IntentTemplate::Remove { .. } => "remove",
-        IntentTemplate::Freeze => "freeze",
-        IntentTemplate::Halt => "halt",
+fn template_kind(template: &RunTemplate) -> &'static str {
+    match template.legacy_intent() {
+        LegacyIntentTemplate::Read { .. } => "read",
+        LegacyIntentTemplate::Write { .. } => "write",
+        LegacyIntentTemplate::Remove { .. } => "remove",
+        LegacyIntentTemplate::Freeze => "freeze",
+        LegacyIntentTemplate::Halt => "halt",
+    }
+}
+
+pub fn run_phase_name(phase: RuntimeRunPhase) -> &'static str {
+    match phase {
+        RuntimeRunPhase::Planning => "planning",
+        RuntimeRunPhase::ExecutingStep => "executing_step",
+        RuntimeRunPhase::Verifying => "verifying",
+        RuntimeRunPhase::Repairing => "repairing",
+        RuntimeRunPhase::WaitingApproval => "waiting_approval",
+        RuntimeRunPhase::Blocked => "blocked",
+        RuntimeRunPhase::Completed => "completed",
+        RuntimeRunPhase::Failed => "failed",
+        RuntimeRunPhase::Aborted => "aborted",
+    }
+}
+
+pub fn run_outcome_name(outcome: RuntimeRunOutcome) -> &'static str {
+    match outcome {
+        RuntimeRunOutcome::Success => "success",
+        RuntimeRunOutcome::Blocked => "blocked",
+        RuntimeRunOutcome::ApprovalRequired => "approval_required",
+        RuntimeRunOutcome::Failed => "failed",
+        RuntimeRunOutcome::Aborted => "aborted",
+    }
+}
+
+pub fn verifier_profile_name(program: &str, args: &[String]) -> &'static str {
+    match (program, args.first().map(String::as_str), args.get(1).map(String::as_str)) {
+        ("cargo", Some("build"), _) => "build",
+        ("cargo", Some("test"), _) => "test",
+        ("cargo", Some("clippy"), _) => "lint",
+        ("cargo", Some("fmt"), Some("--check")) => "lint",
+        ("cargo", Some("fmt"), _) => "lint",
+        ("npm", Some("test"), _) | ("pnpm", Some("test"), _) | ("yarn", Some("test"), _) => {
+            "test"
+        }
+        ("npm", Some("run"), Some("lint"))
+        | ("pnpm", Some("run"), Some("lint"))
+        | ("yarn", Some("lint"), _) => "lint",
+        ("npm", Some("run"), Some("build"))
+        | ("pnpm", Some("run"), Some("build"))
+        | ("yarn", Some("build"), _) => "build",
+        _ => "generic",
     }
 }
 
@@ -690,8 +969,14 @@ fn env_string(key: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{RuntimeComposeConfig, build_tool_adapter};
+    use super::{
+        RuntimeComposeConfig, RuntimeComposeExecution, RuntimeComposeState, RuntimeComposeStep,
+        build_tool_adapter, run_outcome_name, run_phase_name,
+        verifier_profile_name,
+    };
+    use crate::cli_command::{LegacyIntentTemplate, RunTemplate};
     use crate::config_loader::AppConfig;
+    use axonrunner_core::DecisionOutcome;
     use axonrunner_adapters::{ToolAdapter, ToolRequest};
     use std::fs;
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -745,5 +1030,133 @@ mod tests {
         assert!(git.is_err());
 
         let _ = fs::remove_dir_all(workspace);
+    }
+
+    #[test]
+    fn runtime_compose_repair_retries_failed_tool_step() {
+        let workspace = unique_dir("repair");
+        fs::create_dir_all(&workspace).expect("workspace should exist");
+        let state = RuntimeComposeState::new(RuntimeComposeConfig {
+            memory_path: None,
+            tool_workspace: Some(workspace.clone()),
+            tool_log_path: workspace.join("runtime.log").display().to_string(),
+            provider_id: String::from("mock-local"),
+            provider_model: String::from("mock-local"),
+            max_tokens: 256,
+            command_allowlist: None,
+        })
+        .expect("runtime compose state should init");
+
+        let prior = RuntimeComposeExecution {
+            provider_output: Some(String::from("provider-ok")),
+            provider_cwd: String::from("/tmp/workspace"),
+            provider: RuntimeComposeStep::Applied,
+            memory: RuntimeComposeStep::Applied,
+            tool: RuntimeComposeStep::Failed(String::from("boom")),
+            tool_outputs: Vec::new(),
+            patch_artifacts: Vec::new(),
+        };
+        let repair = state.repair_template(
+            &RunTemplate::LegacyIntent(LegacyIntentTemplate::Write {
+                key: String::from("alpha"),
+                value: String::from("42"),
+            }),
+            "cli-repair",
+            DecisionOutcome::Accepted,
+            &prior,
+        );
+
+        assert!(repair.attempted);
+        assert_eq!(repair.status, "repaired");
+        assert!(matches!(repair.tool, RuntimeComposeStep::Applied));
+        assert!(!repair.tool_outputs.is_empty());
+        assert!(!repair.patch_artifacts.is_empty());
+
+        let _ = fs::remove_dir_all(workspace);
+    }
+
+    #[test]
+    fn runtime_compose_execution_carries_canonical_provider_workspace_binding() {
+        let workspace = unique_dir("provider-cwd");
+        fs::create_dir_all(&workspace).expect("workspace should exist");
+        let canonical_workspace = fs::canonicalize(&workspace).unwrap_or(workspace.clone());
+        let mut state = RuntimeComposeState::new(RuntimeComposeConfig {
+            memory_path: None,
+            tool_workspace: Some(workspace.clone()),
+            tool_log_path: workspace.join("runtime.log").display().to_string(),
+            provider_id: String::from("mock-local"),
+            provider_model: String::from("mock-local"),
+            max_tokens: 256,
+            command_allowlist: None,
+        })
+        .expect("runtime compose state should init");
+
+        let execution = state.apply_template(
+            &RunTemplate::LegacyIntent(LegacyIntentTemplate::Write {
+                key: String::from("alpha"),
+                value: String::from("42"),
+            }),
+            "cli-cwd",
+            DecisionOutcome::Accepted,
+        );
+
+        assert_eq!(
+            execution.provider_cwd,
+            canonical_workspace.display().to_string()
+        );
+
+        let _ = fs::remove_dir_all(workspace);
+    }
+
+    #[test]
+    fn run_phase_and_outcome_names_cover_terminal_values() {
+        assert_eq!(run_phase_name(super::RuntimeRunPhase::Completed), "completed");
+        assert_eq!(
+            run_phase_name(super::RuntimeRunPhase::WaitingApproval),
+            "waiting_approval"
+        );
+        assert_eq!(run_outcome_name(super::RuntimeRunOutcome::Success), "success");
+        assert_eq!(
+            run_outcome_name(super::RuntimeRunOutcome::ApprovalRequired),
+            "approval_required"
+        );
+        assert_eq!(run_outcome_name(super::RuntimeRunOutcome::Aborted), "aborted");
+    }
+
+    #[test]
+    fn verifier_profile_name_matches_standard_command_profiles() {
+        assert_eq!(verifier_profile_name("cargo", &[String::from("build")]), "build");
+        assert_eq!(verifier_profile_name("cargo", &[String::from("test")]), "test");
+        assert_eq!(verifier_profile_name("cargo", &[String::from("clippy")]), "lint");
+        assert_eq!(
+            verifier_profile_name("npm", &[String::from("run"), String::from("build")]),
+            "build"
+        );
+        assert_eq!(verifier_profile_name("pwd", &[]), "generic");
+    }
+
+    #[test]
+    fn compact_hot_context_keeps_long_summaries_bounded() {
+        let entries = (0..64)
+            .map(|index| format!("entry-{index}-{}", "x".repeat(32)))
+            .collect::<Vec<_>>();
+        let compact = RuntimeComposeState::compact_hot_context(&entries);
+
+        assert!(compact.len() <= super::HOT_CONTEXT_MAX_CHARS + 16);
+        assert!(compact.ends_with("...<compacted>"));
+    }
+
+    #[test]
+    fn runtime_compose_finds_agents_guidance_in_parent_workspace() {
+        let root = unique_dir("agents-root");
+        let nested = root.join("workspace").join("inner");
+        fs::create_dir_all(&nested).expect("nested workspace should exist");
+        fs::write(root.join("AGENTS.md"), "repo guidance").expect("agents file should exist");
+
+        let found = super::find_agents_md(Some(&nested)).expect("agents path should be found");
+
+        assert_eq!(found, root.join("AGENTS.md"));
+
+        let _ = fs::remove_dir_all(root);
     }
 }

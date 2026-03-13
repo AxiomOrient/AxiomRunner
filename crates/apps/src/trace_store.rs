@@ -1,4 +1,7 @@
-use crate::runtime_compose::{RuntimeComposeExecution, RuntimeComposePatchArtifact};
+use crate::runtime_compose::{
+    RuntimeComposeExecution, RuntimeComposePatchArtifact, RuntimeRunRecord, run_outcome_name,
+    run_phase_name,
+};
 use axonrunner_core::{AgentState, DecisionOutcome};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -52,6 +55,26 @@ pub struct TracePatchArtifact {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TraceRepairSummary {
+    pub attempted: bool,
+    pub status: String,
+    pub summary: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TraceRunSummary {
+    pub run_id: String,
+    pub step_ids: Vec<String>,
+    pub provider_cwd: String,
+    pub phase: String,
+    pub outcome: String,
+    pub reason: String,
+    pub plan_summary: String,
+    pub planned_steps: usize,
+    pub repair: TraceRepairSummary,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TraceIntentEvent {
     pub schema: String,
     pub timestamp_ms: u64,
@@ -72,6 +95,8 @@ pub struct TraceIntentEvent {
     pub verification: TraceVerificationSummary,
     #[serde(default)]
     pub patch_artifacts: Vec<TracePatchArtifact>,
+    #[serde(default)]
+    pub run: Option<TraceRunSummary>,
     pub artifacts: TraceArtifacts,
     pub report_written: bool,
     pub report_error: Option<String>,
@@ -85,6 +110,21 @@ pub struct ReplaySummary {
     pub failed_intents: usize,
     pub latest_intent_id: Option<String>,
     pub latest_failure: Option<TraceFailureBoundary>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TraceArtifactEntry {
+    pub intent_id: String,
+    pub plan: String,
+    pub apply: String,
+    pub verify: String,
+    pub report: String,
+    pub patch_artifacts: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TraceArtifactIndex {
+    pub entries: Vec<TraceArtifactEntry>,
 }
 
 impl TraceStore {
@@ -107,6 +147,7 @@ impl TraceStore {
         report_written: bool,
         report_error: Option<&str>,
         patch_artifacts: &[RuntimeComposePatchArtifact],
+        run: &RuntimeRunRecord,
     ) -> Result<(), String> {
         let event = json!({
             "schema": TRACE_INTENT_SCHEMA_V1,
@@ -129,6 +170,21 @@ impl TraceStore {
             })),
             "verification": verification_summary(execution, report_written, report_error),
             "patch_artifacts": patch_artifacts.iter().map(trace_patch_artifact).collect::<Vec<_>>(),
+            "run": {
+                "run_id": run.plan.run_id,
+                "step_ids": run.plan.steps.iter().map(|step| step.id.clone()).collect::<Vec<_>>(),
+                "provider_cwd": execution.provider_cwd,
+                "phase": run_phase_name(run.phase),
+                "outcome": run_outcome_name(run.outcome),
+                "reason": run.reason,
+                "plan_summary": run.plan.summary,
+                "planned_steps": run.plan.planned_steps,
+                "repair": {
+                    "attempted": run.repair.attempted,
+                    "status": run.repair.status,
+                    "summary": run.repair.summary,
+                },
+            },
             "artifacts": {
                 "plan": format!(".axonrunner/artifacts/{intent_id}.plan.md"),
                 "apply": format!(".axonrunner/artifacts/{intent_id}.apply.md"),
@@ -182,6 +238,21 @@ impl TraceStore {
 
     pub fn events_path(&self) -> &PathBuf {
         self.storage.events_path()
+    }
+
+    pub fn artifact_index(&self) -> Result<TraceArtifactIndex, String> {
+        Ok(build_artifact_index(self.load_events()?))
+    }
+
+    pub fn artifact_index_for_intent(
+        &self,
+        intent_id: &str,
+    ) -> Result<Option<TraceArtifactEntry>, String> {
+        Ok(self
+            .load_events()?
+            .into_iter()
+            .find(|event| event.intent_id == intent_id)
+            .map(artifact_entry_from_event))
     }
 }
 
@@ -288,6 +359,27 @@ fn summarize_events(events: Vec<TraceIntentEvent>) -> Result<ReplaySummary, Stri
     })
 }
 
+fn build_artifact_index(events: Vec<TraceIntentEvent>) -> TraceArtifactIndex {
+    TraceArtifactIndex {
+        entries: events.into_iter().map(artifact_entry_from_event).collect(),
+    }
+}
+
+fn artifact_entry_from_event(event: TraceIntentEvent) -> TraceArtifactEntry {
+    TraceArtifactEntry {
+        intent_id: event.intent_id,
+        plan: event.artifacts.plan,
+        apply: event.artifacts.apply,
+        verify: event.artifacts.verify,
+        report: event.artifacts.report,
+        patch_artifacts: event
+            .patch_artifacts
+            .into_iter()
+            .map(|artifact| artifact.artifact_path)
+            .collect(),
+    }
+}
+
 fn default_trace_verification() -> TraceVerificationSummary {
     TraceVerificationSummary {
         status: String::from("unknown"),
@@ -340,8 +432,9 @@ fn trace_patch_artifact(artifact: &RuntimeComposePatchArtifact) -> TracePatchArt
 #[cfg(test)]
 mod tests {
     use super::{
-        ReplaySummary, TRACE_INTENT_SCHEMA_V1, TraceArtifacts, TraceFailureBoundary,
-        TraceIntentEvent, TracePatchArtifact, TraceStore, TraceVerificationSummary,
+        ReplaySummary, TRACE_INTENT_SCHEMA_V1, TraceArtifactIndex, TraceArtifacts,
+        TraceFailureBoundary, TraceIntentEvent, TracePatchArtifact, TraceRepairSummary,
+        TraceRunSummary, TraceStore, TraceVerificationSummary,
     };
     use std::fs;
     use std::path::PathBuf;
@@ -404,6 +497,38 @@ mod tests {
                 after_excerpt: Some(String::from("after")),
                 unified_diff: None,
             }],
+            run: Some(TraceRunSummary {
+                run_id: format!("run-for-{intent_id}"),
+                step_ids: vec![
+                    format!("run-for-{intent_id}/step-1-planning"),
+                    format!("run-for-{intent_id}/step-2-executing"),
+                    format!("run-for-{intent_id}/step-3-executing"),
+                    format!("run-for-{intent_id}/step-4-verifying"),
+                ],
+                provider_cwd: String::from("/tmp/workspace"),
+                phase: if failed {
+                    String::from("failed")
+                } else {
+                    String::from("completed")
+                },
+                outcome: if failed {
+                    String::from("failed")
+                } else {
+                    String::from("success")
+                },
+                reason: if failed {
+                    String::from("stage=provider,message=boom")
+                } else {
+                    String::from("verification_passed")
+                },
+                plan_summary: String::from("intent_id=cli-1 legacy_write key=alpha outcome=accepted"),
+                planned_steps: 4,
+                repair: TraceRepairSummary {
+                    attempted: false,
+                    status: String::from("skipped"),
+                    summary: String::from("verification_passed"),
+                },
+            }),
             artifacts: TraceArtifacts {
                 plan: format!(".axonrunner/artifacts/{intent_id}.plan.md"),
                 apply: format!(".axonrunner/artifacts/{intent_id}.apply.md"),
@@ -433,6 +558,12 @@ mod tests {
 
         let events = store.load_events().expect("events should load");
         assert_eq!(events.len(), 2);
+        assert_eq!(events[0].run.as_ref().map(|run| run.run_id.as_str()), Some("run-for-cli-1"));
+        assert_eq!(events[0].run.as_ref().map(|run| run.step_ids.len()), Some(4));
+        assert_eq!(
+            events[0].run.as_ref().map(|run| run.provider_cwd.as_str()),
+            Some("/tmp/workspace")
+        );
 
         let summary = store.replay_summary().expect("summary should build");
         assert_eq!(
@@ -456,6 +587,17 @@ mod tests {
             .expect("intent summary should exist");
         assert_eq!(intent_summary.intent_count, 1);
         assert_eq!(intent_summary.failed_intents, 0);
+
+        let artifact_index = store.artifact_index().expect("artifact index should build");
+        assert_eq!(
+            artifact_index,
+            TraceArtifactIndex {
+                entries: vec![
+                    super::artifact_entry_from_event(event("cli-1", 1, false)),
+                    super::artifact_entry_from_event(event("cli-2", 2, true)),
+                ],
+            }
+        );
 
         let _ = fs::remove_dir_all(root);
     }

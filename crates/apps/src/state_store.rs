@@ -15,6 +15,7 @@ const NONE_SENTINEL: &str = "-";
 pub struct RuntimeStateSnapshot {
     pub state: AgentState,
     pub next_intent_seq: u64,
+    pub next_run_seq: u64,
 }
 
 impl Default for RuntimeStateSnapshot {
@@ -22,6 +23,7 @@ impl Default for RuntimeStateSnapshot {
         Self {
             state: AgentState::default(),
             next_intent_seq: 0,
+            next_run_seq: 0,
         }
     }
 }
@@ -116,6 +118,7 @@ fn serialize_snapshot(snapshot: &RuntimeStateSnapshot) -> String {
     let mut lines = vec![
         format!("version={FORMAT_VERSION}"),
         format!("next_intent_seq={}", snapshot.next_intent_seq),
+        format!("next_run_seq={}", snapshot.next_run_seq),
         format!("revision={}", snapshot.state.revision),
         format!("mode={}", mode_name(snapshot.state.mode)),
         format!(
@@ -185,6 +188,7 @@ fn parse_snapshot(raw: &str) -> Result<RuntimeStateSnapshot, String> {
                 saw_version = true;
             }
             "next_intent_seq" => snapshot.next_intent_seq = parse_u64(value, key, index + 1)?,
+            "next_run_seq" => snapshot.next_run_seq = parse_u64(value, key, index + 1)?,
             "revision" => snapshot.state.revision = parse_u64(value, key, index + 1)?,
             "mode" => snapshot.state.mode = parse_mode(value, index + 1)?,
             "last_intent_id" => {
@@ -214,6 +218,9 @@ fn parse_snapshot(raw: &str) -> Result<RuntimeStateSnapshot, String> {
     }
 
     snapshot.state.facts = facts;
+    if snapshot.next_run_seq == 0 {
+        snapshot.next_run_seq = snapshot.next_intent_seq;
+    }
     Ok(snapshot)
 }
 
@@ -335,6 +342,7 @@ mod tests {
                 audit_count: 4,
             },
             next_intent_seq: 3,
+            next_run_seq: 3,
         };
 
         let encoded = serialize_snapshot(&snapshot);
@@ -349,6 +357,7 @@ mod tests {
         let raw = "\
 version=axonrunner-state-v1
 next_intent_seq=3
+next_run_seq=3
 revision=12
 mode=readonly
 last_intent_id=636c692d33
@@ -363,8 +372,29 @@ fact.616c706861=3432
         let decoded = parse_snapshot(raw).expect("legacy snapshot should parse");
 
         assert_eq!(decoded.next_intent_seq, 3);
+        assert_eq!(decoded.next_run_seq, 3);
         assert_eq!(decoded.state.revision, 12);
         assert_eq!(decoded.state.mode, ExecutionMode::ReadOnly);
         assert_eq!(decoded.state.facts.get("alpha"), Some(&String::from("42")));
+    }
+
+    #[test]
+    fn state_snapshot_legacy_payload_defaults_next_run_seq_from_intent_seq() {
+        let raw = "\
+version=axonrunner-state-v1
+next_intent_seq=9
+revision=1
+mode=active
+last_intent_id=-
+last_actor_id=-
+last_decision=-
+last_policy_code=-
+denied_count=0
+audit_count=0
+";
+
+        let decoded = parse_snapshot(raw).expect("legacy snapshot should parse");
+        assert_eq!(decoded.next_intent_seq, 9);
+        assert_eq!(decoded.next_run_seq, 9);
     }
 }

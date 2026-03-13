@@ -132,3 +132,6 @@ env-only runtime knobs:
 - runbook: [docs/RUNBOOK.md](docs/RUNBOOK.md)
 - versioning policy: [docs/VERSIONING.md](docs/VERSIONING.md)
 - 제품 charter: [docs/project-charter.md](docs/project-charter.md)
+- autonomous target bridge: [docs/AUTONOMOUS_AGENT_TARGET.md](docs/AUTONOMOUS_AGENT_TARGET.md)
+- autonomous run contract draft: [docs/AUTONOMOUS_AGENT_SPEC.md](docs/AUTONOMOUS_AGENT_SPEC.md)
+- docs alignment guide: [docs/DOCS_ALIGNMENT.md](docs/DOCS_ALIGNMENT.md)

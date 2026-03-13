@@ -1,6 +1,8 @@
 use axonrunner_core::{
-    AgentState, Decision, DecisionOutcome, DomainEvent, Effect, ExecutionMode, Intent,
-    PolicyAuditRecord, PolicyCode, project_from, reduce,
+    AgentState, Decision, DecisionOutcome, DomainEvent, DoneCondition, Effect, ExecutionMode,
+    Intent, PolicyAuditRecord, PolicyCode, RunApprovalMode, RunBudget, RunEvent, RunGoal,
+    RunOutcome, RunPhase, RunStatus, VerificationCheck, project_from, reduce,
+    reduce_run_status,
 };
 
 #[derive(Clone, Copy)]
@@ -213,4 +215,70 @@ fn state_invariants_hold_for_projected_generated_streams() {
         assert_eq!(projected.audit_count, expected_audit);
         assert_eq!(projected.denied_count, expected_denied);
     }
+}
+
+#[test]
+fn run_status_starts_without_terminal_outcome() {
+    let goal = RunGoal {
+        summary: String::from("complete autonomous mission"),
+        workspace_root: String::from("/tmp/workspace"),
+        constraints: Vec::new(),
+        done_conditions: vec![DoneCondition {
+            label: String::from("report"),
+            evidence: String::from("report exists"),
+        }],
+        verification_checks: vec![VerificationCheck {
+            label: String::from("verify"),
+            detail: String::from("run verifier"),
+        }],
+        budget: RunBudget::bounded(5, 10, 8_000),
+        approval_mode: RunApprovalMode::Never,
+    };
+    let status = RunStatus::new("run-seed", goal);
+
+    assert_eq!(status.phase, RunPhase::Planning);
+    assert_eq!(status.outcome, None);
+    assert_eq!(status.completed_steps, 0);
+    assert_ne!(RunOutcome::Blocked, RunOutcome::Aborted);
+}
+
+#[test]
+fn run_budget_exhaustion_lands_in_blocked_terminal_state() {
+    let goal = RunGoal {
+        summary: String::from("stay within budget"),
+        workspace_root: String::from("/tmp/workspace"),
+        constraints: Vec::new(),
+        done_conditions: vec![DoneCondition {
+            label: String::from("budget"),
+            evidence: String::from("budget not exceeded"),
+        }],
+        verification_checks: vec![VerificationCheck {
+            label: String::from("budget"),
+            detail: String::from("step budget monitor"),
+        }],
+        budget: RunBudget::bounded(1, 1, 100),
+        approval_mode: RunApprovalMode::Never,
+    };
+    let after_budget = reduce_run_status(
+        &RunStatus::new("run-budget", goal),
+        &RunEvent::BudgetConsumed {
+            run_id: String::from("run-budget"),
+            consumed_steps: 3,
+            consumed_minutes: 2,
+            consumed_tokens: 200,
+        },
+    );
+    let terminal = reduce_run_status(
+        &after_budget,
+        &RunEvent::OutcomeRecorded {
+            run_id: String::from("run-budget"),
+            outcome: RunOutcome::BudgetExhausted,
+        },
+    );
+
+    assert_eq!(after_budget.budget.max_steps, 0);
+    assert_eq!(after_budget.budget.max_minutes, 0);
+    assert_eq!(after_budget.budget.max_tokens, 0);
+    assert_eq!(terminal.phase, RunPhase::Blocked);
+    assert_eq!(terminal.outcome, Some(RunOutcome::BudgetExhausted));
 }

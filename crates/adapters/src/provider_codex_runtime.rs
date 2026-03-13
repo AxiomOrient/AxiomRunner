@@ -51,8 +51,7 @@ impl CodexRuntimeProvider {
         let stale_session = {
             let mut guard = self.active_session.lock().await;
             if let Some(active) = guard.as_ref()
-                && active.cwd == request.cwd
-                && active.model == request.model
+                && can_reuse_session(active.cwd.as_str(), active.model.as_str(), request)
                 && !active.session.is_closed()
             {
                 return Ok(active.session.clone());
@@ -110,6 +109,10 @@ impl CodexRuntimeProvider {
         }
         Ok(())
     }
+}
+
+fn can_reuse_session(active_cwd: &str, active_model: &str, request: &ProviderRequest) -> bool {
+    active_cwd == request.cwd && active_model == request.model
 }
 
 fn cli_bin_from_env() -> PathBuf {
@@ -358,12 +361,37 @@ fn sanitize_detail(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        CodexCliCompatibility, CodexRuntimeProvider, compatibility_for_version,
+        CodexCliCompatibility, CodexRuntimeProvider, can_reuse_session,
+        compatibility_for_version,
         parse_semver_triplet,
     };
     use crate::contracts::{ProviderAdapter, ProviderRequest};
     use crate::test_util::block_on;
+    use std::fs;
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
     use std::path::PathBuf;
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+    fn fake_cli(label: &str, stdout: &str) -> PathBuf {
+        let tick = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or(Duration::from_secs(0))
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "axonrunner-codex-fake-{label}-{}-{tick}.sh",
+            std::process::id()
+        ));
+        fs::write(&path, format!("#!/bin/sh\nprintf '%s\\n' '{}'\n", stdout))
+            .expect("fake cli should be written");
+        #[cfg(unix)]
+        {
+            let mut perms = fs::metadata(&path).expect("metadata should exist").permissions();
+            perms.set_mode(0o755);
+            fs::set_permissions(&path, perms).expect("permissions should be updated");
+        }
+        path
+    }
 
     #[tokio::test]
     async fn codex_runtime_provider_rejects_empty_prompt() {
@@ -413,6 +441,33 @@ mod tests {
     }
 
     #[test]
+    fn codex_runtime_provider_health_reports_blocked_old_version() {
+        let cli = fake_cli("old-version", "codex 0.103.9");
+        let provider = CodexRuntimeProvider::new_with_cli_bin("codek", &cli);
+
+        let report = block_on(provider.health()).expect("health probe should complete");
+
+        assert_eq!(report.status.as_str(), "blocked");
+        assert!(report.detail.contains("version=codex_0.103.9") || report.detail.contains("version=codex 0.103.9"));
+        assert!(report.detail.contains("compatibility=blocked"));
+
+        let _ = fs::remove_file(cli);
+    }
+
+    #[test]
+    fn codex_runtime_provider_health_reports_unknown_version_as_degraded() {
+        let cli = fake_cli("unknown-version", "codex dev-build");
+        let provider = CodexRuntimeProvider::new_with_cli_bin("codek", &cli);
+
+        let report = block_on(provider.health()).expect("health probe should complete");
+
+        assert_eq!(report.status.as_str(), "degraded");
+        assert!(report.detail.contains("compatibility=unknown"));
+
+        let _ = fs::remove_file(cli);
+    }
+
+    #[test]
     fn codex_runtime_version_parser_extracts_semver_triplet() {
         assert_eq!(parse_semver_triplet("codex 0.104.1"), Some((0, 104, 1)));
         assert_eq!(
@@ -440,5 +495,14 @@ mod tests {
             compatibility_for_version("codex unknown"),
             CodexCliCompatibility::Unknown
         );
+    }
+
+    #[test]
+    fn codex_runtime_session_reuse_requires_matching_cwd_and_model() {
+        let request = ProviderRequest::new("gpt-5-codex", "hello", 100, "/tmp/work");
+
+        assert!(can_reuse_session("/tmp/work", "gpt-5-codex", &request));
+        assert!(!can_reuse_session("/tmp/other", "gpt-5-codex", &request));
+        assert!(!can_reuse_session("/tmp/work", "gpt-4.1", &request));
     }
 }

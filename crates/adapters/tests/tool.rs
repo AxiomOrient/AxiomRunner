@@ -1,5 +1,6 @@
 use axonrunner_adapters::{
-    AdapterHealth, SearchMode, ToolAdapter, ToolPolicy, ToolRequest, ToolResult, WorkspaceTool,
+    AdapterHealth, SearchMode, ToolAdapter, ToolPolicy, ToolRequest, ToolResult, ToolRiskTier,
+    WorkspaceTool, classify_tool_request_risk,
 };
 use std::fs;
 use std::path::PathBuf;
@@ -119,6 +120,7 @@ fn workspace_tool_supports_list_read_search_replace_remove_and_run_command() {
         panic!("expected run command result");
     };
     assert_eq!(run.exit_code, 0);
+    assert_eq!(run.profile.as_str(), "generic");
     assert!(!run.stdout.trim().is_empty());
     assert!(!run.stdout_truncated);
     assert!(!run.stderr_truncated);
@@ -362,6 +364,7 @@ fn workspace_tool_truncates_command_output() {
     let ToolResult::RunCommand(run) = run else {
         panic!("expected run command result");
     };
+    assert_eq!(run.profile.as_str(), "generic");
     assert!(run.stdout_truncated);
     assert!(run.stdout.contains("[truncated]"));
 
@@ -533,4 +536,35 @@ fn workspace_tool_rejects_non_utf8_text_mutation() {
     assert!(replace.is_err());
 
     let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn tool_risk_tiers_lock_high_risk_operations() {
+    assert_eq!(
+        classify_tool_request_risk(&ToolRequest::ListFiles {
+            path: String::from("."),
+        }),
+        ToolRiskTier::Low
+    );
+    assert_eq!(
+        classify_tool_request_risk(&ToolRequest::FileWrite {
+            path: String::from("notes.txt"),
+            contents: String::from("alpha"),
+            append: false,
+        }),
+        ToolRiskTier::Medium
+    );
+    assert_eq!(
+        classify_tool_request_risk(&ToolRequest::RemovePath {
+            path: String::from("notes.txt"),
+        }),
+        ToolRiskTier::High
+    );
+    assert_eq!(
+        classify_tool_request_risk(&ToolRequest::RunCommand {
+            program: String::from("git"),
+            args: vec![String::from("status")],
+        }),
+        ToolRiskTier::High
+    );
 }

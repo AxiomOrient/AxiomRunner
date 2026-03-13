@@ -60,8 +60,17 @@ cargo build
 
 ## 6. High-risk Tool Operations
 
+위험도는 아래 3단계로 본다.
+
+- `low`: `list_files`, `read_file`, `search_files`
+- `medium`: 작은 `file_write`, bounded `replace_in_file`, 일반 `run_command`
+- `high`: `remove_path`, 큰 `file_write`, 큰 `replace_in_file`, `git` 같은 파급력 큰 `run_command`
+
+추가 규칙:
+
 - `remove_path`: 삭제 전 evidence artifact와 trace/report 설명이 남아야 한다.
 - `run_command`: allowlisted program만 실행되며 command artifact가 남아야 한다.
+- `high` 작업은 이후 approval policy가 붙을 때 기본 심사 대상이 된다.
 
 ## 7. Async Host
 

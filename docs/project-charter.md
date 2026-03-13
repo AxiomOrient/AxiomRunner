@@ -4,6 +4,18 @@
 
 AxonRunner is a minimal event-sourced CLI agent runtime.
 
+## Transition Target
+
+The current contract remains the retained CLI runtime surface below.
+The next product target is a single-workspace autonomous agent that can
+plan, act, verify, repair, and report against an explicit goal contract.
+
+Transition references:
+
+- `docs/AUTONOMOUS_AGENT_TARGET.md`
+- `docs/AUTONOMOUS_AGENT_SPEC.md`
+- `docs/DOCS_ALIGNMENT.md`
+
 ## Retained Surface
 
 - `run`

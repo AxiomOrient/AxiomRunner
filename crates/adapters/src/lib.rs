@@ -13,12 +13,12 @@ pub(crate) mod tool_write;
 
 pub use contracts::*;
 pub use error::*;
-pub use memory::build_contract_memory;
+pub use memory::{MemoryTier, build_contract_memory, detect_memory_tier, tiered_memory_key};
 pub use provider_registry::{
     DEFAULT_PROVIDER_ID, ProviderRegistryEntry, build_contract_provider, provider_registry,
     resolve_provider_id,
 };
-pub use tool::WorkspaceTool;
+pub use tool::{ToolRiskTier, WorkspaceTool, classify_tool_request_risk};
 
 #[cfg(test)]
 pub(crate) mod test_util {

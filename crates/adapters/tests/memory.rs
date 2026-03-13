@@ -6,7 +6,9 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use axonrunner_adapters::MemoryAdapter;
 use axonrunner_adapters::contracts::AdapterHealth;
-use axonrunner_adapters::memory::{MarkdownMemoryAdapter, SqliteMemoryAdapter};
+use axonrunner_adapters::memory::{
+    MarkdownMemoryAdapter, MemoryTier, SqliteMemoryAdapter, detect_memory_tier, tiered_memory_key,
+};
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(0);
 
@@ -229,6 +231,13 @@ fn markdown_memory_performance_smoke_small() {
     );
 
     cleanup_file(&file_path);
+}
+
+#[test]
+fn memory_tier_helpers_split_working_and_recall_namespaces() {
+    assert_eq!(tiered_memory_key(MemoryTier::Recall, "last_run/cli-1"), "recall:last_run/cli-1");
+    assert_eq!(detect_memory_tier("recall:last_run/cli-1"), MemoryTier::Recall);
+    assert_eq!(detect_memory_tier("alpha"), MemoryTier::Working);
 }
 
 fn temp_path(prefix: &str, ext: &str) -> PathBuf {
