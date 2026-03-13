@@ -16,6 +16,7 @@ pub struct RuntimeStateSnapshot {
     pub state: AgentState,
     pub next_intent_seq: u64,
     pub next_run_seq: u64,
+    pub pending_run: Option<PendingRunSnapshot>,
 }
 
 impl Default for RuntimeStateSnapshot {
@@ -24,8 +25,18 @@ impl Default for RuntimeStateSnapshot {
             state: AgentState::default(),
             next_intent_seq: 0,
             next_run_seq: 0,
+            pending_run: None,
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingRunSnapshot {
+    pub run_id: String,
+    pub intent_id: String,
+    pub goal_file_path: String,
+    pub phase: String,
+    pub reason: String,
 }
 
 #[derive(Debug, Clone)]
@@ -141,6 +152,29 @@ fn serialize_snapshot(snapshot: &RuntimeStateSnapshot) -> String {
         format!("audit_count={}", snapshot.state.audit_count),
     ];
 
+    if let Some(pending_run) = &snapshot.pending_run {
+        lines.push(format!(
+            "pending_run.run_id={}",
+            hex_encode(pending_run.run_id.as_bytes())
+        ));
+        lines.push(format!(
+            "pending_run.intent_id={}",
+            hex_encode(pending_run.intent_id.as_bytes())
+        ));
+        lines.push(format!(
+            "pending_run.goal_file_path={}",
+            hex_encode(pending_run.goal_file_path.as_bytes())
+        ));
+        lines.push(format!(
+            "pending_run.phase={}",
+            hex_encode(pending_run.phase.as_bytes())
+        ));
+        lines.push(format!(
+            "pending_run.reason={}",
+            hex_encode(pending_run.reason.as_bytes())
+        ));
+    }
+
     for (key, value) in &snapshot.state.facts {
         lines.push(format!(
             "fact.{}={}",
@@ -157,6 +191,14 @@ fn parse_snapshot(raw: &str) -> Result<RuntimeStateSnapshot, String> {
     let mut snapshot = RuntimeStateSnapshot::default();
     let mut saw_version = false;
     let mut facts = BTreeMap::new();
+    let mut pending_run = PendingRunSnapshot {
+        run_id: String::new(),
+        intent_id: String::new(),
+        goal_file_path: String::new(),
+        phase: String::new(),
+        reason: String::new(),
+    };
+    let mut saw_pending_run = false;
 
     for (index, raw_line) in raw.lines().enumerate() {
         let line = raw_line.trim();
@@ -174,6 +216,27 @@ fn parse_snapshot(raw: &str) -> Result<RuntimeStateSnapshot, String> {
             let value = decode_hex_utf8(value)
                 .ok_or_else(|| format!("invalid fact value encoding on line {}", index + 1))?;
             facts.insert(key, value);
+            continue;
+        }
+
+        if let Some(pending_key) = key.strip_prefix("pending_run.") {
+            let decoded = decode_hex_utf8(value)
+                .ok_or_else(|| format!("invalid pending run field encoding on line {}", index + 1))?;
+            saw_pending_run = true;
+            match pending_key {
+                "run_id" => pending_run.run_id = decoded,
+                "intent_id" => pending_run.intent_id = decoded,
+                "goal_file_path" => pending_run.goal_file_path = decoded,
+                "phase" => pending_run.phase = decoded,
+                "reason" => pending_run.reason = decoded,
+                _ => {
+                    return Err(format!(
+                        "unknown pending run key '{}' on line {}",
+                        pending_key,
+                        index + 1
+                    ));
+                }
+            }
             continue;
         }
 
@@ -220,6 +283,9 @@ fn parse_snapshot(raw: &str) -> Result<RuntimeStateSnapshot, String> {
     snapshot.state.facts = facts;
     if snapshot.next_run_seq == 0 {
         snapshot.next_run_seq = snapshot.next_intent_seq;
+    }
+    if saw_pending_run {
+        snapshot.pending_run = Some(pending_run);
     }
     Ok(snapshot)
 }

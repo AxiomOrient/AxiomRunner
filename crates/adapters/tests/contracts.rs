@@ -1,7 +1,8 @@
 use axonrunner_adapters::{
     FileMutationEvidence, FileWriteOutput, ListFilesOutput, ReadFileOutput, RemovePathOutput,
     ReplaceInFileOutput, RunCommandOutput, RunCommandProfile, SearchFilesOutput, SearchMatch,
-    SearchMode, ToolRequest, ToolResult,
+    SearchMode, ToolRequest, ToolResult, WorkflowPackAllowedTool, WorkflowPackContract,
+    WorkflowPackRiskPolicy, WorkflowPackVerifierRule,
 };
 use std::path::PathBuf;
 
@@ -125,4 +126,62 @@ fn tool_contract_mutation_outputs_keep_evidence_fields() {
     assert_eq!(run.program, "cargo");
     assert_eq!(run.profile, RunCommandProfile::Test);
     assert!(!run.stdout_truncated);
+}
+
+#[test]
+fn workflow_pack_contract_docs_lock_manifest_and_ownership_rules() {
+    let docs = include_str!("../../../docs/transition/WORKFLOW_PACK_CONTRACT.md");
+
+    for token in [
+        "pack_id",
+        "version",
+        "entry_goal",
+        "planner_hints",
+        "allowed_tools",
+        "verifier_rules",
+        "risk_policy",
+        "resume",
+        "abort",
+        "status",
+        "replay",
+    ] {
+        assert!(docs.contains(token), "workflow pack docs missing token: {token}");
+    }
+}
+
+#[test]
+fn workflow_pack_contract_shape_stays_explicit() {
+    let contract = WorkflowPackContract {
+        pack_id: String::from("rust-service-basic"),
+        version: String::from("1"),
+        description: String::from("bounded Rust service workflow"),
+        entry_goal: String::from("implement one bounded Rust service task"),
+        planner_hints: vec![String::from("prefer cargo-first verification")],
+        allowed_tools: vec![
+            WorkflowPackAllowedTool {
+                operation: String::from("read_file"),
+                scope: String::from("workspace"),
+            },
+            WorkflowPackAllowedTool {
+                operation: String::from("run_command"),
+                scope: String::from("workspace"),
+            },
+        ],
+        verifier_rules: vec![WorkflowPackVerifierRule {
+            label: String::from("cargo test"),
+            profile: RunCommandProfile::Test,
+            command_example: String::from("cargo test"),
+            artifact_expectation: String::from("test artifact exists"),
+            required: true,
+        }],
+        risk_policy: WorkflowPackRiskPolicy {
+            approval_mode: String::from("on-risk"),
+            max_mutating_steps: 8,
+        },
+    };
+
+    assert_eq!(contract.validate(), Ok(()));
+    assert_eq!(contract.allowed_tools[0].operation, "read_file");
+    assert_eq!(contract.verifier_rules[0].profile, RunCommandProfile::Test);
+    assert_eq!(contract.risk_policy.approval_mode, "on-risk");
 }

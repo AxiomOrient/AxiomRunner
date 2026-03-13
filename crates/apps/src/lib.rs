@@ -8,11 +8,13 @@ mod config_loader;
 mod dev_guard;
 mod doctor;
 mod env_util;
+mod goal_file;
 mod replay;
 mod runtime_compose;
 mod state_store;
 mod status;
 mod trace_store;
+mod workspace_lock;
 
 pub mod async_runtime_host;
 pub mod cli_command;

@@ -19,13 +19,15 @@
 | 영역 | capability | 상태 | release 기준 |
 |---|---|---|---|
 | CLI | `run` | Core | must pass |
-| CLI | `batch` | Core | must pass |
+| CLI | `resume` | Core | must pass |
+| CLI | `abort` | Core | must pass |
 | CLI | `doctor` | Core | must pass |
 | CLI | `replay` | Core | must pass |
 | CLI | `status` | Core | must pass |
 | CLI | `health` | Core | must pass |
 | CLI | `help` | Core | must pass |
-| CLI alias | `read/write/remove/freeze/halt` | Core | must pass |
+| CLI compat | `batch` | Core | must pass |
+| CLI alias | `read/write/remove/freeze/halt` | Compatibility | should pass |
 | State | persisted state snapshot (`revision/mode/facts`) | Core | must pass |
 | Provider | `codek` | Core | must pass |
 | Provider | `mock-local` | Core | must pass |
@@ -62,13 +64,20 @@
 ### 허용
 
 ```bash
-axonrunner_apps run <intent-spec>
-axonrunner_apps batch [--reset-state] <intent-spec>...
+axonrunner_apps run <goal-file>
 axonrunner_apps doctor [--json]
-axonrunner_apps replay <intent-id|latest>
-axonrunner_apps status
+axonrunner_apps replay [run-id|latest]
+axonrunner_apps status [run-id|latest]
+axonrunner_apps resume [run-id|latest]
+axonrunner_apps abort [run-id|latest]
 axonrunner_apps health
 axonrunner_apps help
+```
+
+### compatibility surface
+
+```bash
+axonrunner_apps batch [--reset-state] <intent-spec>...
 ```
 
 ### 유지되는 thin alias
@@ -155,13 +164,21 @@ axonrunner_apps halt
 
 아래 중 하나라도 깨지면 release 금지다.
 
-- `run` 또는 `batch` 또는 `replay` 핵심 경로 실패
+- `run` 또는 `status` 또는 `replay` 또는 `resume` 또는 `abort` 핵심 경로 실패
 - provider blocked/failure가 success처럼 보임
 - persisted `freeze`/`halt` 의미가 깨짐
 - workspace boundary 우회 가능
 - allowlist 우회 가능
 - report artifact가 남지 않음
 - README/help/DEPLOYMENT/charter/capability matrix 불일치
+- autonomous eval corpus가 representative run을 통과하지 못함
+- replay quality가 step journal / changed paths / failure visibility를 잃음
+
+release evidence 기본 묶음:
+
+- `cargo test -p axonrunner_apps --test autonomous_eval_corpus`
+- `cargo test -p axonrunner_apps --test release_security_gate`
+- `cargo test -p axonrunner_adapters`
 
 ## 10. Transition References
 

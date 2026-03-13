@@ -4,29 +4,44 @@ use crate::trace_store::TraceStore;
 pub fn execute_replay(config: &AppConfig, target: &str) -> Result<(), String> {
     let store = TraceStore::from_workspace_root(config.workspace.clone())?;
 
-    let (summary, latest) = if target == "latest" {
+    let (summary, latest, artifact_index) = if target == "latest" {
         let summary = store.replay_summary()?;
         let latest = store
             .latest_event()?
             .ok_or_else(|| String::from("replay target not found: latest"))?;
-        (summary, latest)
+        let artifact_index = store.artifact_index()?;
+        (summary, latest, artifact_index)
     } else {
-        let summary = store
-            .replay_summary_for_intent(target)?
-            .ok_or_else(|| format!("replay target not found: {target}"))?;
-        let latest = store
-            .latest_event_for_intent(target)?
-            .ok_or_else(|| format!("replay target not found: {target}"))?;
-        (summary, latest)
-    };
-    let artifact_index = if target == "latest" {
-        store.artifact_index()?
-    } else {
-        let latest_entry = store
-            .artifact_index_for_intent(target)?
-            .ok_or_else(|| format!("replay target not found: {target}"))?;
-        crate::trace_store::TraceArtifactIndex {
-            entries: vec![latest_entry],
+        if let Some(summary) = store.replay_summary_for_intent(target)? {
+            let latest = store
+                .latest_event_for_intent(target)?
+                .ok_or_else(|| format!("replay target not found: {target}"))?;
+            let latest_entry = store
+                .artifact_index_for_intent(target)?
+                .ok_or_else(|| format!("replay target not found: {target}"))?;
+            (
+                summary,
+                latest,
+                crate::trace_store::TraceArtifactIndex {
+                    entries: vec![latest_entry],
+                },
+            )
+        } else if let Some(summary) = store.replay_summary_for_run(target)? {
+            let latest = store
+                .latest_event_for_run(target)?
+                .ok_or_else(|| format!("replay target not found: {target}"))?;
+            let latest_entry = store
+                .artifact_index_for_run(target)?
+                .ok_or_else(|| format!("replay target not found: {target}"))?;
+            (
+                summary,
+                latest,
+                crate::trace_store::TraceArtifactIndex {
+                    entries: vec![latest_entry],
+                },
+            )
+        } else {
+            return Err(format!("replay target not found: {target}"));
         }
     };
 
@@ -64,6 +79,17 @@ pub fn execute_replay(config: &AppConfig, target: &str) -> Result<(), String> {
                 run.step_ids.join(",")
             }
         );
+        for step in &run.step_journal {
+            println!(
+                "replay step id={} phase={} status={} label={} evidence={} failure={}",
+                step.id,
+                step.phase,
+                step.status,
+                step.label,
+                step.evidence,
+                step.failure.as_deref().unwrap_or("none")
+            );
+        }
     }
     println!(
         "replay artifacts plan={} apply={} verify={} report={}",

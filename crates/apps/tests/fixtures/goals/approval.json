@@ -1,0 +1,13 @@
+{
+  "summary": "Fixture approval goal",
+  "workspace_root": "/workspace",
+  "constraints": [],
+  "done_conditions": [
+    { "label": "report", "evidence": "report artifact exists" }
+  ],
+  "verification_checks": [
+    { "label": "release gate", "detail": "cargo test -p axonrunner_apps --test release_security_gate" }
+  ],
+  "budget": { "max_steps": 5, "max_minutes": 10, "max_tokens": 8000 },
+  "approval_mode": "always"
+}

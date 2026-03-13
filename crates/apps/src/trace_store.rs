@@ -1,6 +1,6 @@
 use crate::runtime_compose::{
-    RuntimeComposeExecution, RuntimeComposePatchArtifact, RuntimeRunRecord, run_outcome_name,
-    run_phase_name,
+    RuntimeComposeExecution, RuntimeComposePatchArtifact, RuntimeRunRecord, RuntimeRunStepRecord,
+    run_outcome_name, run_phase_name,
 };
 use axonrunner_core::{AgentState, DecisionOutcome};
 use serde::{Deserialize, Serialize};
@@ -65,6 +65,8 @@ pub struct TraceRepairSummary {
 pub struct TraceRunSummary {
     pub run_id: String,
     pub step_ids: Vec<String>,
+    #[serde(default)]
+    pub step_journal: Vec<TraceRunStepSummary>,
     pub provider_cwd: String,
     pub phase: String,
     pub outcome: String,
@@ -72,6 +74,17 @@ pub struct TraceRunSummary {
     pub plan_summary: String,
     pub planned_steps: usize,
     pub repair: TraceRepairSummary,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TraceRunStepSummary {
+    pub id: String,
+    pub label: String,
+    pub phase: String,
+    pub status: String,
+    pub evidence: String,
+    #[serde(default)]
+    pub failure: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -168,11 +181,16 @@ impl TraceStore {
                 "stage": stage,
                 "message": message,
             })),
-            "verification": verification_summary(execution, report_written, report_error),
+            "verification": verification_summary(execution, run, report_error),
             "patch_artifacts": patch_artifacts.iter().map(trace_patch_artifact).collect::<Vec<_>>(),
             "run": {
                 "run_id": run.plan.run_id,
                 "step_ids": run.plan.steps.iter().map(|step| step.id.clone()).collect::<Vec<_>>(),
+                "step_journal": run
+                    .step_journal
+                    .iter()
+                    .map(trace_run_step_summary)
+                    .collect::<Vec<_>>(),
                 "provider_cwd": execution.provider_cwd,
                 "phase": run_phase_name(run.phase),
                 "outcome": run_outcome_name(run.outcome),
@@ -221,6 +239,18 @@ impl TraceStore {
         summarize_events(filtered).map(Some)
     }
 
+    pub fn replay_summary_for_run(&self, run_id: &str) -> Result<Option<ReplaySummary>, String> {
+        let filtered = self
+            .load_events()?
+            .into_iter()
+            .filter(|event| event_has_run_id(event, run_id))
+            .collect::<Vec<_>>();
+        if filtered.is_empty() {
+            return Ok(None);
+        }
+        summarize_events(filtered).map(Some)
+    }
+
     pub fn latest_event(&self) -> Result<Option<TraceIntentEvent>, String> {
         Ok(self.load_events()?.into_iter().last())
     }
@@ -233,6 +263,14 @@ impl TraceStore {
             .load_events()?
             .into_iter()
             .filter(|event| event.intent_id == intent_id)
+            .last())
+    }
+
+    pub fn latest_event_for_run(&self, run_id: &str) -> Result<Option<TraceIntentEvent>, String> {
+        Ok(self
+            .load_events()?
+            .into_iter()
+            .filter(|event| event_has_run_id(event, run_id))
             .last())
     }
 
@@ -252,6 +290,17 @@ impl TraceStore {
             .load_events()?
             .into_iter()
             .find(|event| event.intent_id == intent_id)
+            .map(artifact_entry_from_event))
+    }
+
+    pub fn artifact_index_for_run(
+        &self,
+        run_id: &str,
+    ) -> Result<Option<TraceArtifactEntry>, String> {
+        Ok(self
+            .load_events()?
+            .into_iter()
+            .find(|event| event_has_run_id(event, run_id))
             .map(artifact_entry_from_event))
     }
 }
@@ -359,6 +408,14 @@ fn summarize_events(events: Vec<TraceIntentEvent>) -> Result<ReplaySummary, Stri
     })
 }
 
+fn event_has_run_id(event: &TraceIntentEvent, run_id: &str) -> bool {
+    event
+        .run
+        .as_ref()
+        .map(|run| run.run_id == run_id)
+        .unwrap_or(false)
+}
+
 fn build_artifact_index(events: Vec<TraceIntentEvent>) -> TraceArtifactIndex {
     TraceArtifactIndex {
         entries: events.into_iter().map(artifact_entry_from_event).collect(),
@@ -389,7 +446,7 @@ fn default_trace_verification() -> TraceVerificationSummary {
 
 fn verification_summary(
     execution: &RuntimeComposeExecution,
-    report_written: bool,
+    run: &RuntimeRunRecord,
     report_error: Option<&str>,
 ) -> TraceVerificationSummary {
     if let Some((stage, message)) = execution.first_failure() {
@@ -404,15 +461,9 @@ fn verification_summary(
             summary: format!("stage=report,message={message}"),
         };
     }
-    if report_written {
-        return TraceVerificationSummary {
-            status: String::from("passed"),
-            summary: String::from("report_written=true"),
-        };
-    }
     TraceVerificationSummary {
-        status: String::from("failed"),
-        summary: String::from("report_written=false"),
+        status: run.verification.status.to_owned(),
+        summary: run.verification.summary.clone(),
     }
 }
 
@@ -426,6 +477,17 @@ fn trace_patch_artifact(artifact: &RuntimeComposePatchArtifact) -> TracePatchArt
         before_excerpt: artifact.before_excerpt.clone(),
         after_excerpt: artifact.after_excerpt.clone(),
         unified_diff: artifact.unified_diff.clone(),
+    }
+}
+
+fn trace_run_step_summary(step: &RuntimeRunStepRecord) -> TraceRunStepSummary {
+    TraceRunStepSummary {
+        id: step.id.clone(),
+        label: step.label.clone(),
+        phase: step.phase.clone(),
+        status: step.status.clone(),
+        evidence: step.evidence.clone(),
+        failure: step.failure.clone(),
     }
 }
 
@@ -505,6 +567,14 @@ mod tests {
                     format!("run-for-{intent_id}/step-3-executing"),
                     format!("run-for-{intent_id}/step-4-verifying"),
                 ],
+                step_journal: vec![TraceRunStepSummary {
+                    id: format!("run-for-{intent_id}/step-1-planning"),
+                    label: String::from("prepare bounded write"),
+                    phase: String::from("planning"),
+                    status: String::from("completed"),
+                    evidence: String::from("intent_id=cli-1"),
+                    failure: None,
+                }],
                 provider_cwd: String::from("/tmp/workspace"),
                 phase: if failed {
                     String::from("failed")

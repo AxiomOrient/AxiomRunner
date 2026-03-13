@@ -2,7 +2,7 @@
 
 ## Purpose
 
-AxonRunner is a minimal event-sourced CLI agent runtime.
+AxonRunner is a goal-file oriented CLI agent runtime.
 
 ## Transition Target
 
@@ -19,12 +19,14 @@ Transition references:
 ## Retained Surface
 
 - `run`
-- `batch`
-- `doctor`
-- `replay`
 - `status`
+- `replay`
+- `resume`
+- `abort`
+- `doctor`
 - `health`
 - `help`
+- compatibility: `batch`
 - legacy aliases: `read`, `write`, `remove`, `freeze`, `halt`
 
 ## Non-goals

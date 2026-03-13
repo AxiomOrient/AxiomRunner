@@ -22,6 +22,20 @@ impl RunBudget {
             max_tokens,
         }
     }
+
+    pub fn validate(&self) -> Result<(), RunGoalValidationError> {
+        if self.max_steps == 0 {
+            return Err(RunGoalValidationError::BudgetStepsZero);
+        }
+        if self.max_minutes == 0 {
+            return Err(RunGoalValidationError::BudgetMinutesZero);
+        }
+        if self.max_tokens == 0 {
+            return Err(RunGoalValidationError::BudgetTokensZero);
+        }
+
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -51,6 +65,76 @@ pub struct RunGoal {
     pub verification_checks: Vec<VerificationCheck>,
     pub budget: RunBudget,
     pub approval_mode: RunApprovalMode,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RunGoalValidationError {
+    SummaryEmpty,
+    WorkspaceRootEmpty,
+    ConstraintLabelEmpty { index: usize },
+    ConstraintDetailEmpty { index: usize },
+    DoneConditionsEmpty,
+    DoneConditionLabelEmpty { index: usize },
+    DoneConditionEvidenceEmpty { index: usize },
+    VerificationChecksEmpty,
+    VerificationCheckLabelEmpty { index: usize },
+    VerificationCheckDetailEmpty { index: usize },
+    BudgetStepsZero,
+    BudgetMinutesZero,
+    BudgetTokensZero,
+}
+
+impl RunGoal {
+    pub fn validate(&self) -> Result<(), RunGoalValidationError> {
+        ensure_not_blank(self.summary.as_str(), RunGoalValidationError::SummaryEmpty)?;
+        ensure_not_blank(
+            self.workspace_root.as_str(),
+            RunGoalValidationError::WorkspaceRootEmpty,
+        )?;
+
+        for (index, constraint) in self.constraints.iter().enumerate() {
+            ensure_not_blank(
+                constraint.label.as_str(),
+                RunGoalValidationError::ConstraintLabelEmpty { index },
+            )?;
+            ensure_not_blank(
+                constraint.detail.as_str(),
+                RunGoalValidationError::ConstraintDetailEmpty { index },
+            )?;
+        }
+
+        if self.done_conditions.is_empty() {
+            return Err(RunGoalValidationError::DoneConditionsEmpty);
+        }
+        for (index, done_condition) in self.done_conditions.iter().enumerate() {
+            ensure_not_blank(
+                done_condition.label.as_str(),
+                RunGoalValidationError::DoneConditionLabelEmpty { index },
+            )?;
+            ensure_not_blank(
+                done_condition.evidence.as_str(),
+                RunGoalValidationError::DoneConditionEvidenceEmpty { index },
+            )?;
+        }
+
+        if self.verification_checks.is_empty() {
+            return Err(RunGoalValidationError::VerificationChecksEmpty);
+        }
+        for (index, verification_check) in self.verification_checks.iter().enumerate() {
+            ensure_not_blank(
+                verification_check.label.as_str(),
+                RunGoalValidationError::VerificationCheckLabelEmpty { index },
+            )?;
+            ensure_not_blank(
+                verification_check.detail.as_str(),
+                RunGoalValidationError::VerificationCheckDetailEmpty { index },
+            )?;
+        }
+
+        self.budget.validate()?;
+
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

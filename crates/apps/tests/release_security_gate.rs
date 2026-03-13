@@ -1,6 +1,9 @@
 #[path = "../src/cli_command.rs"]
 #[allow(dead_code)]
 mod cli_command;
+#[path = "../src/goal_file.rs"]
+#[allow(dead_code)]
+mod goal_file;
 #[path = "../src/config_loader.rs"]
 #[allow(dead_code)]
 mod config_loader;
@@ -160,7 +163,7 @@ fn release_security_gate_truth_surface_docs_match_retained_commands() {
     let charter = include_str!("../../../docs/project-charter.md");
 
     for command in [
-        "run", "batch", "doctor", "replay", "status", "health", "help",
+        "run", "status", "replay", "resume", "abort", "doctor", "health", "help",
     ] {
         assert!(
             USAGE.contains(command),
@@ -183,13 +186,23 @@ fn release_security_gate_truth_surface_docs_match_retained_commands() {
             "charter missing command: {command}"
         );
     }
+
+    assert!(USAGE.contains("compatibility:"), "cli usage missing compatibility section");
+    assert!(readme.contains("compatibility"), "README missing compatibility section");
+    assert!(
+        capability_matrix.contains("compatibility"),
+        "capability matrix missing compatibility section"
+    );
+    assert!(runbook.contains("compatibility"), "runbook missing compatibility section");
 }
 
 #[test]
 fn release_security_gate_transition_docs_lock_autonomous_target_contract() {
+    let readme = include_str!("../../../README.md");
     let target = include_str!("../../../docs/AUTONOMOUS_AGENT_TARGET.md");
     let spec = include_str!("../../../docs/AUTONOMOUS_AGENT_SPEC.md");
     let alignment = include_str!("../../../docs/DOCS_ALIGNMENT.md");
+    let transition = include_str!("../../../docs/transition/README.md");
 
     for token in ["run <goal>", "resume", "abort", "goal", "approval", "trace"] {
         assert!(
@@ -219,6 +232,29 @@ fn release_security_gate_transition_docs_lock_autonomous_target_contract() {
         assert!(
             alignment.contains(token),
             "docs alignment missing token: {token}"
+        );
+    }
+
+    for doc in [readme, target, alignment] {
+        assert!(
+            doc.contains("docs/transition/README.md"),
+            "root transition references must point at docs/transition/README.md"
+        );
+        assert!(
+            !doc.contains("docs/roadmap/"),
+            "root transition references must not point at deleted docs/roadmap paths"
+        );
+    }
+
+    for token in [
+        "current truth",
+        "transition",
+        "review bundle",
+        "AxonRunner",
+    ] {
+        assert!(
+            transition.contains(token),
+            "transition index missing token: {token}"
         );
     }
 }

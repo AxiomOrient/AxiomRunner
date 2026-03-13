@@ -21,15 +21,24 @@ global-options:
   --actor=<id>  (default: system)
 
 commands:
-  run <intent-spec>
+  run <goal-file>
+  status [run-id|latest]
+  replay [run-id|latest]
+  resume [run-id|latest]
+  abort [run-id|latest]
   doctor [--json]
-  replay <intent-id|latest>
-  status
-  batch [--reset-state] <intent-spec>...
   health
   help
 
-intent-spec:
+compatibility:
+  batch [--reset-state] <intent-spec>...
+  read <key>
+  write <key> <value>
+  remove <key>
+  freeze
+  halt
+
+legacy intent-spec:
   read:<key>
   write:<key>=<value>
   remove:<key>
@@ -249,6 +258,8 @@ fn e2e_cli_run_composes_provider_memory_and_tool() {
     assert!(verify.contains("first_failure=none"));
     assert!(verify.contains("status=passed"));
     assert!(verify.contains("repair_status=skipped"));
+    assert!(verify.contains("state_fact=alpha:42"));
+    assert!(verify.contains("changed_paths="));
     let trace_event: serde_json::Value =
         serde_json::from_str(trace.lines().last().expect("trace line should exist"))
             .expect("trace line should be valid json");
@@ -302,6 +313,8 @@ fn e2e_cli_replay_latest_summarizes_recent_trace() {
     assert!(stdout.contains("replay run run_id=run-1 phase=completed outcome=success"));
     assert!(stdout.contains("replay repair attempted=false status=skipped"));
     assert!(stdout.contains("run-1/step-1-planning"));
+    assert!(stdout.contains("replay step id="));
+    assert!(stdout.contains("phase=verifying"));
     assert!(stdout.contains("artifacts"));
     assert!(stdout.contains("replay artifact_index count=1"));
     assert!(stdout.contains("replay patch target="));
@@ -341,6 +354,311 @@ fn e2e_cli_status_and_health_are_minimal() {
     assert!(health_stdout.contains("provider_state=ready"));
 
     let _ = fs::remove_dir_all(workspace);
+}
+
+#[test]
+fn e2e_cli_goal_file_run_persists_run_id_and_supports_status_and_replay_by_run_id() {
+    let workspace = unique_path("goal-file-workspace", "dir");
+    let goal_file = unique_path("goal-file", "json");
+    fs::write(
+        &goal_file,
+        r#"{
+  "summary": "Ship one bounded goal package",
+  "workspace_root": "/workspace",
+  "constraints": [
+    { "label": "non-goal", "detail": "no multi-agent orchestration" }
+  ],
+  "done_conditions": [
+    { "label": "report", "evidence": "report artifact exists" }
+  ],
+  "verification_checks": [
+    { "label": "release gate", "detail": "cargo test -p axonrunner_apps --test release_security_gate" }
+  ],
+  "budget": { "max_steps": 5, "max_minutes": 10, "max_tokens": 8000 },
+  "approval_mode": "on-risk"
+}"#,
+    )
+    .expect("goal file should be written");
+
+    let run = run_cli_with_env(
+        &["run", path_str(&goal_file)],
+        &[("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
+        "goal-file-run",
+    );
+    let run_stdout = stdout_of(&run);
+    let run_stderr = stderr_of(&run);
+
+    assert!(run.status.success(), "stderr:\n{run_stderr}");
+    assert!(run_stdout.contains("intent id=cli-1 kind=goal outcome=accepted"));
+    assert!(run_stdout.contains(
+        "run intent_id=cli-1 phase=blocked outcome=blocked reason=goal_file_ingested_execution_pending"
+    ));
+
+    let status = run_cli_with_env(
+        &["status", "run-1"],
+        &[("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
+        "goal-file-status",
+    );
+    let replay = run_cli_with_env(
+        &["replay", "run-1"],
+        &[("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
+        "goal-file-replay",
+    );
+
+    assert!(status.status.success());
+    assert!(replay.status.success());
+    assert!(stdout_of(&status).contains("status run run_id=run-1 phase=blocked outcome=blocked"));
+    assert!(stdout_of(&replay).contains("replay run run_id=run-1 phase=blocked outcome=blocked"));
+    assert!(stdout_of(&replay).contains("replay verification status=passed summary=goal_contract_validated"));
+    assert!(stdout_of(&replay).contains("replay step id="));
+    assert!(stdout_of(&replay).contains("label=validate goal contract"));
+    assert!(
+        fs::read_to_string(workspace.join(".axonrunner/artifacts/cli-1.plan.md"))
+            .expect("plan artifact should exist")
+            .contains("goal=Ship one bounded goal package")
+    );
+
+    let _ = fs::remove_dir_all(workspace);
+    let _ = fs::remove_file(goal_file);
+}
+
+#[test]
+fn e2e_cli_goal_file_approval_can_resume_from_pending_run() {
+    let workspace = unique_path("goal-file-approval-workspace", "dir");
+    let state_path = unique_path("goal-file-approval-state", "snapshot");
+    let goal_file = unique_path("goal-file-approval", "json");
+    fs::write(
+        &goal_file,
+        r#"{
+  "summary": "Wait for approval before execution",
+  "workspace_root": "/workspace",
+  "constraints": [],
+  "done_conditions": [
+    { "label": "report", "evidence": "report artifact exists" }
+  ],
+  "verification_checks": [
+    { "label": "release gate", "detail": "cargo test -p axonrunner_apps --test release_security_gate" }
+  ],
+  "budget": { "max_steps": 5, "max_minutes": 10, "max_tokens": 8000 },
+  "approval_mode": "always"
+}"#,
+    )
+    .expect("goal file should be written");
+
+    let run = run_cli_with_env(
+        &["run", path_str(&goal_file)],
+        &[
+            ("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace)),
+            ("AXONRUNNER_RUNTIME_STATE_PATH", path_str(&state_path)),
+        ],
+        "goal-file-approval-run",
+    );
+    assert!(run.status.success());
+    assert!(stdout_of(&run).contains(
+        "run intent_id=cli-1 phase=waiting_approval outcome=approval_required reason=approval_required_before_execution"
+    ));
+
+    let resume = run_cli_with_env(
+        &["resume", "run-1"],
+        &[
+            ("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace)),
+            ("AXONRUNNER_RUNTIME_STATE_PATH", path_str(&state_path)),
+        ],
+        "goal-file-approval-resume",
+    );
+    let status = run_cli_with_env(
+        &["status", "run-1"],
+        &[
+            ("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace)),
+            ("AXONRUNNER_RUNTIME_STATE_PATH", path_str(&state_path)),
+        ],
+        "goal-file-approval-status",
+    );
+    let replay = run_cli_with_env(
+        &["replay", "run-1"],
+        &[("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
+        "goal-file-approval-replay",
+    );
+
+    assert!(resume.status.success());
+    assert!(stdout_of(&resume).contains(
+        "resume run_id=run-1 phase=blocked outcome=blocked reason=approval_granted_execution_pending"
+    ));
+    assert!(status.status.success());
+    assert!(stdout_of(&status).contains("status run run_id=run-1 phase=blocked outcome=blocked"));
+    assert!(replay.status.success());
+    assert!(stdout_of(&replay).contains("replay run run_id=run-1 phase=blocked outcome=blocked"));
+
+    let _ = fs::remove_dir_all(workspace);
+    let _ = fs::remove_file(state_path);
+    let _ = fs::remove_file(goal_file);
+}
+
+#[test]
+fn e2e_cli_goal_file_pending_run_can_abort_cleanly() {
+    let workspace = unique_path("goal-file-abort-workspace", "dir");
+    let state_path = unique_path("goal-file-abort-state", "snapshot");
+    let goal_file = unique_path("goal-file-abort", "json");
+    fs::write(
+        &goal_file,
+        r#"{
+  "summary": "Abort pending approval run",
+  "workspace_root": "/workspace",
+  "constraints": [],
+  "done_conditions": [
+    { "label": "report", "evidence": "report artifact exists" }
+  ],
+  "verification_checks": [
+    { "label": "release gate", "detail": "cargo test -p axonrunner_apps --test release_security_gate" }
+  ],
+  "budget": { "max_steps": 5, "max_minutes": 10, "max_tokens": 8000 },
+  "approval_mode": "always"
+}"#,
+    )
+    .expect("goal file should be written");
+
+    let run = run_cli_with_env(
+        &["run", path_str(&goal_file)],
+        &[
+            ("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace)),
+            ("AXONRUNNER_RUNTIME_STATE_PATH", path_str(&state_path)),
+        ],
+        "goal-file-abort-run",
+    );
+    assert!(run.status.success());
+
+    let abort = run_cli_with_env(
+        &["abort", "run-1"],
+        &[
+            ("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace)),
+            ("AXONRUNNER_RUNTIME_STATE_PATH", path_str(&state_path)),
+        ],
+        "goal-file-abort-command",
+    );
+    let status = run_cli_with_env(
+        &["status", "run-1"],
+        &[
+            ("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace)),
+            ("AXONRUNNER_RUNTIME_STATE_PATH", path_str(&state_path)),
+        ],
+        "goal-file-abort-status",
+    );
+    let replay = run_cli_with_env(
+        &["replay", "run-1"],
+        &[("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
+        "goal-file-abort-replay",
+    );
+
+    assert!(abort.status.success());
+    assert!(stdout_of(&abort).contains("abort run_id=run-1 phase=aborted outcome=aborted reason=operator_abort"));
+    assert!(status.status.success());
+    assert!(stdout_of(&status).contains("status run run_id=run-1 phase=aborted outcome=aborted"));
+    assert!(replay.status.success());
+    assert!(stdout_of(&replay).contains("replay run run_id=run-1 phase=aborted outcome=aborted"));
+
+    let _ = fs::remove_dir_all(workspace);
+    let _ = fs::remove_file(state_path);
+    let _ = fs::remove_file(goal_file);
+}
+
+#[test]
+fn e2e_cli_goal_file_blocks_when_step_budget_is_already_exhausted() {
+    let workspace = unique_path("goal-file-budget-workspace", "dir");
+    let goal_file = unique_path("goal-file-budget", "json");
+    fs::write(
+        &goal_file,
+        r#"{
+  "summary": "Budget exhaustion before execution",
+  "workspace_root": "/workspace",
+  "constraints": [],
+  "done_conditions": [
+    { "label": "report", "evidence": "report artifact exists" }
+  ],
+  "verification_checks": [
+    { "label": "release gate", "detail": "cargo test -p axonrunner_apps --test release_security_gate" }
+  ],
+  "budget": { "max_steps": 1, "max_minutes": 10, "max_tokens": 8000 },
+  "approval_mode": "never"
+}"#,
+    )
+    .expect("goal file should be written");
+
+    let run = run_cli_with_env(
+        &["run", path_str(&goal_file)],
+        &[("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
+        "goal-file-budget-run",
+    );
+    let status = run_cli_with_env(
+        &["status", "run-1"],
+        &[("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
+        "goal-file-budget-status",
+    );
+    let replay = run_cli_with_env(
+        &["replay", "run-1"],
+        &[("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
+        "goal-file-budget-replay",
+    );
+
+    assert!(run.status.success());
+    assert!(stdout_of(&run).contains(
+        "run intent_id=cli-1 phase=blocked outcome=budget_exhausted reason=budget_exhausted_before_execution"
+    ));
+    assert!(status.status.success());
+    assert!(stdout_of(&status).contains("status run run_id=run-1 phase=blocked outcome=budget_exhausted"));
+    assert!(replay.status.success());
+    assert!(stdout_of(&replay).contains("replay run run_id=run-1 phase=blocked outcome=budget_exhausted"));
+
+    let _ = fs::remove_dir_all(workspace);
+    let _ = fs::remove_file(goal_file);
+}
+
+#[test]
+fn e2e_cli_workspace_lock_blocks_mutating_commands_but_allows_status_reads() {
+    let workspace = unique_path("workspace-lock-workspace", "dir");
+    fs::create_dir_all(workspace.join(".axonrunner")).expect("lock dir should exist");
+    fs::write(
+        workspace.join(".axonrunner/runtime.lock"),
+        "pid=999 command=run\n",
+    )
+    .expect("lock file should exist");
+
+    let goal_file = unique_path("workspace-lock-goal", "json");
+    fs::write(
+        &goal_file,
+        r#"{
+  "summary": "Blocked by single writer lock",
+  "workspace_root": "/workspace",
+  "constraints": [],
+  "done_conditions": [
+    { "label": "report", "evidence": "report artifact exists" }
+  ],
+  "verification_checks": [
+    { "label": "release gate", "detail": "cargo test -p axonrunner_apps --test release_security_gate" }
+  ],
+  "budget": { "max_steps": 5, "max_minutes": 10, "max_tokens": 8000 },
+  "approval_mode": "never"
+}"#,
+    )
+    .expect("goal file should be written");
+
+    let run = run_cli_with_env(
+        &["run", path_str(&goal_file)],
+        &[("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
+        "workspace-lock-run",
+    );
+    let status = run_cli_with_env(
+        &["status"],
+        &[("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
+        "workspace-lock-status",
+    );
+
+    assert_eq!(run.status.code(), Some(6));
+    assert!(stderr_of(&run).contains("workspace lock is active"));
+    assert!(status.status.success());
+    assert!(stdout_of(&status).contains("status revision=0 mode=active facts=0 denied=0 audit=0"));
+
+    let _ = fs::remove_dir_all(workspace);
+    let _ = fs::remove_file(goal_file);
 }
 
 #[test]

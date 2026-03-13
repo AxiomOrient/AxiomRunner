@@ -1,0 +1,338 @@
+[
+  {
+    "code": "AZ-001",
+    "priority": "P0",
+    "title": "Lock current truth surface across README/charter/capability matrix/runbook/help",
+    "done_when": "done when all public docs and CLI outputs agree on current contract",
+    "proof": "docs + golden text tests"
+  },
+  {
+    "code": "AZ-002",
+    "priority": "P0",
+    "title": "Decide async runtime fallback policy",
+    "done_when": "done when fallback is either removed or explicitly surfaced as blocked/degraded contract",
+    "proof": "doctor + init tests"
+  },
+  {
+    "code": "AZ-003",
+    "priority": "P0",
+    "title": "Create product-owned goal schema spec",
+    "done_when": "done when objective/workspace/constraints/done_conditions/verification/budget/approval are versioned",
+    "proof": "schema tests"
+  },
+  {
+    "code": "AZ-004",
+    "priority": "P0",
+    "title": "Implement goal file parser",
+    "done_when": "done when goal yaml/json/md loads into validated RunGoal input",
+    "proof": "parser tests"
+  },
+  {
+    "code": "AZ-005",
+    "priority": "P0",
+    "title": "Add canonical CLI commands run/resume/abort around goal files",
+    "done_when": "done when help/status/replay support run ids",
+    "proof": "e2e CLI tests"
+  },
+  {
+    "code": "AZ-006",
+    "priority": "P0",
+    "title": "Create run-id based persistence path",
+    "done_when": "done when runs survive process restarts and are addressable by id",
+    "proof": "state/trace tests"
+  },
+  {
+    "code": "AZ-007",
+    "priority": "P0",
+    "title": "Promote RunGoal/RunEvent/RunStatus path into apps runtime",
+    "done_when": "done when autonomous run path uses core run domain directly",
+    "proof": "core/apps integration tests"
+  },
+  {
+    "code": "AZ-008",
+    "priority": "P1",
+    "title": "Define explicit step model",
+    "done_when": "done when each run compiles to inspectable steps with ids/types/status",
+    "proof": "planner tests"
+  },
+  {
+    "code": "AZ-009",
+    "priority": "P1",
+    "title": "Persist step journal into trace",
+    "done_when": "done when replay can render per-step timeline",
+    "proof": "trace tests"
+  },
+  {
+    "code": "AZ-010",
+    "priority": "P1",
+    "title": "Replace shallow tool phase with step executor",
+    "done_when": "done when runtime uses tool adapter operations beyond log/report append",
+    "proof": "e2e step tests"
+  },
+  {
+    "code": "AZ-011",
+    "priority": "P1",
+    "title": "Implement inspect/read/search step handlers",
+    "done_when": "done when planner can gather workspace evidence before mutation",
+    "proof": "tool integration tests"
+  },
+  {
+    "code": "AZ-012",
+    "priority": "P1",
+    "title": "Implement mutate/write/replace/remove step handlers with path expectations",
+    "done_when": "done when mutation steps emit bounded evidence and changed-path summaries",
+    "proof": "mutation tests"
+  },
+  {
+    "code": "AZ-013",
+    "priority": "P1",
+    "title": "Implement verification-command steps",
+    "done_when": "done when cargo/npm/python build/test/lint/typecheck can be attached to milestones",
+    "proof": "command profile tests"
+  },
+  {
+    "code": "AZ-014",
+    "priority": "P1",
+    "title": "Upgrade report artifacts to step-aware plan/apply/verify/report documents",
+    "done_when": "done when reports show milestone/step/evidence/failure boundary",
+    "proof": "artifact golden tests"
+  },
+  {
+    "code": "AZ-015",
+    "priority": "P1",
+    "title": "Implement terminal done-condition evaluation",
+    "done_when": "done when success requires all declared checks to pass",
+    "proof": "goal-run e2e tests"
+  },
+  {
+    "code": "AZ-016",
+    "priority": "P1",
+    "title": "Implement per-milestone verification",
+    "done_when": "done when milestone advancement is impossible without passing checks",
+    "proof": "milestone tests"
+  },
+  {
+    "code": "AZ-017",
+    "priority": "P1",
+    "title": "Implement repair classification",
+    "done_when": "done when verification failures map to retryable/non-retryable classes",
+    "proof": "repair tests"
+  },
+  {
+    "code": "AZ-018",
+    "priority": "P1",
+    "title": "Implement bounded repair loop",
+    "done_when": "done when repair attempts consume explicit budget and stop deterministically",
+    "proof": "repair budget tests"
+  },
+  {
+    "code": "AZ-019",
+    "priority": "P1",
+    "title": "Persist repair attempts and reasons",
+    "done_when": "done when replay/report show repair history",
+    "proof": "replay/report tests"
+  },
+  {
+    "code": "AZ-020",
+    "priority": "P1",
+    "title": "Support operator-readable changed-path and patch preview summaries",
+    "done_when": "done when replay/report show what changed without raw diff overload",
+    "proof": "artifact tests"
+  },
+  {
+    "code": "AZ-021",
+    "priority": "P1",
+    "title": "Wire tool risk tiers into approval gate",
+    "done_when": "done when risky steps pause before execution under on-risk/always",
+    "proof": "approval e2e tests"
+  },
+  {
+    "code": "AZ-022",
+    "priority": "P1",
+    "title": "Implement persisted pending-approval state",
+    "done_when": "done when status/replay show waiting approval with step context",
+    "proof": "state/replay tests"
+  },
+  {
+    "code": "AZ-023",
+    "priority": "P1",
+    "title": "Implement resume after approval",
+    "done_when": "done when approved runs continue from paused step, not restart whole run",
+    "proof": "resume tests"
+  },
+  {
+    "code": "AZ-024",
+    "priority": "P1",
+    "title": "Implement abort semantics",
+    "done_when": "done when abort leaves coherent terminal outcome and report",
+    "proof": "abort tests"
+  },
+  {
+    "code": "AZ-025",
+    "priority": "P1",
+    "title": "Define budget exhaustion semantics",
+    "done_when": "done when step/time/token limits yield budget_exhausted terminal outcome",
+    "proof": "budget tests"
+  },
+  {
+    "code": "AZ-026",
+    "priority": "P1",
+    "title": "Expose budget and approval state in doctor/status/replay",
+    "done_when": "done when operator can inspect run control state easily",
+    "proof": "golden output tests"
+  },
+  {
+    "code": "AZ-027",
+    "priority": "P2",
+    "title": "Define execution isolation strategy (single-writer lockfile or worktree-per-run)",
+    "done_when": "done when concurrency contract is explicit and enforced",
+    "proof": "design doc + tests"
+  },
+  {
+    "code": "AZ-028",
+    "priority": "P2",
+    "title": "Protect state snapshot against concurrent writers",
+    "done_when": "done when multi-process writes are prevented or serialized",
+    "proof": "race tests"
+  },
+  {
+    "code": "AZ-029",
+    "priority": "P2",
+    "title": "Protect trace log append path",
+    "done_when": "done when events.jsonl cannot be corrupted by multi-process append",
+    "proof": "trace concurrency tests"
+  },
+  {
+    "code": "AZ-030",
+    "priority": "P2",
+    "title": "Protect memory backends or document single-writer mode",
+    "done_when": "done when markdown/sqlite behavior is deterministic under chosen contract",
+    "proof": "memory concurrency tests"
+  },
+  {
+    "code": "AZ-031",
+    "priority": "P2",
+    "title": "Serialize or isolate provider session usage",
+    "done_when": "done when active session cannot be asked concurrently unsafely",
+    "proof": "provider concurrency tests"
+  },
+  {
+    "code": "AZ-032",
+    "priority": "P2",
+    "title": "Remove or surface hidden async-host fallback",
+    "done_when": "done when configured runtime init failure is operator-visible and policy-consistent",
+    "proof": "doctor/init tests"
+  },
+  {
+    "code": "AZ-033",
+    "priority": "P2",
+    "title": "Tighten replace_in_file semantics with expected_count/max_count",
+    "done_when": "done when risky broad replacements are impossible by accident",
+    "proof": "tool tests"
+  },
+  {
+    "code": "AZ-034",
+    "priority": "P2",
+    "title": "Surface unreadable/skipped files in search/list operations",
+    "done_when": "done when search results report skips/errors deterministically",
+    "proof": "tool tests"
+  },
+  {
+    "code": "AZ-035",
+    "priority": "P2",
+    "title": "Add worktree adapter or scm adapter for isolated coding runs",
+    "done_when": "done when runs can operate in ephemeral worktrees and leave reviewable diffs",
+    "proof": "integration tests"
+  },
+  {
+    "code": "AZ-036",
+    "priority": "P2",
+    "title": "Create verifier profiles for Rust/Node/Python projects",
+    "done_when": "done when common dev stacks can be verified with minimal configuration",
+    "proof": "profile tests"
+  },
+  {
+    "code": "AZ-037",
+    "priority": "P2",
+    "title": "Define workflow-pack contract",
+    "done_when": "done when user-provided workflow packs have stable schema and allowed-tool/verifier metadata",
+    "proof": "schema tests"
+  },
+  {
+    "code": "AZ-038",
+    "priority": "P2",
+    "title": "Implement adapter SDK for workflow packs",
+    "done_when": "done when external workflow adapters plug into one orchestrator contract",
+    "proof": "SDK samples"
+  },
+  {
+    "code": "AZ-039",
+    "priority": "P2",
+    "title": "Support spec-stack inputs (SPEC/PLAN/IMPLEMENT/STATUS/AGENTS)",
+    "done_when": "done when runs can ingest durable project memory files as source of truth",
+    "proof": "e2e goal-package tests"
+  },
+  {
+    "code": "AZ-040",
+    "priority": "P2",
+    "title": "Create app workflow pack",
+    "done_when": "done when an app scaffold/change goal can run end-to-end",
+    "proof": "golden repo eval"
+  },
+  {
+    "code": "AZ-041",
+    "priority": "P2",
+    "title": "Create server/API workflow pack",
+    "done_when": "done when a server feature goal can run end-to-end",
+    "proof": "golden repo eval"
+  },
+  {
+    "code": "AZ-042",
+    "priority": "P3",
+    "title": "Build autonomous eval corpus",
+    "done_when": "done when representative repos/goals exist for repeated scoring",
+    "proof": "eval dataset"
+  },
+  {
+    "code": "AZ-043",
+    "priority": "P3",
+    "title": "Add trace/artifact scoring checks",
+    "done_when": "done when runs are scored on outcome plus evidence quality",
+    "proof": "eval harness"
+  },
+  {
+    "code": "AZ-044",
+    "priority": "P3",
+    "title": "Add release gate for autonomous runs",
+    "done_when": "done when releases are blocked by failing representative runs",
+    "proof": "CI gate"
+  },
+  {
+    "code": "AZ-045",
+    "priority": "P3",
+    "title": "Dogfood maintenance workflow on AxonRunner itself",
+    "done_when": "done when a recurring internal engineering workflow completes through the product",
+    "proof": "dogfood report"
+  },
+  {
+    "code": "AZ-046",
+    "priority": "P3",
+    "title": "Dogfood spec-to-feature workflow",
+    "done_when": "done when a feature derived from a planning doc is executed end-to-end",
+    "proof": "dogfood report"
+  },
+  {
+    "code": "AZ-047",
+    "priority": "P3",
+    "title": "Trim legacy intent path to debug/migration mode",
+    "done_when": "done when goal-run is primary and legacy path no longer drives product decisions",
+    "proof": "CLI/docs update"
+  },
+  {
+    "code": "AZ-048",
+    "priority": "P3",
+    "title": "Write product release checklist for autonomous mode",
+    "done_when": "done when operator can deploy/use/recover confidently",
+    "proof": "runbook"
+  }
+]

@@ -52,7 +52,46 @@ pub fn build_runtime_run_plan(
     intent_id: &str,
     outcome: DecisionOutcome,
 ) -> RuntimeRunPlan {
-    match template.legacy_intent() {
+    match template {
+        RunTemplate::GoalFile(goal_file) => RuntimeRunPlan {
+            run_id: run_id.to_owned(),
+            goal: goal_file.goal.summary.clone(),
+            summary: format!(
+                "intent_id={intent_id} goal_file={} workspace_root={}",
+                goal_file.path, goal_file.goal.workspace_root
+            ),
+            done_when: goal_file
+                .goal
+                .done_conditions
+                .iter()
+                .map(|condition| format!("{}:{}", condition.label, condition.evidence))
+                .collect::<Vec<_>>()
+                .join(" | "),
+            planned_steps: 3,
+            steps: vec![
+                RuntimeRunPlanStep {
+                    id: format!("{run_id}/step-1-planning"),
+                    label: String::from("load goal file"),
+                    phase: "planning",
+                    done_when: format!("goal file `{}` is parsed into RunGoal", goal_file.path),
+                },
+                RuntimeRunPlanStep {
+                    id: format!("{run_id}/step-2-verifying"),
+                    label: String::from("validate goal contract"),
+                    phase: "verifying",
+                    done_when: String::from(
+                        "goal summary, workspace, done conditions, verification checks, and budget validate",
+                    ),
+                },
+                RuntimeRunPlanStep {
+                    id: format!("{run_id}/step-3-blocked"),
+                    label: String::from("wait for step engine execution"),
+                    phase: "blocked",
+                    done_when: String::from("goal intake is persisted with a replayable run id"),
+                },
+            ],
+        },
+        RunTemplate::LegacyIntent(template) => match template {
         LegacyIntentTemplate::Read { key } => RuntimeRunPlan {
             run_id: run_id.to_owned(),
             goal: format!("Read fact `{key}` from persisted runtime state"),
@@ -197,7 +236,7 @@ pub fn build_runtime_run_plan(
                 },
             ],
         },
-    }
+    }}
 }
 
 pub(super) fn build_runtime_compose_plan(
@@ -216,7 +255,13 @@ pub(super) fn build_runtime_compose_plan(
         };
     }
 
-    match template.legacy_intent() {
+    match template {
+        RunTemplate::GoalFile(_) => RuntimeComposePlan {
+            provider: None,
+            memory: MemoryPlan::None,
+            tool: None,
+        },
+        RunTemplate::LegacyIntent(template) => match template {
         LegacyIntentTemplate::Write { key, value } => RuntimeComposePlan {
             provider: Some(ProviderPlan {
                 model: provider_model.to_owned(),
@@ -253,7 +298,7 @@ pub(super) fn build_runtime_compose_plan(
                 tool: None,
             }
         }
-    }
+    }}
 }
 
 fn outcome_name(outcome: DecisionOutcome) -> &'static str {

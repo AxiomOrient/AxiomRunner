@@ -1,6 +1,7 @@
 use axonrunner_core::{
     AgentState, DecisionOutcome, DomainEvent, DoneCondition, ExecutionMode, Intent, PolicyCode,
-    RunApprovalMode, RunBudget, RunConstraint, RunEvent, RunGoal, RunOutcome, RunPhase,
+    RunApprovalMode, RunBudget, RunConstraint, RunEvent, RunGoal, RunGoalValidationError,
+    RunOutcome, RunPhase,
     RunStatus, VerificationCheck,
     build_policy_audit, decide, evaluate_policy, project, project_from, project_run,
     reduce, reduce_run_status,
@@ -150,6 +151,7 @@ fn run_goal_types_capture_autonomous_contract_basics() {
     assert_eq!(status.phase, RunPhase::Planning);
     assert_eq!(status.outcome, None);
     assert_eq!(status.goal, goal);
+    assert_eq!(status.goal.validate(), Ok(()));
     assert_eq!(status.budget.max_steps, 12);
     assert_eq!(created, RunEvent::RunCreated { run_id: String::from("run-1"), goal });
     assert_eq!(
@@ -158,6 +160,48 @@ fn run_goal_types_capture_autonomous_contract_basics() {
             run_id: String::from("run-1"),
             outcome: RunOutcome::Success,
         }
+    );
+}
+
+#[test]
+fn run_goal_validation_rejects_missing_done_conditions_and_zero_budget() {
+    let goal = RunGoal {
+        summary: String::from("Ship goal package"),
+        workspace_root: String::from("/workspace"),
+        constraints: vec![RunConstraint {
+            label: String::from("non-goal"),
+            detail: String::from("no multi-agent orchestration"),
+        }],
+        done_conditions: Vec::new(),
+        verification_checks: vec![VerificationCheck {
+            label: String::from("release gate"),
+            detail: String::from("cargo test -p axonrunner_apps --test release_security_gate"),
+        }],
+        budget: RunBudget::bounded(1, 1, 1),
+        approval_mode: RunApprovalMode::OnRisk,
+    };
+
+    assert_eq!(goal.validate(), Err(RunGoalValidationError::DoneConditionsEmpty));
+
+    let zero_budget_goal = RunGoal {
+        summary: String::from("Ship goal package"),
+        workspace_root: String::from("/workspace"),
+        constraints: Vec::new(),
+        done_conditions: vec![DoneCondition {
+            label: String::from("report"),
+            evidence: String::from("report exists"),
+        }],
+        verification_checks: vec![VerificationCheck {
+            label: String::from("release gate"),
+            detail: String::from("cargo test -p axonrunner_apps --test release_security_gate"),
+        }],
+        budget: RunBudget::bounded(0, 1, 1),
+        approval_mode: RunApprovalMode::Never,
+    };
+
+    assert_eq!(
+        zero_budget_goal.validate(),
+        Err(RunGoalValidationError::BudgetStepsZero)
     );
 }
 

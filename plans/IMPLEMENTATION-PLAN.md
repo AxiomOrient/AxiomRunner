@@ -1,86 +1,117 @@
-# AxonRunner Autonomous Transition Implementation Plan
+# AxonRunner Documentation-Driven Improvement Plan
 
 ## Scope Contract
 
-- Request: turn the `docs/roadmap/` bundle into a build-ready implementation plan for migrating AxonRunner from an `intent-spec` minimal runtime to a goal/run autonomous workspace agent.
-- Target scope: repo-wide changes across `README.md`, `docs/`, `crates/core`, `crates/apps`, `crates/adapters`, regression tests, release gates, and later-stage examples.
+- Request: review the current root docs and the autonomous review bundle, then turn that evidence into a repo-improvement plan.
+- Target scope: `README.md`, `docs/*.md`, `plans/*.md`, `axonrunner_7674ced_autonomous_review/docs/*.md`, and the follow-on code areas named by those docs in `crates/core`, `crates/apps`, and `crates/adapters`.
 - Repository baseline:
-  - Current truth surface is still `run <intent-spec>`, `batch`, `doctor`, `replay`, `status`, `health`, `help`, plus legacy aliases.
-  - `docs/roadmap/` and `docs/AUTONOMOUS_AGENT_TARGET.md` describe the future transition target, not the current product contract.
-  - The current worktree does not yet contain `plans/IMPLEMENTATION-PLAN.md` or `plans/TASKS.md`, so this plan becomes the first canonical execution ledger for the transition.
+  - Current shipped truth is still the minimal `intent-spec` CLI surface, confirmed by `README.md`, `docs/project-charter.md`, `docs/CAPABILITY_MATRIX.md`, `docs/RUNBOOK.md`, CLI help output, and `cargo test -p axonrunner_apps --test release_security_gate`.
+  - Autonomous transition analysis now lives in `axonrunner_7674ced_autonomous_review/docs/`, not in `docs/roadmap/`.
+  - `docs/AUTONOMOUS_AGENT_TARGET.md`, `docs/DOCS_ALIGNMENT.md`, and the old planning ledger still point at deleted `docs/roadmap/*`, so the reading path and plan baseline are stale.
+  - The review bundle converges on the same remaining product gaps: truthful `goal/run` contract, real step engine, stronger verification, approval enforcement, and concurrency/isolation hardening.
 - Out of scope:
-  - multi-agent orchestration
-  - browser or channel integrations
-  - daemon, gateway, or cron-first surfaces
-  - skills marketplace or broad MCP sprawl
+  - implementing the runtime changes in this planning pass
+  - widening the product into channels, gateways, multi-agent orchestration, or marketplace features
+  - rewriting root docs to claim `goal/run` behavior before the CLI actually ships it
 - Constraints:
-  - preserve event-sourced truth, workspace boundary, and explicit failure semantics throughout the transition
-  - do not claim the autonomous product contract before planner, verifier, repair, approval, budget, and replay evidence actually exist
-  - prefer additive migration steps and compatibility shims over a big-bang rewrite
-  - keep docs, help text, release gate tests, and runtime behavior aligned at every phase boundary
+  - keep current-truth docs honest until public behavior changes
+  - declare one canonical home for transition analysis and one canonical task ledger
+  - reuse the existing run-domain scaffolding instead of inventing a second goal schema
+  - end every phase with operator-visible evidence such as docs, tests, or replayable artifacts
 - Done conditions:
-  - docs, help, and release gates converge on the same goal/run public contract
-  - `core` models run lifecycle and terminal outcomes, not only fact mutation
-  - `apps` executes a bounded `plan -> act -> verify -> repair -> report` loop with explicit stop reasons
-  - `adapters` provide bounded workspace execution, deterministic artifacts, verifier evidence, and safety policies
-  - release decisions use autonomy-specific evidence instead of intent-runtime-only confidence
+  - root docs and planning docs point to living transition references
+  - the repo has one explicit reading path for current truth versus next-product transition material
+  - remaining project work is ordered from doc truth repair to runtime hardening
+  - `plans/TASKS.md` matches the current repo topology and the real dependency path
+
+## Document Review Summary
+
+### Healthy parts
+
+- Root truth docs are mostly aligned on the retained CLI surface.
+- The autonomous review bundle is coherent and already narrows the next product around one agent, one workspace, one evidence trail.
+- The release gate test already protects the current truth surface from drifting into false marketing.
+
+### Gaps that matter now
+
+- Dead `docs/roadmap/*` references remain in root transition docs and in the planning ledger.
+- Transition analysis is split between root bridge docs and the external review bundle without one declared canonical owner.
+- The current plan/task ledger still assumes the deleted roadmap tree is the active source set.
+- The release gate protects truth tokens, but the document topology itself is not yet guarded.
+
+## Complexity Map
+
+### Essential complexity
+
+- The repo must keep two truths separate until the product actually changes: current `intent-spec` reality and next `goal/run` target.
+- The transition crosses `core`, `apps`, and `adapters`, so the plan has to respect domain, CLI, and substrate dependencies.
+- Success must stay evidence-driven; docs, tests, status, replay, and risk policy all have to move together.
+
+### Accidental complexity
+
+- Deleted `docs/roadmap/*` paths are still treated as live sources.
+- Transition material has two homes without a declared primary index.
+- Planning artifacts drifted away from the current document tree.
+- Topology drift can recur because the current checks do not validate transition-reference integrity.
+
+### Simplification candidates
+
+1. Declare one canonical transition-doc home and update every reference to that location.
+2. Add a lightweight docs-topology check so dead roadmap references fail quickly.
+3. Reset the plan/task ledger around the current baseline instead of keeping stale source paths alive.
 
 ## Design Summary
 
-AxonRunner should migrate in three coupled layers. `core` changes first to introduce the run lifecycle, invariants, and event vocabulary that the rest of the system can trust. `apps` then moves the public CLI and runtime harness from one-shot intent execution to a bounded autonomous loop. `adapters` harden provider, tool, and memory behavior so the loop can operate on a real workspace without hidden fallback or unverifiable success.
+The improvement path should start with documentation truth repair, not more runtime surface. Right now the repo already has a usable minimal runtime, a clear bridge into the next product, and a substantial review bundle. The immediate problem is that those assets are arranged in a way that still makes readers and future execution plans look at deleted paths.
 
-The migration should stay dual-track until the new truth is real. Current docs and tests still lock the minimal runtime surface, while `docs/roadmap/` and the bridge docs describe the target state. That means P0 is not editorial cleanup; it is the contract lock that prevents false claims while the code remains intent-centric. The plan therefore treats doc alignment, release gates, and CLI/help outputs as core product work.
+After the doc topology is repaired, the project should promote the autonomous contract in dependency order. First freeze the goal package and run identity contract using the run-domain scaffolding that already exists in `core`. Then move the public CLI only when `apps` can ingest a goal file, persist run ids, and report status/replay honestly. Only after that should the shallow tool phase be replaced by a real step engine, followed by stronger verification, approval control, concurrency hardening, and release evidence.
 
-Implementation order follows dependency rather than ownership. Contract lock must land before public-surface changes. Domain remodel must land before the autonomous loop can be honest. Loop harness and substrate hardening must exist before approval, budget, resume, and eval signals are meaningful. Context engineering and dogfooding remain later phases because they amplify a stable loop instead of substituting for one.
-
-Temporary bridge docs already exist in `docs/AUTONOMOUS_AGENT_TARGET.md` and `docs/DOCS_ALIGNMENT.md`. They should be used to reduce reader confusion while P0 is in flight, but the final product truth must move back into the canonical root docs and release checks once the autonomous surface is implemented.
+This keeps the plan aligned with the review bundle while avoiding two mistakes: pretending the autonomous product already exists, or restarting work that the current baseline already solved.
 
 ## Expanded Atomic Path
 
-1. `scout-boundaries` — reconcile roadmap intent with the current repo truth surface and bridge docs.
-2. `plan-what-it-does` — define the bounded contract, constraints, non-goals, and observable done conditions for the transition.
-3. `plan-how-to-build` — order the migration around domain-first data changes, loop scaffolding, and safety/eval gates.
-4. `plan-task-breakdown` — convert the roadmap backlog into dependency-ordered execution rows under `plans/TASKS.md`.
+1. `scout-boundaries` — reconcile current truth docs, review-bundle docs, and the real repo tree.
+2. `plan-what-it-does` — lock the bounded improvement goal, constraints, and done conditions.
+3. `plan-how-to-build` — order the work from doc truth repair to runtime/product hardening.
+4. `plan-task-breakdown` — convert the path into execution-ready task rows under `plans/TASKS.md`.
 
 ## Phase Plan
 
 | Phase | Goal | Primary Files | Entry Criteria | Exit Evidence |
 |---|---|---|---|---|
-| P0 | Lock the autonomous transition contract without pretending the product is already there. | `README.md`, `docs/project-charter.md`, `docs/CAPABILITY_MATRIX.md`, `docs/RUNBOOK.md`, `docs/AUTONOMOUS_AGENT_SPEC.md`, `crates/apps/tests/release_security_gate.rs` | current truth and target truth are both visible and can be separated cleanly | root docs, help, and release gate all describe the same transition-aware public surface |
-| P1 | Introduce a run-oriented domain model under the current intent runtime. | `crates/core/src/{intent,event,effect,state,reducer,projection}.rs`, `crates/core/tests/*` | P0 contract exists and the target lifecycle is named | `core` expresses `RunGoal`, `RunPhase`, `RunOutcome`, budget/approval semantics, and lifecycle invariants |
-| P2 | Move the CLI surface from intent-first to goal/run-first without losing migration safety. | `crates/apps/src/{cli_args,cli_command,display}.rs`, `crates/apps/tests/e2e_cli.rs`, `README.md` | P1 types and compatibility story exist | help text and golden CLI outputs lock `run`, `resume`, `abort`, `status`, `replay`, `doctor` as the public truth |
-| P3 | Build the single-agent autonomous loop harness. | `crates/apps/src/{cli_runtime,runtime_compose,replay,status,trace_store,state_store}.rs` | P2 gives the loop a truthful public entrypoint | every run records planning, execution, verification, repair, and terminal outcome evidence |
-| P4 | Harden `codek` / `codex-runtime` into a run-scoped execution substrate. | `crates/adapters/src/provider_codex_runtime.rs`, `crates/apps/src/{runtime_compose,doctor}.rs`, `docs/CODEK_RUNTIME_CONTRACT.md` | P3 loop can execute steps and report failure boundaries | provider workspace binding, compatibility probe, and optional isolation are explicit and testable |
-| P5 | Finish the tool and verifier contract so "done" means verified, not merely changed. | `crates/adapters/src/{contracts,tool,tool_workspace}.rs`, `crates/apps/src/{runtime_compose,replay}.rs`, `docs/CAPABILITY_MATRIX.md`, `docs/RUNBOOK.md` | P3/P4 can execute against a workspace | tool input/output schema, verifier profiles, patch evidence, and risk tiers are stable and operator-readable |
-| P6 | Add context discipline and durable memory boundaries for long-horizon runs. | `crates/apps/src/{cli_runtime,runtime_compose,trace_store,state_store}.rs`, `crates/adapters/src/{memory,memory_sqlite,memory_markdown}.rs` | loop, trace, and verifier artifacts already exist | hot context, recall memory, artifact index, compaction, and `AGENTS.md` ingestion are explicit and replayable |
-| P7 | Add operator control for approval, budget, resume, abort, and rollback. | `crates/apps/src/{cli_command,cli_runtime,state_store,status,replay}.rs`, `docs/RUNBOOK.md`, `crates/core/src/state.rs` | loop and substrate already expose stable ids and failure modes | risky work can be paused, resumed, aborted, or rolled back with explicit evidence |
-| P8 | Gate releases on autonomy evidence and real usage, not aspiration. | `crates/apps/tests/e2e_cli.rs`, `crates/apps/tests/release_security_gate.rs`, `crates/adapters/tests/*`, `crates/core/tests/*`, `docs/CAPABILITY_MATRIX.md`, `docs/RUNBOOK.md`, `examples/*` | P0-P7 are materially implemented | autonomy corpus, false-success metrics, provider-failure evals, nightly dogfood, and release gate criteria are in place |
+| P0 | Repair the document topology so every root reference points at living transition material. | `README.md`, `docs/AUTONOMOUS_AGENT_TARGET.md`, `docs/DOCS_ALIGNMENT.md`, `plans/IMPLEMENTATION-PLAN.md`, `plans/TASKS.md` | current truth docs remain valid and the review bundle exists | dead roadmap references are removed or redirected, and one reading path is documented |
+| P1 | Freeze the canonical goal package contract by reusing existing run-domain types instead of inventing new ones. | `docs/AUTONOMOUS_AGENT_SPEC.md`, `crates/core/src/{intent,validation,state}.rs`, parser fixtures | P0 gives the repo one honest transition-doc baseline | goal input shape, run ids, done conditions, budget, and approval rules are versioned and testable |
+| P2 | Promote a truthful `goal/run` public surface only after ingestion and persistence exist. | `crates/apps/src/{cli_command,cli_args,display,status}.rs`, `README.md`, `docs/CAPABILITY_MATRIX.md`, `docs/RUNBOOK.md` | P1 schema and persistence boundary exist | `run <goal-file>`, `status`, `replay`, `resume`, and `abort` agree across help, docs, and e2e tests |
+| P3 | Replace the shallow compose path with a real step engine plus completion-grade verification. | `crates/apps/src/{cli_runtime,runtime_compose,trace_store,replay}.rs`, `crates/adapters/src/{tool,contracts}.rs` | P2 makes the public entrypoint honest | runs produce explicit step journals, verification evidence, bounded repairs, and terminal outcomes tied to declared checks |
+| P4 | Add operator control and safety hardening around risky work and multi-run interference. | `crates/apps/src/{cli_runtime,status,replay,state_store}.rs`, `crates/adapters/src/{provider_codex_runtime,memory,tool}.rs`, `docs/RUNBOOK.md` | P3 can execute and verify real work | approval, resume, abort, budget exhaustion, and concurrency/isolation rules are operator-visible and tested |
+| P5 | Move release confidence from aspiration to evidence. | `crates/apps/tests/*`, `crates/adapters/tests/*`, `docs/CAPABILITY_MATRIX.md`, `docs/RUNBOOK.md`, example or fixture repos | P4 safety and control semantics are stable | representative autonomous runs, eval suites, and release gates prove the shipped product behavior |
 
-## Execution Strategy
+## Critical Path
 
-Build in four waves so each slice closes with usable evidence instead of broad partial work.
+1. P0 document topology repair
+2. P1 goal package contract freeze
+3. P2 truthful `goal/run` CLI promotion
+4. P3 step engine plus verification
+5. P4 approval and isolation hardening
+6. P5 eval-backed release gates
 
-1. Wave A: P0 + P1
-   - lock the contract and land the run domain model
-   - do not expose a new public CLI until the underlying state machine exists
-2. Wave B: P2 + P3 + P4
-   - switch the public entry surface, then immediately back it with a traceable loop and hardened provider/workspace substrate
-3. Wave C: P5 + P7
-   - finish verifier quality and operator-control semantics before claiming safe autonomous execution
-4. Wave D: P6 + P8
-   - optimize long-horizon behavior and release confidence only after the core loop is stable
+## Decision Gates
+
+| Gate | Check | Pass Condition | On Fail |
+|---|---|---|---|
+| DG-1 | Transition-doc home | one canonical transition-doc location and reading path are declared | stop surface edits and resolve doc ownership first |
+| DG-2 | Goal package contract | one goal input schema maps cleanly onto current run-domain types | keep CLI truth on `intent-spec` until schema is fixed |
+| DG-3 | Public CLI truth flip | goal-file ingestion, run-id persistence, status, and replay all work together | keep legacy surface canonical and continue implementation behind the bridge docs |
+| DG-4 | Safe autonomy gate | verification, approval, budget, and isolation semantics all have passing evidence | do not call the product autonomous in release docs |
+| DG-5 | Release evidence gate | eval corpus and release checks prove repeated autonomous success | keep autonomous work experimental |
 
 ## Open Decisions
 
-- Legacy public surface demotion
-  - Option A: keep `batch` plus legacy aliases visible until `run <goal>` is production-ready
-  - Option B: demote them as soon as P2 lands
-  - Recommended: Option A, because current docs/tests still lock those paths and early demotion would create contract churn without autonomy evidence.
-- Event schema migration shape
-  - Option A: add `RunEvent` and run lifecycle projections alongside the current intent event path, then phase out legacy projections later
-  - Option B: replace the current event schema in place
-  - Recommended: Option A, because replay compatibility and transition safety matter more than immediate schema purity.
-- Workspace isolation default
-  - Option A: ship in-place workspace execution first and add optional worktree isolation in P4/P7
-  - Option B: require worktree isolation before any write-capable autonomous loop ships
-  - Recommended: Option A first, but only if approval, checkpoint, and failure reporting are present before high-risk write operations leave experimental scope.
+- Canonical transition-doc home
+  - Option A: keep `axonrunner_7674ced_autonomous_review/docs/` as the source of transition analysis and update root docs to point there.
+  - Option B: move that bundle under a canonical path such as `docs/transition/` and treat the review folder as archived input.
+  - Recommended: Option B, because it restores one obvious docs tree and removes the need for root docs to point outside `docs/`.
+- Concurrency model
+  - Option A: declare single-writer mode first and enforce it with lockfiles.
+  - Option B: move directly to worktree-per-run isolation.
+  - Recommended: Option A first, then add worktree isolation when the autonomous loop is already stable.

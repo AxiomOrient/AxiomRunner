@@ -1,4 +1,6 @@
-use axonrunner_core::Intent;
+use crate::goal_file::parse_goal_file;
+use axonrunner_core::{Intent, RunGoal};
+use std::path::Path;
 
 pub const USAGE: &str = "\
 usage:
@@ -15,15 +17,24 @@ global-options:
   --actor=<id>  (default: system)
 
 commands:
-  run <intent-spec>
+  run <goal-file>
+  status [run-id|latest]
+  replay [run-id|latest]
+  resume [run-id|latest]
+  abort [run-id|latest]
   doctor [--json]
-  replay <intent-id|latest>
-  status
-  batch [--reset-state] <intent-spec>...
   health
   help
 
-intent-spec:
+compatibility:
+  batch [--reset-state] <intent-spec>...
+  read <key>
+  write <key> <value>
+  remove <key>
+  freeze
+  halt
+
+legacy intent-spec:
   read:<key>
   write:<key>=<value>
   remove:<key>
@@ -40,10 +51,18 @@ pub enum CliCommand {
     Replay {
         target: String,
     },
+    Resume {
+        target: String,
+    },
+    Abort {
+        target: String,
+    },
     Doctor {
         json: bool,
     },
-    Status,
+    Status {
+        target: Option<String>,
+    },
     Health,
     Help,
 }
@@ -74,18 +93,20 @@ impl LegacyIntentTemplate {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RunTemplate {
     LegacyIntent(LegacyIntentTemplate),
+    GoalFile(GoalFileTemplate),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GoalFileTemplate {
+    pub path: String,
+    pub goal: RunGoal,
 }
 
 impl RunTemplate {
-    pub fn to_intent(&self, intent_id: String, actor_id: Option<String>) -> Intent {
+    pub fn goal_file(&self) -> Option<&GoalFileTemplate> {
         match self {
-            Self::LegacyIntent(template) => template.to_intent(intent_id, actor_id),
-        }
-    }
-
-    pub fn legacy_intent(&self) -> &LegacyIntentTemplate {
-        match self {
-            Self::LegacyIntent(template) => template,
+            Self::GoalFile(template) => Some(template),
+            Self::LegacyIntent(_) => None,
         }
     }
 }
@@ -100,10 +121,12 @@ pub fn parse_command(tokens: &[String]) -> Result<CliCommand, String> {
         "run" => parse_run_command(args),
         "doctor" => parse_doctor_command(args),
         "replay" => parse_replay_command(args),
+        "resume" => parse_resume_command(args),
+        "abort" => parse_abort_command(args),
         "read" | "write" | "remove" | "freeze" | "halt" => parse_legacy_run_alias(command, args),
         "status" => {
-            no_args(command, args)?;
-            Ok(CliCommand::Status)
+            let target = optional_one_arg(command, args)?;
+            Ok(CliCommand::Status { target })
         }
         "help" => {
             no_args(command, args)?;
@@ -135,9 +158,25 @@ fn parse_replay_command(args: &[String]) -> Result<CliCommand, String> {
 
 fn parse_run_command(args: &[String]) -> Result<CliCommand, String> {
     let intent_spec = exactly_one_arg("run", args)?;
+    if Path::new(&intent_spec).is_file() {
+        return Ok(CliCommand::Run(RunTemplate::GoalFile(GoalFileTemplate {
+            path: intent_spec.clone(),
+            goal: parse_goal_file(&intent_spec)?,
+        })));
+    }
     Ok(CliCommand::Run(RunTemplate::LegacyIntent(
         parse_legacy_intent_spec(&intent_spec)?,
     )))
+}
+
+fn parse_resume_command(args: &[String]) -> Result<CliCommand, String> {
+    let target = exactly_one_arg("resume", args)?;
+    Ok(CliCommand::Resume { target })
+}
+
+fn parse_abort_command(args: &[String]) -> Result<CliCommand, String> {
+    let target = exactly_one_arg("abort", args)?;
+    Ok(CliCommand::Abort { target })
 }
 
 fn parse_legacy_run_alias(command: &str, args: &[String]) -> Result<CliCommand, String> {
@@ -256,5 +295,20 @@ fn no_args(command: &str, args: &[String]) -> Result<(), String> {
         Ok(())
     } else {
         Err(format!("command '{command}' does not accept arguments"))
+    }
+}
+
+fn optional_one_arg(command: &str, args: &[String]) -> Result<Option<String>, String> {
+    match args.len() {
+        0 => Ok(None),
+        1 => {
+            let value = args[0].trim();
+            if value.is_empty() {
+                Err(format!("command '{command}' requires a non-empty argument"))
+            } else {
+                Ok(Some(value.to_owned()))
+            }
+        }
+        _ => Err(format!("command '{command}' accepts at most one argument")),
     }
 }

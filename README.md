@@ -1,30 +1,32 @@
 # AxonRunner
 
-AxonRunner는 로컬 워크스페이스 자동화를 위한 minimal event-sourced CLI runtime이다.
+AxonRunner는 로컬 워크스페이스 자동화를 위한 goal-file 중심 CLI agent runtime이다.
 
-제품 표면은 의도적으로 좁다. 지금 보장하는 것은 `run`, `batch`, `doctor`, `replay`, `status`, `health`, `help`와 legacy single-intent alias(`read`, `write`, `remove`, `freeze`, `halt`) 뿐이다.
+제품 표면은 의도적으로 좁다. 지금 정식으로 노출하는 것은 `run`, `status`, `replay`, `resume`, `abort`, `doctor`, `health`, `help`다. `batch`와 legacy single-intent alias(`read`, `write`, `remove`, `freeze`, `halt`)는 compatibility 경로로만 유지한다.
 
 ## 현재 제품면
 
 정식 명령:
 
-- `run <intent-spec>`
-- `batch [--reset-state] <intent-spec>...`
+- `run <goal-file>`
+- `status [run-id|latest]`
+- `replay [run-id|latest]`
+- `resume [run-id|latest]`
+- `abort [run-id|latest]`
 - `doctor [--json]`
-- `replay <intent-id|latest>`
-- `status`
 - `health`
 - `help`
 
-legacy alias:
+compatibility surface:
 
+- `batch [--reset-state] <intent-spec>...`
 - `read <key>`
 - `write <key> <value>`
 - `remove <key>`
 - `freeze`
 - `halt`
 
-intent spec:
+legacy intent spec:
 
 - `read:<key>`
 - `write:<key>=<value>`
@@ -40,22 +42,38 @@ intent spec:
 cargo build
 ```
 
-도메인 상태와 tool 로그를 남기면서 한 번 실행:
+goal file을 받아 run id를 남기며 한 번 실행:
 
 ```bash
+cat > GOAL.json <<'EOF'
+{
+  "summary": "Check one workspace contract",
+  "workspace_root": ".",
+  "constraints": [],
+  "done_conditions": [
+    { "label": "report", "evidence": "report artifact exists" }
+  ],
+  "verification_checks": [
+    { "label": "release gate", "detail": "cargo test -p axonrunner_apps --test release_security_gate" }
+  ],
+  "budget": { "max_steps": 5, "max_minutes": 10, "max_tokens": 8000 },
+  "approval_mode": "never"
+}
+EOF
+
 ./target/debug/axonrunner_apps \
   --workspace="$PWD" \
   --state-path="$PWD/.axonrunner/state.snapshot" \
-  run "write:profile=prod"
+  run GOAL.json
 ```
 
-같은 상태를 다른 프로세스에서 읽기:
+대기 중인 run을 다시 진행:
 
 ```bash
 ./target/debug/axonrunner_apps \
   --workspace="$PWD" \
   --state-path="$PWD/.axonrunner/state.snapshot" \
-  run "read:profile"
+  resume latest
 ```
 
 CLI 표면 확인:
@@ -72,7 +90,7 @@ CLI 표면 확인:
   doctor --json
 ```
 
-가장 최근 intent 요약 replay:
+가장 최근 run 요약 replay:
 
 ```bash
 ./target/debug/axonrunner_apps \
@@ -119,8 +137,9 @@ env-only runtime knobs:
 
 ## 실행 의미
 
-- `read`도 이제 다른 intent와 같은 canonical path를 타며 intent id와 revision이 남는다.
-- `freeze`와 `halt`는 persisted state로 유지된다.
+- `run <goal-file>`은 run id, step journal, verify/report artifact를 남긴다.
+- `resume`과 `abort`는 pending run control state를 기준으로 동작한다.
+- compatibility 경로의 `read`, `write`, `remove`, `freeze`, `halt`도 기존 canonical path를 유지한다.
 - provider/tool/memory 단계 실패는 성공 종료로 숨기지 않고 process failure로 승격된다.
 - provider health는 `ready`, `degraded`, `blocked`로 노출된다.
 - `openai` provider는 기본 비활성 experimental 경로다. 실제 사용은 `AXONRUNNER_EXPERIMENTAL_OPENAI=1` opt-in 이후에만 허용된다.
@@ -135,3 +154,4 @@ env-only runtime knobs:
 - autonomous target bridge: [docs/AUTONOMOUS_AGENT_TARGET.md](docs/AUTONOMOUS_AGENT_TARGET.md)
 - autonomous run contract draft: [docs/AUTONOMOUS_AGENT_SPEC.md](docs/AUTONOMOUS_AGENT_SPEC.md)
 - docs alignment guide: [docs/DOCS_ALIGNMENT.md](docs/DOCS_ALIGNMENT.md)
+- transition index: [docs/transition/README.md](docs/transition/README.md)

@@ -58,12 +58,12 @@
 - operator-visible failure reason
 - eval-driven release
 
-## Roadmap References
+## Transition References
 
-자세한 전환 근거와 계획은 아래 문서가 소유한다.
+자세한 전환 근거와 읽기 시작점은 아래 문서가 소유한다.
 
-1. `docs/roadmap/01_CURRENT_STATUS.md`
-2. `docs/roadmap/02_AUTONOMOUS_AGENT_MENTAL_MODELS.md`
-3. `docs/roadmap/03_AUTONOMOUS_ROADMAP.md`
-4. `docs/roadmap/04_PHASED_IMPLEMENTATION_PLAN.md`
-5. `docs/roadmap/05_A_TO_Z_TASKS.md`
+1. `docs/transition/README.md`
+2. `axonrunner_7674ced_autonomous_review/docs/01_REVIEW_REPORT.md`
+3. `axonrunner_7674ced_autonomous_review/docs/04_NEXT_PRODUCT_DEFINITION.md`
+4. `axonrunner_7674ced_autonomous_review/docs/05_ROADMAP.md`
+5. `axonrunner_7674ced_autonomous_review/docs/06_PHASED_IMPLEMENTATION_PLAN.md`

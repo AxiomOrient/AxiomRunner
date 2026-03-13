@@ -18,6 +18,22 @@ A goal-oriented run must answer all of the following:
 - verification plan: which commands, file checks, or assertions prove completion
 - artifact expectations: which trace, report, patch, and summary outputs must exist
 
+## Canonical Core Mapping
+
+The current core contract already has a stable goal shape:
+
+- `RunGoal.summary` -> objective
+- `RunGoal.workspace_root` -> workspace boundary
+- `RunGoal.constraints[]` -> explicit non-goals and compatibility rules
+- `RunGoal.done_conditions[]` -> externally checkable completion rules
+- `RunGoal.verification_checks[]` -> concrete verification steps
+- `RunGoal.budget` -> step/minute/token budget
+- `RunGoal.approval_mode` -> `never` / `on-risk` / `always`
+
+The contract is only valid when all required fields are present and non-empty,
+there is at least one done condition, there is at least one verification check,
+and every budget dimension is greater than zero.
+
 ## Done Condition Schema
 
 A run is complete only when every declared `done condition` has evidence.

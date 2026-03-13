@@ -20,7 +20,7 @@ pub use effect::{Effect, effects_for_intent};
 pub use event::{DomainEvent, RunEvent};
 pub use intent::{
     DoneCondition, Intent, IntentKind, IntentSurface, RunApprovalMode, RunBudget, RunConstraint,
-    RunGoal, VerificationCheck,
+    RunGoal, RunGoalValidationError, VerificationCheck,
 };
 pub use policy::{PolicyVerdict, evaluate_policy};
 pub use policy_codes::PolicyCode;

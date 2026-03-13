@@ -118,6 +118,7 @@ pub enum RuntimeRunPhase {
 pub enum RuntimeRunOutcome {
     Success,
     Blocked,
+    BudgetExhausted,
     ApprovalRequired,
     Failed,
     Aborted,
@@ -126,11 +127,22 @@ pub enum RuntimeRunOutcome {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeRunRecord {
     pub plan: RuntimeRunPlan,
+    pub step_journal: Vec<RuntimeRunStepRecord>,
     pub verification: RuntimeRunVerification,
     pub repair: RuntimeRunRepair,
     pub phase: RuntimeRunPhase,
     pub outcome: RuntimeRunOutcome,
     pub reason: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeRunStepRecord {
+    pub id: String,
+    pub label: String,
+    pub phase: String,
+    pub status: String,
+    pub evidence: String,
+    pub failure: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -505,6 +517,10 @@ impl RuntimeComposeState {
         }
     }
 
+    pub fn workspace_root(&self) -> Option<&PathBuf> {
+        self.config.tool_workspace.as_ref()
+    }
+
     pub fn write_report(
         &self,
         template: &RunTemplate,
@@ -524,7 +540,8 @@ impl RuntimeComposeState {
             (
                 format!("{base}.plan.md"),
                 format!(
-                    "# Plan\n\nintent_id={intent_id}\nkind={}\noutcome={}\npolicy={policy_code}\ngoal={}\nsummary={}\ndone_when={}\nplanned_steps={}\nsteps={}\n",
+                    "# Plan\n\nphase={}\nintent_id={intent_id}\nkind={}\noutcome={}\npolicy={policy_code}\ngoal={}\nsummary={}\ndone_when={}\nplanned_steps={}\nsteps={}\n",
+                    run_phase_name(RuntimeRunPhase::Planning),
                     template_kind(template),
                     outcome_name(outcome),
                     run.plan.goal,
@@ -554,8 +571,9 @@ impl RuntimeComposeState {
             (
                 format!("{base}.verify.md"),
                 format!(
-                    "# Verify\n\nphase={}\nstatus={}\nsummary={}\nchecks={}\nrepair_attempted={}\nrepair_status={}\nrepair_summary={}\nfirst_failure={}\n",
+                    "# Verify\n\nphase={}\nrepair_phase={}\nstatus={}\nsummary={}\nchecks={}\nrepair_attempted={}\nrepair_status={}\nrepair_summary={}\nfirst_failure={}\nstep_journal={}\n",
                     run_phase_name(RuntimeRunPhase::Verifying),
+                    run_phase_name(RuntimeRunPhase::Repairing),
                     run.verification.status,
                     run.verification.summary,
                     if run.verification.checks.is_empty() {
@@ -569,7 +587,19 @@ impl RuntimeComposeState {
                     execution
                         .first_failure()
                         .map(|(stage, message)| format!("{stage}:{message}"))
-                        .unwrap_or_else(|| String::from("none"))
+                        .unwrap_or_else(|| String::from("none")),
+                    if run.step_journal.is_empty() {
+                        String::from("none")
+                    } else {
+                        run.step_journal
+                            .iter()
+                            .map(|step| format!(
+                                "{}:{}:{}:{}",
+                                step.phase, step.status, step.label, step.evidence
+                            ))
+                            .collect::<Vec<_>>()
+                            .join(" | ")
+                    }
                 ),
             ),
             (
@@ -891,12 +921,15 @@ fn probe_provider_health(provider: Arc<dyn ProviderAdapter>) -> RuntimeComposeCo
 }
 
 fn template_kind(template: &RunTemplate) -> &'static str {
-    match template.legacy_intent() {
-        LegacyIntentTemplate::Read { .. } => "read",
-        LegacyIntentTemplate::Write { .. } => "write",
-        LegacyIntentTemplate::Remove { .. } => "remove",
-        LegacyIntentTemplate::Freeze => "freeze",
-        LegacyIntentTemplate::Halt => "halt",
+    match template {
+        RunTemplate::GoalFile(_) => "goal",
+        RunTemplate::LegacyIntent(template) => match template {
+            LegacyIntentTemplate::Read { .. } => "read",
+            LegacyIntentTemplate::Write { .. } => "write",
+            LegacyIntentTemplate::Remove { .. } => "remove",
+            LegacyIntentTemplate::Freeze => "freeze",
+            LegacyIntentTemplate::Halt => "halt",
+        },
     }
 }
 
@@ -918,29 +951,10 @@ pub fn run_outcome_name(outcome: RuntimeRunOutcome) -> &'static str {
     match outcome {
         RuntimeRunOutcome::Success => "success",
         RuntimeRunOutcome::Blocked => "blocked",
+        RuntimeRunOutcome::BudgetExhausted => "budget_exhausted",
         RuntimeRunOutcome::ApprovalRequired => "approval_required",
         RuntimeRunOutcome::Failed => "failed",
         RuntimeRunOutcome::Aborted => "aborted",
-    }
-}
-
-pub fn verifier_profile_name(program: &str, args: &[String]) -> &'static str {
-    match (program, args.first().map(String::as_str), args.get(1).map(String::as_str)) {
-        ("cargo", Some("build"), _) => "build",
-        ("cargo", Some("test"), _) => "test",
-        ("cargo", Some("clippy"), _) => "lint",
-        ("cargo", Some("fmt"), Some("--check")) => "lint",
-        ("cargo", Some("fmt"), _) => "lint",
-        ("npm", Some("test"), _) | ("pnpm", Some("test"), _) | ("yarn", Some("test"), _) => {
-            "test"
-        }
-        ("npm", Some("run"), Some("lint"))
-        | ("pnpm", Some("run"), Some("lint"))
-        | ("yarn", Some("lint"), _) => "lint",
-        ("npm", Some("run"), Some("build"))
-        | ("pnpm", Some("run"), Some("build"))
-        | ("yarn", Some("build"), _) => "build",
-        _ => "generic",
     }
 }
 
@@ -972,7 +986,6 @@ mod tests {
     use super::{
         RuntimeComposeConfig, RuntimeComposeExecution, RuntimeComposeState, RuntimeComposeStep,
         build_tool_adapter, run_outcome_name, run_phase_name,
-        verifier_profile_name,
     };
     use crate::cli_command::{LegacyIntentTemplate, RunTemplate};
     use crate::config_loader::AppConfig;
@@ -1121,18 +1134,6 @@ mod tests {
             "approval_required"
         );
         assert_eq!(run_outcome_name(super::RuntimeRunOutcome::Aborted), "aborted");
-    }
-
-    #[test]
-    fn verifier_profile_name_matches_standard_command_profiles() {
-        assert_eq!(verifier_profile_name("cargo", &[String::from("build")]), "build");
-        assert_eq!(verifier_profile_name("cargo", &[String::from("test")]), "test");
-        assert_eq!(verifier_profile_name("cargo", &[String::from("clippy")]), "lint");
-        assert_eq!(
-            verifier_profile_name("npm", &[String::from("run"), String::from("build")]),
-            "build"
-        );
-        assert_eq!(verifier_profile_name("pwd", &[]), "generic");
     }
 
     #[test]
