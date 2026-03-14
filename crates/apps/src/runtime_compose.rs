@@ -16,6 +16,7 @@ use std::process::Command;
 use std::sync::Arc;
 
 mod plan;
+mod artifacts;
 
 pub use self::plan::RuntimeRunPlan;
 
@@ -146,10 +147,19 @@ pub struct RuntimeRunRecord {
     pub step_journal: Vec<RuntimeRunStepRecord>,
     pub verification: RuntimeRunVerification,
     pub repair: RuntimeRunRepair,
+    pub checkpoint: Option<RuntimeRunCheckpointMetadata>,
     pub rollback: Option<RuntimeRunRollbackMetadata>,
     pub elapsed_ms: u64,
     pub phase: RuntimeRunPhase,
     pub outcome: RuntimeRunOutcome,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeRunCheckpointMetadata {
+    pub metadata_path: String,
+    pub restore_path: String,
+    pub execution_workspace: String,
     pub reason: String,
 }
 
@@ -209,11 +219,22 @@ impl RuntimeComposeExecution {
             return self.clone();
         }
 
-        let mut next = self.clone();
-        next.tool = RuntimeComposeStep::Applied;
-        next.tool_outputs.extend(repair.tool_outputs.clone());
-        next.patch_artifacts.extend(repair.patch_artifacts.clone());
-        next
+        Self {
+            tool: RuntimeComposeStep::Applied,
+            tool_outputs: self
+                .tool_outputs
+                .iter()
+                .chain(&repair.tool_outputs)
+                .cloned()
+                .collect(),
+            patch_artifacts: self
+                .patch_artifacts
+                .iter()
+                .chain(&repair.patch_artifacts)
+                .cloned()
+                .collect(),
+            ..self.clone()
+        }
     }
 }
 
@@ -675,6 +696,10 @@ impl RuntimeComposeState {
             .or(self.config.tool_workspace.as_ref())
     }
 
+    pub fn max_tokens(&self) -> usize {
+        self.config.max_tokens
+    }
+
     pub fn write_report(
         &self,
         template: &RunTemplate,
@@ -682,131 +707,7 @@ impl RuntimeComposeState {
         execution: &RuntimeComposeExecution,
         run: &RuntimeRunRecord,
     ) -> Result<Vec<RuntimeComposePatchArtifact>, String> {
-        let Some(tool) = self.artifact_tool.as_ref() else {
-            return Ok(Vec::new());
-        };
-
-        let base = format!(".axonrunner/artifacts/{}", input.intent_id);
-        let verification_checks = render_string_list(&run.verification.checks);
-        let step_journal = render_step_journal(&run.step_journal);
-        let tool_outputs = render_string_list(&execution.tool_outputs);
-        let changed_paths = render_patch_targets(&execution.patch_artifacts);
-        let evidence = render_patch_evidence(&execution.patch_artifacts);
-        let health = self.health();
-        let rollback_summary = run
-            .rollback
-            .as_ref()
-            .map(|rollback| {
-                format!(
-                    "metadata={},restore_path={},cleanup_path={},reason={}",
-                    rollback.metadata_path,
-                    rollback.restore_path,
-                    rollback.cleanup_path.as_deref().unwrap_or("none"),
-                    rollback.reason
-                )
-            })
-            .unwrap_or_else(|| String::from("none"));
-        let files = [
-            (
-                format!("{base}.plan.md"),
-                format!(
-                    "# Plan\n\nphase={}\nintent_id={}\nkind={}\noutcome={}\npolicy={}\ngoal={}\nsummary={}\ndone_when={}\nplanned_steps={}\nsteps={}\n",
-                    run_phase_name(RuntimeRunPhase::Planning),
-                    input.intent_id,
-                    template_kind(template),
-                    outcome_name(input.outcome),
-                    input.policy_code,
-                    run.plan.goal,
-                    run.plan.summary,
-                    run.plan.done_when,
-                    run.plan.planned_steps,
-                    run.plan
-                        .steps
-                        .iter()
-                        .map(|step| format!("{}:{}:{}", step.phase, step.label, step.done_when))
-                        .collect::<Vec<_>>()
-                        .join(" | "),
-                ),
-            ),
-            (
-                format!("{base}.apply.md"),
-                format!(
-                    "# Apply\n\nphase={}\nprovider={}\nmemory={}\ntool={}\neffects={}\nprovider_cwd={}\nprovider_output={}\n",
-                    run_phase_name(RuntimeRunPhase::ExecutingStep),
-                    step_name(&execution.provider),
-                    step_name(&execution.memory),
-                    step_name(&execution.tool),
-                    input.effect_count,
-                    execution.provider_cwd,
-                    execution.provider_output.as_deref().unwrap_or("<none>"),
-                ),
-            ),
-            (
-                format!("{base}.verify.md"),
-                format!(
-                    "# Verify\n\nphase={}\nrepair_phase={}\nstatus={}\nsummary={}\nchecks={}\nrepair_attempted={}\nrepair_attempts={}\nrepair_status={}\nrepair_summary={}\nfirst_failure={}\nstep_journal={}\n",
-                    run_phase_name(RuntimeRunPhase::Verifying),
-                    run_phase_name(RuntimeRunPhase::Repairing),
-                    run.verification.status,
-                    run.verification.summary,
-                    verification_checks,
-                    run.repair.attempted,
-                    run.repair.attempts,
-                    run.repair.status,
-                    run.repair.summary,
-                    execution
-                        .first_failure()
-                        .map(|(stage, message)| format!("{stage}:{message}"))
-                        .unwrap_or_else(|| String::from("none")),
-                    step_journal,
-                ),
-            ),
-            (
-                format!("{base}.report.md"),
-                format!(
-                    "# Report\n\nintent_id={}\nkind={}\noutcome={}\npolicy={}\nrun_phase={}\nrun_outcome={}\nrun_reason={}\nrun_reason_code={}\nrun_reason_detail={}\nrun_elapsed_ms={}\nrollback={}\nprovider_health_state={}\nprovider_health_detail={}\nprovider={}\nprovider_cwd={}\nmemory={}\ntool={}\noutputs={}\nchanged_paths={}\nevidence={}\n",
-                    input.intent_id,
-                    template_kind(template),
-                    outcome_name(input.outcome),
-                    input.policy_code,
-                    run_phase_name(run.phase),
-                    run_outcome_name(run.outcome),
-                    run.reason,
-                    run_reason_code(&run.reason),
-                    run_reason_detail(&run.reason),
-                    run.elapsed_ms,
-                    rollback_summary,
-                    health.provider.state,
-                    health.provider.detail,
-                    step_name(&execution.provider),
-                    execution.provider_cwd,
-                    step_name(&execution.memory),
-                    step_name(&execution.tool),
-                    tool_outputs,
-                    changed_paths,
-                    evidence,
-                ),
-            ),
-        ];
-
-        let mut patch_artifacts = Vec::new();
-        for (path, contents) in files {
-            let result = tool
-                .execute(ToolRequest::FileWrite {
-                    path,
-                    contents,
-                    append: false,
-                })
-                .map_err(|error| format!("runtime_compose.report: {error}"))?;
-            let ToolResult::FileWrite(FileWriteOutput { path, evidence, .. }) = result else {
-                return Err(String::from(
-                    "runtime_compose.report: unexpected non-file-write result",
-                ));
-            };
-            patch_artifacts.push(patch_artifact_from_write_output(path, evidence));
-        }
-
-        Ok(patch_artifacts)
+        artifacts::write_report(self, template, input, execution, run)
     }
 
     pub fn idle_execution(&self) -> RuntimeComposeExecution {
@@ -821,77 +722,21 @@ impl RuntimeComposeState {
         }
     }
 
+    pub fn write_checkpoint_metadata(
+        &self,
+        intent_id: &str,
+        run_id: &str,
+    ) -> Result<Option<RuntimeRunCheckpointMetadata>, String> {
+        artifacts::write_checkpoint_metadata(self, intent_id, run_id)
+    }
+
     pub fn write_rollback_metadata(
         &self,
         intent_id: &str,
         execution: &RuntimeComposeExecution,
         run: &RuntimeRunRecord,
     ) -> Result<Option<RuntimeRunRollbackMetadata>, String> {
-        if !matches!(
-            run.outcome,
-            RuntimeRunOutcome::Failed | RuntimeRunOutcome::Blocked
-        ) {
-            return Ok(None);
-        }
-
-        let Some(base_workspace) = self.base_tool_workspace.as_ref() else {
-            return Ok(None);
-        };
-        let Some(execution_workspace) = self.config.tool_workspace.as_ref() else {
-            return Ok(None);
-        };
-        if base_workspace == execution_workspace {
-            return Ok(None);
-        }
-        let Some(tool) = self.artifact_tool.as_ref() else {
-            return Ok(None);
-        };
-
-        let path = format!(".axonrunner/artifacts/{intent_id}.rollback.json");
-        let contents = format!(
-            concat!(
-                "{{\n",
-                "  \"schema\": \"axonrunner.rollback.v1\",\n",
-                "  \"run_id\": \"{}\",\n",
-                "  \"intent_id\": \"{}\",\n",
-                "  \"reason\": \"{}\",\n",
-                "  \"restore_path\": \"{}\",\n",
-                "  \"cleanup_path\": {},\n",
-                "  \"execution_workspace\": \"{}\",\n",
-                "  \"provider_cwd\": \"{}\"\n",
-                "}}\n"
-            ),
-            escape_json_string(&run.plan.run_id),
-            escape_json_string(intent_id),
-            escape_json_string(&run.reason),
-            escape_json_string(&base_workspace.display().to_string()),
-            execution_workspace
-                .to_str()
-                .map(escape_json_string)
-                .map(|value| format!("\"{value}\""))
-                .unwrap_or_else(|| String::from("null")),
-            escape_json_string(&execution_workspace.display().to_string()),
-            escape_json_string(&execution.provider_cwd),
-        );
-        let result = tool
-            .execute(ToolRequest::FileWrite {
-                path,
-                contents,
-                append: false,
-            })
-            .map_err(|error| format!("runtime_compose.rollback: {error}"))?;
-        let ToolResult::FileWrite(FileWriteOutput { path, .. }) = result else {
-            return Err(String::from(
-                "runtime_compose.rollback: unexpected non-file-write result",
-            ));
-        };
-
-        Ok(Some(RuntimeRunRollbackMetadata {
-            metadata_path: path.display().to_string(),
-            restore_path: base_workspace.display().to_string(),
-            cleanup_path: Some(execution_workspace.display().to_string()),
-            reason: run.reason.clone(),
-        }))
+        artifacts::write_rollback_metadata(self, intent_id, execution, run)
     }
 
     fn apply_plan(&mut self, plan: RuntimeComposePlan) -> RuntimeComposeExecution {
@@ -997,7 +842,7 @@ impl RuntimeComposeState {
                     Ok(ToolResult::FileWrite(FileWriteOutput { path, evidence, .. })) => (
                         RuntimeComposeStep::Applied,
                         vec![format!("log={}", path.display())],
-                        vec![patch_artifact_from_write_output(path, evidence)],
+                        vec![artifacts::patch_artifact_from_write_output(path, evidence)],
                     ),
                     Ok(_) => (RuntimeComposeStep::Applied, Vec::new(), Vec::new()),
                     Err(error) => (
@@ -1433,78 +1278,6 @@ fn parse_command_allowlist(raw: &str) -> Option<Vec<String>> {
     }
 }
 
-fn patch_artifact_from_write_output(
-    path: std::path::PathBuf,
-    evidence: FileMutationEvidence,
-) -> RuntimeComposePatchArtifact {
-    RuntimeComposePatchArtifact {
-        operation: evidence.operation,
-        target_path: path.display().to_string(),
-        artifact_path: evidence.artifact_path.display().to_string(),
-        before_digest: evidence.before_digest,
-        after_digest: evidence.after_digest,
-        before_excerpt: evidence.before_excerpt,
-        after_excerpt: evidence.after_excerpt,
-        unified_diff: evidence.unified_diff,
-    }
-}
-
-fn render_string_list(items: &[String]) -> String {
-    if items.is_empty() {
-        String::from("none")
-    } else {
-        items.join(" | ")
-    }
-}
-
-fn render_step_journal(steps: &[RuntimeRunStepRecord]) -> String {
-    if steps.is_empty() {
-        return String::from("none");
-    }
-
-    steps
-        .iter()
-        .map(|step| {
-            format!(
-                "{}:{}:{}:{}",
-                step.phase, step.status, step.label, step.evidence
-            )
-        })
-        .collect::<Vec<_>>()
-        .join(" | ")
-}
-
-fn render_patch_targets(artifacts: &[RuntimeComposePatchArtifact]) -> String {
-    if artifacts.is_empty() {
-        return String::from("none");
-    }
-
-    artifacts
-        .iter()
-        .map(|artifact| artifact.target_path.as_str())
-        .collect::<Vec<_>>()
-        .join(" | ")
-}
-
-fn render_patch_evidence(artifacts: &[RuntimeComposePatchArtifact]) -> String {
-    if artifacts.is_empty() {
-        return String::from("none");
-    }
-
-    artifacts
-        .iter()
-        .map(|artifact| {
-            format!(
-                "{}:{}:{}",
-                artifact.operation,
-                artifact.target_path,
-                artifact.after_excerpt.as_deref().unwrap_or("no_excerpt")
-            )
-        })
-        .collect::<Vec<_>>()
-        .join(" | ")
-}
-
 fn complete_provider_request(
     provider: Arc<dyn ProviderAdapter>,
     request: ProviderRequest,
@@ -1637,7 +1410,7 @@ pub fn run_reason_detail(reason: &str) -> String {
     String::from("none")
 }
 
-fn step_name(step: &RuntimeComposeStep) -> &'static str {
+pub(crate) fn step_name(step: &RuntimeComposeStep) -> &'static str {
     match step {
         RuntimeComposeStep::Skipped => "skipped",
         RuntimeComposeStep::Applied => "applied",

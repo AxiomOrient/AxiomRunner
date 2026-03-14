@@ -1,5 +1,4 @@
 use crate::state_store::PendingRunSnapshot;
-use crate::display::mode_name;
 use crate::trace_store::TraceRunSummary;
 use axonrunner_core::ExecutionMode;
 
@@ -88,48 +87,5 @@ impl From<StatusInput> for StatusSnapshot {
 }
 
 pub fn render_status_lines(snapshot: &StatusSnapshot) -> Vec<String> {
-    let mut lines = vec![
-        format!(
-            "status revision={} mode={} facts={} denied={} audit={}",
-            snapshot.state.revision,
-            mode_name(snapshot.state.mode),
-            snapshot.state.facts,
-            snapshot.state.denied,
-            snapshot.state.audit
-        ),
-        format!(
-            "status runtime provider_id={} provider_model={} provider_state={} provider_detail={} memory_enabled={} memory_state={} tool_enabled={} tool_state={}",
-            snapshot.runtime.provider_id,
-            snapshot.runtime.provider_model,
-            snapshot.runtime.provider_state,
-            snapshot.runtime.provider_detail,
-            snapshot.runtime.memory_enabled,
-            snapshot.runtime.memory_state,
-            snapshot.runtime.tool_enabled,
-            snapshot.runtime.tool_state
-        ),
-    ];
-    if let Some(run) = &snapshot.runtime.latest_run {
-        lines.push(format!(
-            "status run run_id={} phase={} outcome={} reason={} planned_steps={} step_count={}",
-            run.run_id,
-            run.phase,
-            run.outcome,
-            run.reason,
-            run.planned_steps,
-            run.step_ids.len()
-        ));
-    }
-    if let Some(pending) = &snapshot.runtime.pending_run {
-        lines.push(format!(
-            "status pending_run run_id={} goal_file_path={} phase={} reason={} approval_state={} verifier_state={}",
-            pending.run_id,
-            pending.goal_file_path,
-            pending.phase,
-            pending.reason,
-            pending.approval_state,
-            pending.verifier_state
-        ));
-    }
-    lines
+    crate::operator_render::render_status_lines(snapshot)
 }

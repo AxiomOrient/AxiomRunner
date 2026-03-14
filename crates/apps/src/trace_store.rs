@@ -1,7 +1,8 @@
 use crate::display::outcome_name;
 use crate::runtime_compose::{
-    RuntimeComposeExecution, RuntimeComposePatchArtifact, RuntimeRunRecord,
-    RuntimeRunRollbackMetadata, RuntimeRunStepRecord, run_outcome_name, run_phase_name,
+    RuntimeComposeExecution, RuntimeComposePatchArtifact, RuntimeRunCheckpointMetadata,
+    RuntimeRunRecord, RuntimeRunRollbackMetadata, RuntimeRunStepRecord, run_outcome_name,
+    run_phase_name,
 };
 use axonrunner_core::{AgentState, DecisionOutcome};
 use serde::{Deserialize, Serialize};
@@ -85,7 +86,17 @@ pub struct TraceRunSummary {
     pub planned_steps: usize,
     pub repair: TraceRepairSummary,
     #[serde(default)]
+    pub checkpoint: Option<TraceCheckpointSummary>,
+    #[serde(default)]
     pub rollback: Option<TraceRollbackSummary>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TraceCheckpointSummary {
+    pub metadata_path: String,
+    pub restore_path: String,
+    pub execution_workspace: String,
+    pub reason: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -230,6 +241,7 @@ impl TraceStore {
                     "status": input.run.repair.status,
                     "summary": input.run.repair.summary,
                 },
+                "checkpoint": input.run.checkpoint.as_ref().map(trace_checkpoint_summary),
                 "rollback": input.run.rollback.as_ref().map(trace_rollback_summary),
             },
             "artifacts": {
@@ -563,6 +575,15 @@ fn trace_patch_artifact(artifact: &RuntimeComposePatchArtifact) -> TracePatchArt
     }
 }
 
+fn trace_checkpoint_summary(checkpoint: &RuntimeRunCheckpointMetadata) -> serde_json::Value {
+    json!({
+        "metadata_path": checkpoint.metadata_path,
+        "restore_path": checkpoint.restore_path,
+        "execution_workspace": checkpoint.execution_workspace,
+        "reason": checkpoint.reason,
+    })
+}
+
 fn trace_rollback_summary(rollback: &RuntimeRunRollbackMetadata) -> serde_json::Value {
     json!({
         "metadata_path": rollback.metadata_path,
@@ -700,6 +721,7 @@ mod tests {
                     summary: String::from("verification_passed"),
                 },
                 elapsed_ms: 0,
+                checkpoint: None,
                 rollback: None,
             }),
             artifacts: TraceArtifacts {
@@ -944,6 +966,7 @@ mod tests {
                     summary: String::from("verification_passed"),
                 },
                 elapsed_ms: 0,
+                checkpoint: None,
                 rollback: None,
             }),
             artifacts: TraceArtifacts {

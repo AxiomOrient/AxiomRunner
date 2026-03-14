@@ -17,6 +17,17 @@
 - `6`: runtime execution error
 - `7`: runtime shutdown error
 
+## v0.1 Release Gate
+
+v0.1 출하 전에는 아래가 모두 잠겨 있어야 한다.
+
+- retained CLI surface: `run`, `status`, `replay`, `resume`, `abort`, `doctor`, `health`, `help`
+- operator-visible blocker: approval_required, budget_exhausted, blocked, failed, aborted
+- docs truth lock: README, RUNBOOK, CAPABILITY_MATRIX, charter, release gate 테스트가 같은 surface를 말함
+- autonomy evidence: `autonomous_eval_corpus`, `fault_path_suite`, `nightly_dogfood_contract`, `release_security_gate`
+
+이 중 하나라도 깨지면 version을 올리지 않고 release를 막는다.
+
 ## Changelog
 
 - retained commands 변화는 첫 줄에 드러나야 한다.

@@ -374,7 +374,12 @@ mod tests {
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
     use std::path::PathBuf;
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
+    use tokio::time::sleep;
 
     fn fake_cli(label: &str, stdout: &str) -> PathBuf {
         let tick = SystemTime::now()
@@ -512,5 +517,47 @@ mod tests {
         assert!(can_reuse_session("/tmp/work", "gpt-5-codex", &request));
         assert!(!can_reuse_session("/tmp/other", "gpt-5-codex", &request));
         assert!(!can_reuse_session("/tmp/work", "gpt-4.1", &request));
+    }
+
+    #[tokio::test]
+    async fn codex_runtime_provider_serializes_request_entry_under_stress() {
+        let provider = Arc::new(CodexRuntimeProvider::new("codek"));
+        let active = Arc::new(AtomicUsize::new(0));
+        let peak = Arc::new(AtomicUsize::new(0));
+        let mut tasks = Vec::new();
+
+        for _ in 0..16 {
+            let provider = Arc::clone(&provider);
+            let active = Arc::clone(&active);
+            let peak = Arc::clone(&peak);
+            tasks.push(tokio::spawn(async move {
+                let _guard = provider.request_serialization.lock().await;
+                let now = active.fetch_add(1, Ordering::SeqCst) + 1;
+                loop {
+                    let seen = peak.load(Ordering::SeqCst);
+                    if now <= seen {
+                        break;
+                    }
+                    if peak
+                        .compare_exchange(seen, now, Ordering::SeqCst, Ordering::SeqCst)
+                        .is_ok()
+                    {
+                        break;
+                    }
+                }
+                sleep(Duration::from_millis(10)).await;
+                active.fetch_sub(1, Ordering::SeqCst);
+            }));
+        }
+
+        for task in tasks {
+            task.await.expect("stress task should complete");
+        }
+
+        assert_eq!(
+            peak.load(Ordering::SeqCst),
+            1,
+            "request serialization must allow only one active request section"
+        );
     }
 }

@@ -25,12 +25,14 @@
 
 ## Next Backlog
 
-큰 전환은 이미 끝났고, 현재 cycle 기준으로 열린 hardening task는 없다.
-이후 작업은 새 backlog에서만 연다.
+큰 전환은 이미 끝났지만, 현재 cycle에는 아직 닫아야 할 hardening task가 남아 있다.
+현재 backlog는 새 기능 추가가 아니라 제품 의미를 잠그는 일에만 쓴다.
 
-- richer workflow-pack selection
-- richer verifier schema
-- finer-grained risk classifier
+- truth lock: 문서, 테스트, release gate가 같은 제품을 말하게 맞춘다.
+- operator lock: approval, budget, resume, abort 의미를 status/replay/report까지 같은 뜻으로 고정한다.
+- workspace safety: execution workspace, artifact workspace, isolated worktree, rollback evidence를 잠근다.
+- developer automation: representative example pack과 verifier 힌트를 operator-facing asset으로 고정한다.
+- eval / release hardening: false-success, degraded provider path, nightly dogfood를 출하 기준에 반영한다.
 
 ## Required Product Contract
 
@@ -58,3 +60,5 @@
 
 1. `docs/README.md`
 2. `docs/WORKFLOW_PACK_CONTRACT.md`
+3. `docs/CAPABILITY_MATRIX.md`
+4. `docs/RUNBOOK.md`

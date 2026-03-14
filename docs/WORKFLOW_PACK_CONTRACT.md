@@ -97,6 +97,28 @@ workflow pack이 하면 안 되는 것:
 - `done` 판단 규칙 우회
 - adapter마다 다른 resume/abort 의미 정의
 
+## Adapter Authoring Boundary
+
+user-provided adapter는 backend만 제공해야 한다.
+
+adapter가 소유하는 것:
+
+- provider substrate 연결
+- tool execution backend
+- memory backend
+- health probe detail
+
+adapter가 소유하지 않는 것:
+
+- `run`, `resume`, `abort` phase 의미
+- `success`, `blocked`, `budget_exhausted`, `approval_required`, `failed`, `aborted` outcome 의미
+- `status`, `replay`, `report` schema
+- verify-before-done rule
+- workflow pack manifest schema
+
+즉 adapter는 AxonRunner 본체 semantics를 구현하는 것이 아니라,
+이미 잠긴 semantics를 실행 가능한 backend로 연결하는 역할만 한다.
+
 ## Example
 
 ```text

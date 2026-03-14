@@ -9,6 +9,7 @@ mod dev_guard;
 mod doctor;
 mod env_util;
 mod goal_file;
+mod operator_render;
 mod replay;
 mod runtime_compose;
 mod state_store;

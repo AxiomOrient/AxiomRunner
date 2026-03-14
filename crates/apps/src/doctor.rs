@@ -143,67 +143,7 @@ pub fn build_doctor_report(
 }
 
 pub fn render_doctor_lines(report: &DoctorReport) -> Vec<String> {
-    let mut lines = vec![
-        format!(
-            "doctor ok={} profile={} provider_id={} provider_model={} provider_experimental={}",
-            report.ok,
-            report.profile,
-            report.provider_id,
-            report.provider_model,
-            report.provider_experimental
-        ),
-        format!(
-            "doctor state revision={} mode={} facts={} denied={} audit={}",
-            report.state.revision,
-            report.state.mode,
-            report.state.facts,
-            report.state.denied,
-            report.state.audit
-        ),
-        format!(
-            "doctor runtime provider_state={} memory_state={} tool_state={}",
-            report.runtime.provider_state, report.runtime.memory_state, report.runtime.tool_state
-        ),
-        format!(
-            "doctor detail provider_detail={} memory_detail={} tool_detail={}",
-            report.runtime.provider_detail,
-            report.runtime.memory_detail,
-            report.runtime.tool_detail
-        ),
-        format!(
-            "doctor async_host detail={}",
-            report.runtime.async_host_detail
-        ),
-        format!(
-            "doctor paths workspace={} state_path={} trace_events_path={} tool_log_path={}",
-            report.paths.workspace,
-            report.paths.state_path,
-            report.paths.trace_events_path,
-            report.paths.tool_log_path
-        ),
-    ];
-
-    if let Some(pending) = &report.pending_run {
-        lines.push(format!(
-            "doctor pending_run run_id={} intent_id={} goal_file_path={} phase={} reason={} approval_state={} verifier_state={}",
-            pending.run_id,
-            pending.intent_id,
-            pending.goal_file_path,
-            pending.phase,
-            pending.reason,
-            pending.approval_state,
-            pending.verifier_state
-        ));
-    }
-
-    for check in &report.checks {
-        lines.push(format!(
-            "doctor check name={} state={} detail={}",
-            check.name, check.state, check.detail
-        ));
-    }
-
-    lines
+    crate::operator_render::render_doctor_lines(report)
 }
 
 fn format_async_host_detail(

@@ -326,6 +326,11 @@ fn e2e_cli_goal_run_can_use_isolated_git_worktree() {
     assert_ne!(pwd_stdout, repo_root.display().to_string());
     assert!(pwd_stdout.contains("run-1"));
     assert!(stdout_of(&run).contains("phase=completed outcome=success"));
+    assert!(
+        artifact_workspace
+            .join(".axonrunner/artifacts/cli-1.checkpoint.json")
+            .exists()
+    );
 
     let _ = fs::remove_dir_all(repo_root);
     let _ = fs::remove_dir_all(artifact_workspace);
@@ -368,14 +373,25 @@ fn e2e_cli_failed_isolated_run_writes_rollback_metadata() {
 
     assert_eq!(run.status.code(), Some(6));
     assert!(replay.status.success(), "stderr:\n{}", stderr_of(&replay));
+    let checkpoint_path = artifact_workspace.join(".axonrunner/artifacts/cli-1.checkpoint.json");
     let rollback_path = artifact_workspace.join(".axonrunner/artifacts/cli-1.rollback.json");
+    assert!(checkpoint_path.exists(), "checkpoint metadata should exist");
     assert!(rollback_path.exists(), "rollback metadata should exist");
     let report_path = artifact_workspace.join(".axonrunner/artifacts/cli-1.report.md");
     let report = fs::read_to_string(&report_path).expect("rollback report should be readable");
+    let checkpoint_json: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(&checkpoint_path).expect("checkpoint metadata should be readable"),
+    )
+    .expect("checkpoint metadata should be valid json");
     let rollback_json: serde_json::Value = serde_json::from_str(
         &fs::read_to_string(&rollback_path).expect("rollback metadata should be readable"),
     )
     .expect("rollback metadata should be valid json");
+    assert_eq!(checkpoint_json["schema"], "axonrunner.checkpoint.v1");
+    assert_eq!(
+        checkpoint_json["restore_path"],
+        canonical_repo_root.display().to_string()
+    );
     assert_eq!(rollback_json["schema"], "axonrunner.rollback.v1");
     assert_eq!(
         rollback_json["restore_path"],
@@ -388,8 +404,11 @@ fn e2e_cli_failed_isolated_run_writes_rollback_metadata() {
             .contains("run-1")
     );
     let replay_stdout = stdout_of(&replay);
+    assert!(replay_stdout.contains("replay checkpoint metadata="));
     assert!(replay_stdout.contains("replay rollback metadata="));
     assert!(replay_stdout.contains(canonical_repo_root.display().to_string().as_str()));
+    assert!(report.contains("checkpoint=metadata="));
+    assert!(report.contains("cli-1.checkpoint.json"));
     assert!(report.contains("rollback=metadata="));
     assert!(report.contains("cli-1.rollback.json"));
     assert!(report.contains("restore_path="));
@@ -1001,6 +1020,72 @@ fn e2e_cli_goal_file_blocks_when_step_budget_is_already_exhausted() {
 }
 
 #[test]
+fn e2e_cli_goal_file_blocks_when_token_budget_is_already_exhausted() {
+    let workspace = unique_path("goal-file-token-budget-workspace", "dir");
+    let goal_file = unique_path("goal-file-token-budget", "json");
+    fs::write(
+        &goal_file,
+        r#"{
+  "summary": "Token budget exhaustion before execution",
+  "workspace_root": "/workspace",
+  "constraints": [],
+  "done_conditions": [
+    { "label": "report", "evidence": "report artifact exists" }
+  ],
+  "verification_checks": [
+    { "label": "release gate", "detail": "cargo test -p axonrunner_apps --test release_security_gate" }
+  ],
+  "budget": { "max_steps": 5, "max_minutes": 10, "max_tokens": 64 },
+  "approval_mode": "never"
+}"#,
+    )
+    .expect("goal file should be written");
+
+    let run = run_cli_with_env(
+        &["run", path_str(&goal_file)],
+        &[("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
+        "goal-file-token-budget-run",
+    );
+    let status = run_cli_with_env(
+        &["status", "run-1"],
+        &[("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
+        "goal-file-token-budget-status",
+    );
+    let replay = run_cli_with_env(
+        &["replay", "run-1"],
+        &[("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
+        "goal-file-token-budget-replay",
+    );
+
+    assert!(run.status.success());
+    assert!(stdout_of(&run).contains(
+        "run intent_id=cli-1 phase=blocked outcome=budget_exhausted reason=budget_exhausted_before_execution_tokens:4096>64"
+    ));
+    assert!(status.status.success());
+    assert!(
+        stdout_of(&status)
+            .contains("status run run_id=run-1 phase=blocked outcome=budget_exhausted")
+    );
+    assert!(replay.status.success());
+    assert!(
+        stdout_of(&replay)
+            .contains("replay run run_id=run-1 phase=blocked outcome=budget_exhausted")
+    );
+    assert!(
+        stdout_of(&replay).contains(
+            "reason_code=budget_exhausted_before_execution_tokens reason_detail=4096>64"
+        )
+    );
+    let report = fs::read_to_string(workspace.join(".axonrunner/artifacts/cli-1.report.md"))
+        .expect("token budget report should exist");
+    assert!(report.contains("run_reason_code=budget_exhausted_before_execution_tokens"));
+    assert!(report.contains("run_reason_detail=4096>64"));
+
+    let _ = fs::remove_dir_all(workspace);
+    let _ = fs::remove_file(goal_file);
+}
+
+#[test]
 fn e2e_cli_goal_file_uses_bounded_repair_budget() {
     let workspace = unique_path("goal-file-repair-budget-workspace", "dir");
     let goal_file = unique_path("goal-file-repair-budget", "json");
@@ -1049,6 +1134,56 @@ fn e2e_cli_goal_file_uses_bounded_repair_budget() {
             .contains("replay repair attempted=true attempts=1 status=budget_exhausted")
     );
     assert!(stdout_of(&replay).contains("repair_budget_exhausted:attempts=1/1"));
+
+    let _ = fs::remove_dir_all(workspace);
+    let _ = fs::remove_file(goal_file);
+}
+
+#[test]
+fn e2e_cli_goal_file_zero_repair_budget_does_not_claim_attempt() {
+    let workspace = unique_path("goal-file-zero-repair-budget-workspace", "dir");
+    let goal_file = unique_path("goal-file-zero-repair-budget", "json");
+    fs::write(
+        &goal_file,
+        r#"{
+  "summary": "Repair budget exhausted before any retry",
+  "workspace_root": "/workspace",
+  "constraints": [],
+  "done_conditions": [
+    { "label": "report", "evidence": "report artifact exists" }
+  ],
+  "verification_checks": [
+    { "label": "release gate", "detail": "cargo test -p axonrunner_apps --test release_security_gate" }
+  ],
+  "budget": { "max_steps": 5, "max_minutes": 10, "max_tokens": 8000 },
+  "approval_mode": "never"
+}"#,
+    )
+    .expect("goal file should be written");
+
+    let run = run_cli_with_env(
+        &["run", path_str(&goal_file)],
+        &[
+            ("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace)),
+            ("AXONRUNNER_RUNTIME_COMMAND_ALLOWLIST", "git"),
+        ],
+        "goal-file-zero-repair-budget-run",
+    );
+    let replay = run_cli_with_env(
+        &["replay", "run-1"],
+        &[("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
+        "goal-file-zero-repair-budget-replay",
+    );
+
+    assert!(run.status.success());
+    assert!(stdout_of(&run).contains("phase=blocked outcome=budget_exhausted"));
+    assert!(stdout_of(&run).contains("repair_budget_exhausted:attempts=0/0"));
+    assert!(replay.status.success());
+    assert!(
+        stdout_of(&replay)
+            .contains("replay repair attempted=false status=budget_exhausted")
+    );
+    assert!(stdout_of(&replay).contains("repair_budget_exhausted:attempts=0/0"));
 
     let _ = fs::remove_dir_all(workspace);
     let _ = fs::remove_file(goal_file);

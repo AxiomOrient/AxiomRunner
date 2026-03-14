@@ -117,6 +117,11 @@ representative verifier examples:
 - `examples/python_fastapi`
 - 실행 방법: [examples/README.md](examples/README.md)
 
+developer automation milestone:
+
+- `v0.1`: honest autonomous runtime lock
+- `v0.2`: representative app/server automation packs + safer workspace execution
+
 ## 설정 표면
 
 정식 config surface:

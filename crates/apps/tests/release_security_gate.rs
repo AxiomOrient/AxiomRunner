@@ -23,6 +23,7 @@ use cli_command::USAGE;
 use common::*;
 use config_loader::AppConfig;
 use dev_guard::{GuardError, enforce_current_build, enforce_release_gate};
+use std::path::{Path, PathBuf};
 
 fn mock_config(profile: &str) -> AppConfig {
     AppConfig {
@@ -297,4 +298,120 @@ fn release_security_gate_autonomy_evidence_bundle_is_locked() {
             "autonomy evidence docs missing detail: {token}"
         );
     }
+}
+
+#[test]
+fn release_security_gate_relative_doc_and_example_paths_exist() {
+    let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .canonicalize()
+        .expect("repo root should resolve");
+    let docs = [
+        ("README.md", include_str!("../../../README.md")),
+        ("docs/README.md", include_str!("../../../docs/README.md")),
+        ("docs/RUNBOOK.md", include_str!("../../../docs/RUNBOOK.md")),
+        (
+            "docs/AUTONOMOUS_AGENT_TARGET.md",
+            include_str!("../../../docs/AUTONOMOUS_AGENT_TARGET.md"),
+        ),
+        (
+            "docs/WORKFLOW_PACK_CONTRACT.md",
+            include_str!("../../../docs/WORKFLOW_PACK_CONTRACT.md"),
+        ),
+        ("examples/README.md", include_str!("../../../examples/README.md")),
+    ];
+
+    for (doc_name, contents) in docs {
+        for path in relative_markdown_links(contents) {
+            assert!(
+                repo_relative_path_exists(&repo_root, &path),
+                "{doc_name} references missing markdown link path: {path}"
+            );
+        }
+        for path in repo_path_code_spans(contents) {
+            assert!(
+                repo_relative_path_exists(&repo_root, &path),
+                "{doc_name} references missing repo path: {path}"
+            );
+        }
+    }
+}
+
+fn relative_markdown_links(contents: &str) -> Vec<String> {
+    let mut paths = Vec::new();
+    let bytes = contents.as_bytes();
+    let mut index = 0usize;
+
+    while index < bytes.len() {
+        if bytes[index] != b']' || index + 1 >= bytes.len() || bytes[index + 1] != b'(' {
+            index += 1;
+            continue;
+        }
+        let start = index + 2;
+        let Some(end_rel) = contents[start..].find(')') else {
+            break;
+        };
+        let raw = contents[start..start + end_rel].trim();
+        if is_repo_relative_path(raw) {
+            paths.push(raw.to_owned());
+        }
+        index = start + end_rel + 1;
+    }
+
+    paths
+}
+
+fn repo_path_code_spans(contents: &str) -> Vec<String> {
+    let mut paths = Vec::new();
+    let mut in_span = false;
+    let mut current = String::new();
+
+    for ch in contents.chars() {
+        if ch == '`' {
+            if in_span {
+                let value = current.trim();
+                if is_repo_relative_path(value) {
+                    paths.push(value.to_owned());
+                }
+                current.clear();
+            }
+            in_span = !in_span;
+            continue;
+        }
+        if in_span {
+            current.push(ch);
+        }
+    }
+
+    paths
+}
+
+fn is_repo_relative_path(value: &str) -> bool {
+    if value.is_empty()
+        || value.starts_with('#')
+        || value.starts_with("http://")
+        || value.starts_with("https://")
+        || value.starts_with("mailto:")
+        || value.contains(' ')
+        || value.contains('<')
+        || value.contains('>')
+    {
+        return false;
+    }
+
+    matches!(
+        value,
+        "README.md"
+            | "CHANGELOG.md"
+            | "Cargo.toml"
+            | "Cargo.lock"
+            | _ if value.starts_with("docs/")
+                || value.starts_with("examples/")
+                || value.starts_with("scripts/")
+                || value.starts_with("crates/")
+    )
+}
+
+fn repo_relative_path_exists(repo_root: &Path, relative: &str) -> bool {
+    repo_root.join(relative).exists()
 }
