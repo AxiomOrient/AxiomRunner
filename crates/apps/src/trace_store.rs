@@ -59,6 +59,8 @@ pub struct TracePatchArtifact {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TraceRepairSummary {
     pub attempted: bool,
+    #[serde(default)]
+    pub attempts: usize,
     pub status: String,
     pub summary: String,
 }
@@ -73,6 +75,12 @@ pub struct TraceRunSummary {
     pub phase: String,
     pub outcome: String,
     pub reason: String,
+    #[serde(default = "default_trace_approval_state")]
+    pub approval_state: String,
+    #[serde(default = "default_trace_verifier_state")]
+    pub verifier_state: String,
+    #[serde(default)]
+    pub elapsed_ms: u64,
     pub plan_summary: String,
     pub planned_steps: usize,
     pub repair: TraceRepairSummary,
@@ -211,10 +219,14 @@ impl TraceStore {
                 "phase": run_phase_name(input.run.phase),
                 "outcome": run_outcome_name(input.run.outcome),
                 "reason": input.run.reason,
+                "approval_state": trace_approval_state(input.run),
+                "verifier_state": input.run.verification.status,
+                "elapsed_ms": input.run.elapsed_ms,
                 "plan_summary": input.run.plan.summary,
                 "planned_steps": input.run.plan.planned_steps,
                 "repair": {
                     "attempted": input.run.repair.attempted,
+                    "attempts": input.run.repair.attempts,
                     "status": input.run.repair.status,
                     "summary": input.run.repair.summary,
                 },
@@ -358,15 +370,24 @@ impl JsonlTraceStorage {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
             Err(error) => return Err(format!("read trace event log failed: {error}")),
         };
-
-        raw.lines()
+        let lines = raw
+            .lines()
             .filter(|line| !line.trim().is_empty())
-            .enumerate()
-            .map(|(index, line)| {
-                serde_json::from_str::<TraceIntentEvent>(line)
-                    .map_err(|error| format!("parse trace line {} failed: {error}", index + 1))
-            })
-            .collect()
+            .collect::<Vec<_>>();
+        let last_index = lines.len().saturating_sub(1);
+        let mut events = Vec::with_capacity(lines.len());
+
+        for (index, line) in lines.into_iter().enumerate() {
+            match serde_json::from_str::<TraceIntentEvent>(line) {
+                Ok(event) => events.push(event),
+                Err(_) if index == last_index && !raw.ends_with('\n') => break,
+                Err(error) => {
+                    return Err(format!("parse trace line {} failed: {error}", index + 1));
+                }
+            }
+        }
+
+        Ok(events)
     }
 
     fn events_path(&self) -> &PathBuf {
@@ -491,6 +512,14 @@ fn default_trace_verification() -> TraceVerificationSummary {
     }
 }
 
+fn default_trace_approval_state() -> String {
+    String::from("unknown")
+}
+
+fn default_trace_verifier_state() -> String {
+    String::from("unknown")
+}
+
 fn verification_summary(
     execution: &RuntimeComposeExecution,
     run: &RuntimeRunRecord,
@@ -511,6 +540,13 @@ fn verification_summary(
     TraceVerificationSummary {
         status: run.verification.status.to_owned(),
         summary: run.verification.summary.clone(),
+    }
+}
+
+fn trace_approval_state(run: &RuntimeRunRecord) -> &'static str {
+    match run.outcome {
+        crate::runtime_compose::RuntimeRunOutcome::ApprovalRequired => "required",
+        _ => "not_required",
     }
 }
 
@@ -647,15 +683,23 @@ mod tests {
                 } else {
                     String::from("verification_passed")
                 },
+                approval_state: String::from("not_required"),
+                verifier_state: if failed {
+                    String::from("failed")
+                } else {
+                    String::from("passed")
+                },
                 plan_summary: String::from(
                     "intent_id=cli-1 legacy_write key=alpha outcome=accepted",
                 ),
                 planned_steps: 4,
                 repair: TraceRepairSummary {
                     attempted: false,
+                    attempts: 0,
                     status: String::from("skipped"),
                     summary: String::from("verification_passed"),
                 },
+                elapsed_ms: 0,
                 rollback: None,
             }),
             artifacts: TraceArtifacts {
@@ -793,6 +837,44 @@ mod tests {
     }
 
     #[test]
+    fn trace_store_ignores_partial_final_line_without_newline() {
+        let root = unique_dir("partial-tail");
+        fs::create_dir_all(&root).expect("workspace should exist");
+        let store = TraceStore::from_workspace_root(Some(root.clone())).expect("store should init");
+        let path = root.join(".axonrunner/trace/events.jsonl");
+        fs::create_dir_all(path.parent().expect("trace parent should exist"))
+            .expect("trace parent should be created");
+
+        let valid = serde_json::to_string(&event("cli-1", 1, false)).expect("event should serialize");
+        fs::write(&path, format!("{valid}\n{{\"schema\":\"axonrunner.trace.intent.v1\""))
+            .expect("trace log should be written");
+
+        let events = store.load_events().expect("events should load");
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].intent_id, "cli-1");
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn trace_store_rejects_committed_malformed_line() {
+        let root = unique_dir("malformed-line");
+        fs::create_dir_all(&root).expect("workspace should exist");
+        let store = TraceStore::from_workspace_root(Some(root.clone())).expect("store should init");
+        let path = root.join(".axonrunner/trace/events.jsonl");
+        fs::create_dir_all(path.parent().expect("trace parent should exist"))
+            .expect("trace parent should be created");
+
+        let valid = serde_json::to_string(&event("cli-1", 1, false)).expect("event should serialize");
+        fs::write(&path, format!("{valid}\n{{bad json}}\n")).expect("trace log should be written");
+
+        let error = store.load_events().expect_err("malformed committed line should fail");
+        assert!(error.contains("parse trace line 2 failed"));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn trace_store_artifact_index_compacts_long_patch_lists() {
         let mut long_event = event("cli-long", 1, false);
         long_event.patch_artifacts = (0..10)
@@ -851,13 +933,17 @@ mod tests {
                 phase: String::from("failed"),
                 outcome: String::from("failed"),
                 reason: String::from("done_condition_missing_report_artifact:report"),
+                approval_state: String::from("not_required"),
+                verifier_state: String::from("failed"),
                 plan_summary: String::from("intent_id=cli-false-done goal"),
                 planned_steps: 4,
                 repair: TraceRepairSummary {
                     attempted: false,
+                    attempts: 0,
                     status: String::from("skipped"),
                     summary: String::from("verification_passed"),
                 },
+                elapsed_ms: 0,
                 rollback: None,
             }),
             artifacts: TraceArtifacts {

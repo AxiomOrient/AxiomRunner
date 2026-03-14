@@ -57,5 +57,4 @@
 자세한 closure context와 future extension 근거는 아래 문서가 소유한다.
 
 1. `docs/transition/README.md`
-2. `docs/transition/REMAINING_GAPS.md`
-3. `docs/transition/WORKFLOW_PACK_CONTRACT.md`
+2. `docs/transition/WORKFLOW_PACK_CONTRACT.md`

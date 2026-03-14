@@ -120,7 +120,7 @@ fn fault_path_suite_covers_provider_tool_and_workspace_substrates() {
         fs::create_dir_all(workspace.join(".axonrunner")).expect("lock dir should exist");
         fs::write(
             workspace.join(".axonrunner/runtime.lock"),
-            "pid=999 command=run\n",
+            format!("pid={} command=run\n", std::process::id()),
         )
         .expect("lock file should exist");
         let run = run_cli_with_env(
@@ -144,8 +144,33 @@ fn fault_path_suite_covers_provider_tool_and_workspace_substrates() {
         let _ = fs::remove_dir_all(workspace);
     }
 
+    {
+        let workspace = unique_path("workspace-stale-lock-workspace", "dir");
+        fs::create_dir_all(workspace.join(".axonrunner")).expect("lock dir should exist");
+        fs::write(
+            workspace.join(".axonrunner/runtime.lock"),
+            "pid=999999 command=run\n",
+        )
+        .expect("stale lock file should exist");
+        let run = run_cli_with_env(
+            &[
+                "run",
+                fixture_goal_path("intake.json")
+                    .to_str()
+                    .expect("utf8 path"),
+            ],
+            &[("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
+        );
+
+        assert!(run.status.success(), "stderr:\n{}", stderr_of(&run));
+        assert!(stdout_of(&run).contains("phase=completed outcome=success"));
+        passed += 1;
+        let _ = fs::remove_dir_all(workspace);
+    }
+
     assert_eq!(
-        passed, total,
+        passed,
+        total + 1,
         "fault path suite must keep all substrate failures visible"
     );
 }

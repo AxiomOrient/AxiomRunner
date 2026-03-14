@@ -74,6 +74,8 @@ axonrunner_apps health
 axonrunner_apps help
 ```
 
+`resume`은 `waiting_approval` 상태의 goal-file pending run 전용이다.
+
 ### compatibility surface
 
 ```bash

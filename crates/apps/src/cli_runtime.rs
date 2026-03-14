@@ -17,6 +17,7 @@ use axonrunner_core::{
     AgentState, DecisionOutcome, DomainEvent, ExecutionMode, Intent, IntentKind, PolicyCode,
     build_policy_audit, decide, evaluate_policy, project_from,
 };
+use std::time::Instant;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct AppliedIntent {
@@ -41,6 +42,7 @@ struct FinalizeRunInput<'a> {
     verification: RuntimeRunVerification,
     repair: RuntimeRunRepair,
     goal_approval_granted: bool,
+    elapsed_ms: u64,
 }
 
 struct StepJournalInput<'a> {
@@ -309,17 +311,42 @@ fn print_usage() {
 
 fn execute_intent(runtime: &mut CliRuntime, intent: &RunTemplate) -> Result<(), String> {
     let previous = runtime.runtime_snapshot();
+    let started_at = Instant::now();
     let run_id = runtime.next_run_id();
     let applied = runtime.apply_template(intent)?;
-    runtime.compose_state.prepare_execution_workspace(&run_id)?;
     let plan =
         runtime
             .compose_state
             .plan_template(intent, &run_id, &applied.intent_id, applied.outcome);
-    let execution = runtime.persist_template_result(intent, &applied);
-    let verification = verify_run(intent, &applied, &execution, &runtime.state);
-    let (execution, verification, repair) =
-        run_repair_loop(runtime, intent, &plan, &applied, execution, verification);
+    let pre_execution_guard = intent.goal_file().and_then(|goal_file| {
+        goal_pre_execution_guard(goal_file, &plan).map(|summary| {
+            (
+                runtime.compose_state.idle_execution(),
+                RuntimeRunVerification {
+                    status: "skipped",
+                    summary,
+                    checks: vec![
+                        format!("goal_file={}", goal_file.path),
+                        format!("workspace_root={}", goal_file.goal.workspace_root),
+                        format!("done_conditions={}", goal_file.goal.done_conditions.len()),
+                        format!(
+                            "verification_checks={}",
+                            goal_file.goal.verification_checks.len()
+                        ),
+                    ],
+                },
+                RuntimeRunRepair::skipped("pre_execution_guard"),
+            )
+        })
+    });
+    let (execution, verification, repair) = if let Some(guard) = pre_execution_guard {
+        guard
+    } else {
+        runtime.compose_state.prepare_execution_workspace(&run_id)?;
+        let execution = runtime.persist_template_result(intent, &applied);
+        let verification = verify_run(intent, &applied, &execution, &runtime.state);
+        run_repair_loop(runtime, intent, &plan, &applied, execution, verification)
+    };
     let mut finalized = finalize_run(
         runtime,
         FinalizeRunInput {
@@ -330,8 +357,10 @@ fn execute_intent(runtime: &mut CliRuntime, intent: &RunTemplate) -> Result<(), 
             verification,
             repair,
             goal_approval_granted: false,
+            elapsed_ms: elapsed_ms(started_at),
         },
     );
+    apply_goal_elapsed_budget(intent, &mut finalized.record);
     let mut report_result = runtime.compose_state.write_report(
         intent,
         &report_write_input(&applied),
@@ -364,6 +393,14 @@ fn execute_intent(runtime: &mut CliRuntime, intent: &RunTemplate) -> Result<(), 
         &finalized.execution,
         &finalized.record,
     )?;
+    if finalized.record.rollback.is_some() {
+        report_result = runtime.compose_state.write_report(
+            intent,
+            &report_write_input(&applied),
+            &finalized.execution,
+            &finalized.record,
+        );
+    }
 
     let mut patch_artifacts = finalized.execution.patch_artifacts.clone();
     if let Ok(report_patch_artifacts) = &report_result {
@@ -432,15 +469,12 @@ fn execute_intent(runtime: &mut CliRuntime, intent: &RunTemplate) -> Result<(), 
 }
 
 fn execute_resume(runtime: &mut CliRuntime, target: &str) -> Result<(), String> {
-    let pending = pending_run_for_target(runtime, target)?.clone();
+    let started_at = Instant::now();
+    let pending = pending_resume_for_target(runtime, target)?.clone();
     runtime
         .compose_state
         .prepare_execution_workspace(&pending.run_id)?;
-    let goal = crate::goal_file::parse_goal_file(&pending.goal_file_path)?;
-    let template = RunTemplate::GoalFile(crate::cli_command::GoalFileTemplate {
-        path: pending.goal_file_path.clone(),
-        goal,
-    });
+    let template = load_pending_goal_template(&pending.goal_file_path)?;
     let plan = runtime.compose_state.plan_template(
         &template,
         &pending.run_id,
@@ -472,8 +506,10 @@ fn execute_resume(runtime: &mut CliRuntime, target: &str) -> Result<(), String> 
             verification,
             repair,
             goal_approval_granted: true,
+            elapsed_ms: elapsed_ms(started_at),
         },
     );
+    apply_goal_elapsed_budget(&template, &mut finalized.record);
     let mut patch_artifacts = runtime.compose_state.write_report(
         &template,
         &report_write_input(&resume_applied),
@@ -497,6 +533,14 @@ fn execute_resume(runtime: &mut CliRuntime, target: &str) -> Result<(), String> 
         &pending.intent_id,
         &finalized.execution,
         &finalized.record,
+    )?;
+    patch_artifacts = rewrite_report_for_rollback(
+        &runtime.compose_state,
+        &template,
+        &report_write_input(&resume_applied),
+        &finalized.execution,
+        &finalized.record,
+        patch_artifacts,
     )?;
     runtime.trace_store.append_intent_event(TraceEventInput {
         actor_id: &runtime.actor_id,
@@ -525,23 +569,16 @@ fn execute_resume(runtime: &mut CliRuntime, target: &str) -> Result<(), String> 
 }
 
 fn execute_abort(runtime: &mut CliRuntime, target: &str) -> Result<(), String> {
+    let started_at = Instant::now();
     let pending = pending_run_for_target(runtime, target)?.clone();
-    let goal = crate::goal_file::parse_goal_file(&pending.goal_file_path)?;
-    let template = RunTemplate::GoalFile(crate::cli_command::GoalFileTemplate {
-        path: pending.goal_file_path.clone(),
-        goal,
-    });
+    let template = load_pending_goal_template(&pending.goal_file_path)?;
     let plan = runtime.compose_state.plan_template(
         &template,
         &pending.run_id,
         &pending.intent_id,
         DecisionOutcome::Accepted,
     );
-    let execution = runtime.compose_state.apply_template(
-        &template,
-        &pending.intent_id,
-        DecisionOutcome::Accepted,
-    );
+    let execution = runtime.compose_state.idle_execution();
     let verification = RuntimeRunVerification {
         status: "passed",
         summary: String::from("operator_abort"),
@@ -561,6 +598,7 @@ fn execute_abort(runtime: &mut CliRuntime, target: &str) -> Result<(), String> {
         verification,
         repair,
         rollback: None,
+        elapsed_ms: elapsed_ms(started_at),
         phase: RuntimeRunPhase::Aborted,
         outcome: RuntimeRunOutcome::Aborted,
         reason: String::from("operator_abort"),
@@ -639,6 +677,7 @@ fn run_repair_loop(
             },
             RuntimeRunRepair {
                 attempted: false,
+                attempts: 0,
                 status: "budget_exhausted",
                 summary: String::from("repair_budget_exhausted:attempts=0/0"),
                 tool: crate::runtime_compose::RuntimeComposeStep::Skipped,
@@ -678,6 +717,7 @@ fn run_repair_loop(
                 next_verification,
                 RuntimeRunRepair {
                     attempted: repair.attempted,
+                    attempts: attempt,
                     status,
                     summary,
                     tool: repair.tool,
@@ -691,6 +731,7 @@ fn run_repair_loop(
         verification = next_verification;
         last_repair = RuntimeRunRepair {
             attempted: repair.attempted,
+            attempts: attempt,
             status: if attempt == repair_budget {
                 "budget_exhausted"
             } else {
@@ -746,6 +787,24 @@ fn pending_run_for_target<'a>(
     Err(format!("pending run not found: {target}"))
 }
 
+fn pending_resume_for_target<'a>(
+    runtime: &'a CliRuntime,
+    target: &str,
+) -> Result<&'a PendingRunSnapshot, String> {
+    let pending = pending_run_for_target(runtime, target).map_err(|_| {
+        String::from(
+            "resume only supports pending goal-file approval runs; no pending approval run is available",
+        )
+    })?;
+    if pending.phase != "waiting_approval" || pending.approval_state != "required" {
+        return Err(format!(
+            "resume only supports pending goal-file approval runs; found phase={} approval_state={}",
+            pending.phase, pending.approval_state
+        ));
+    }
+    Ok(pending)
+}
+
 fn pending_run_snapshot(
     intent: &RunTemplate,
     applied: &AppliedIntent,
@@ -761,7 +820,29 @@ fn pending_run_snapshot(
         goal_file_path: goal_file.path.clone(),
         phase: run_phase_name(record.phase).to_owned(),
         reason: record.reason.clone(),
+        approval_state: String::from("required"),
+        verifier_state: record.verification.status.to_owned(),
     })
+}
+
+fn load_pending_goal_template(goal_file_path: &str) -> Result<RunTemplate, String> {
+    Ok(RunTemplate::GoalFile(
+        crate::goal_file::parse_goal_file_template(goal_file_path)?,
+    ))
+}
+
+fn rewrite_report_for_rollback(
+    compose_state: &crate::runtime_compose::RuntimeComposeState,
+    template: &RunTemplate,
+    input: &ReportWriteInput<'_>,
+    execution: &RuntimeComposeExecution,
+    record: &RuntimeRunRecord,
+    patch_artifacts: Vec<crate::runtime_compose::RuntimeComposePatchArtifact>,
+) -> Result<Vec<crate::runtime_compose::RuntimeComposePatchArtifact>, String> {
+    if record.rollback.is_some() {
+        return compose_state.write_report(template, input, execution, record);
+    }
+    Ok(patch_artifacts)
 }
 
 fn print_intent_result(applied: &AppliedIntent) {
@@ -840,6 +921,7 @@ fn print_status(runtime: &CliRuntime, target: Option<&str>) {
             tool_enabled: compose.tool.enabled,
             tool_state: compose.tool.state.to_string(),
             latest_run,
+            pending_run: runtime.pending_run.clone(),
         },
     });
 
@@ -878,6 +960,7 @@ fn print_doctor(runtime: &CliRuntime, config: &AppConfig, json: bool) -> Result<
         &compose,
         &runtime.trace_store,
         runtime.state_store.path(),
+        runtime.pending_run.as_ref(),
     );
 
     if json {
@@ -1166,6 +1249,7 @@ fn finalize_run(runtime: &CliRuntime, input: FinalizeRunInput<'_>) -> FinalizedR
         verification,
         repair,
         goal_approval_granted,
+        elapsed_ms,
     } = input;
     let compose = runtime.compose_state.health();
 
@@ -1202,6 +1286,7 @@ fn finalize_run(runtime: &CliRuntime, input: FinalizeRunInput<'_>) -> FinalizedR
             verification,
             repair,
             rollback: None,
+            elapsed_ms,
             phase,
             outcome,
             reason,
@@ -1218,26 +1303,24 @@ fn finalize_goal_run(
     compose: &crate::runtime_compose::RuntimeComposeHealth,
     approval_granted: bool,
 ) -> (RuntimeRunPhase, RuntimeRunOutcome, String) {
-    if verification.status == "passed" {
-        if goal_file.goal.budget.max_steps < plan_ref.planned_steps as u64 {
-            (
-                RuntimeRunPhase::Blocked,
-                RuntimeRunOutcome::BudgetExhausted,
-                String::from("budget_exhausted_before_execution"),
-            )
-        } else if goal_requires_pre_execution_approval(&goal_file.goal) && !approval_granted {
-            (
-                RuntimeRunPhase::WaitingApproval,
-                RuntimeRunOutcome::ApprovalRequired,
-                String::from("approval_required_before_execution"),
-            )
-        } else {
-            (
-                RuntimeRunPhase::Completed,
-                RuntimeRunOutcome::Success,
-                String::from("verification_passed"),
-            )
-        }
+    if goal_file.goal.budget.max_steps < plan_ref.planned_steps as u64 {
+        (
+            RuntimeRunPhase::Blocked,
+            RuntimeRunOutcome::BudgetExhausted,
+            String::from("budget_exhausted_before_execution"),
+        )
+    } else if goal_requires_pre_execution_approval(&goal_file.goal) && !approval_granted {
+        (
+            RuntimeRunPhase::WaitingApproval,
+            RuntimeRunOutcome::ApprovalRequired,
+            String::from("approval_required_before_execution"),
+        )
+    } else if verification.status == "passed" {
+        (
+            RuntimeRunPhase::Completed,
+            RuntimeRunOutcome::Success,
+            String::from("verification_passed"),
+        )
     } else if verification.summary.starts_with("repair_budget_exhausted") {
         (
             RuntimeRunPhase::Blocked,
@@ -1321,6 +1404,104 @@ fn goal_requires_pre_execution_approval(goal: &axonrunner_core::RunGoal) -> bool
         goal.approval_mode,
         axonrunner_core::RunApprovalMode::Always | axonrunner_core::RunApprovalMode::OnRisk
     )
+}
+
+fn goal_pre_execution_guard(
+    goal_file: &crate::cli_command::GoalFileTemplate,
+    plan_ref: &crate::runtime_compose::RuntimeRunPlan,
+) -> Option<String> {
+    if goal_file.goal.budget.max_steps < plan_ref.planned_steps as u64 {
+        return Some(String::from("budget_exhausted_before_execution"));
+    }
+    if goal_requires_pre_execution_approval(&goal_file.goal) {
+        return Some(String::from("approval_required_before_execution"));
+    }
+    None
+}
+
+fn apply_goal_elapsed_budget(template: &RunTemplate, record: &mut RuntimeRunRecord) {
+    let Some(goal_file) = template.goal_file() else {
+        return;
+    };
+    let limit_ms = goal_file.goal.budget.max_minutes.saturating_mul(60_000);
+    if record.elapsed_ms > limit_ms
+        && !matches!(
+            record.outcome,
+            RuntimeRunOutcome::ApprovalRequired | RuntimeRunOutcome::Aborted
+        )
+    {
+        record.phase = RuntimeRunPhase::Blocked;
+        record.outcome = RuntimeRunOutcome::BudgetExhausted;
+        record.reason = format!(
+            "budget_exhausted_elapsed_minutes:{}>{}",
+            record.elapsed_ms, limit_ms
+        );
+    }
+}
+
+fn elapsed_ms(started_at: Instant) -> u64 {
+    u64::try_from(started_at.elapsed().as_millis()).unwrap_or(u64::MAX)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axonrunner_core::{DoneCondition, RunApprovalMode, RunBudget, RunGoal, VerificationCheck};
+
+    fn sample_goal_template(minutes: u64) -> RunTemplate {
+        RunTemplate::GoalFile(crate::cli_command::GoalFileTemplate {
+            path: String::from("/tmp/goal.json"),
+            goal: RunGoal {
+                summary: String::from("goal"),
+                workspace_root: String::from("/workspace"),
+                constraints: Vec::new(),
+                done_conditions: vec![DoneCondition {
+                    label: String::from("report"),
+                    evidence: String::from("report exists"),
+                }],
+                verification_checks: vec![VerificationCheck {
+                    label: String::from("unit"),
+                    detail: String::from("cargo test"),
+                }],
+                budget: RunBudget::bounded(5, minutes, 8000),
+                approval_mode: RunApprovalMode::Never,
+            },
+            workflow_pack: None,
+        })
+    }
+
+    #[test]
+    fn elapsed_minute_budget_blocks_goal_runs() {
+        let template = sample_goal_template(1);
+        let mut record = RuntimeRunRecord {
+            plan: crate::runtime_compose::RuntimeRunPlan {
+                run_id: String::from("run-1"),
+                goal: String::from("goal"),
+                summary: String::from("summary"),
+                done_when: String::from("done"),
+                planned_steps: 4,
+                steps: Vec::new(),
+            },
+            step_journal: Vec::new(),
+            verification: RuntimeRunVerification {
+                status: "passed",
+                summary: String::from("goal_execution_verified"),
+                checks: Vec::new(),
+            },
+            repair: RuntimeRunRepair::skipped("verification_passed"),
+            rollback: None,
+            elapsed_ms: 60_001,
+            phase: RuntimeRunPhase::Completed,
+            outcome: RuntimeRunOutcome::Success,
+            reason: String::from("verification_passed"),
+        };
+
+        apply_goal_elapsed_budget(&template, &mut record);
+
+        assert_eq!(record.phase, RuntimeRunPhase::Blocked);
+        assert_eq!(record.outcome, RuntimeRunOutcome::BudgetExhausted);
+        assert!(record.reason.starts_with("budget_exhausted_elapsed_minutes:"));
+    }
 }
 
 fn build_step_journal(input: StepJournalInput<'_>) -> Vec<RuntimeRunStepRecord> {

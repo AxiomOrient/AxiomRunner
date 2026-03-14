@@ -24,6 +24,7 @@ pub struct CodexRuntimeProvider {
     id_str: &'static str,
     cli_bin: PathBuf,
     active_session: Mutex<Option<ActiveSession>>,
+    request_serialization: Mutex<()>,
 }
 
 impl CodexRuntimeProvider {
@@ -32,6 +33,7 @@ impl CodexRuntimeProvider {
             id_str,
             cli_bin: cli_bin_from_env(),
             active_session: Mutex::new(None),
+            request_serialization: Mutex::new(()),
         }
     }
 
@@ -41,6 +43,7 @@ impl CodexRuntimeProvider {
             id_str,
             cli_bin: cli_bin.into(),
             active_session: Mutex::new(None),
+            request_serialization: Mutex::new(()),
         }
     }
 
@@ -146,6 +149,7 @@ impl ProviderAdapter for CodexRuntimeProvider {
                 return Err(AdapterError::invalid_input("cwd", "must not be empty"));
             }
 
+            let _request_guard = self.request_serialization.lock().await;
             let session = self.session_for_request(&request).await?;
             let result = match session.ask(request.prompt).await {
                 Ok(result) => result,

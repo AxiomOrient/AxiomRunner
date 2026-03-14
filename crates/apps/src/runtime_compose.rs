@@ -20,7 +20,7 @@ mod plan;
 pub use self::plan::RuntimeRunPlan;
 
 use self::plan::{
-    MemoryPlan, ProviderPlan, RuntimeComposePlan, ToolPlan, build_runtime_compose_plan,
+    MemoryPlan, ProviderPlan, RuntimeComposePlan, ToolCommandPlan, ToolPlan, build_runtime_compose_plan,
     build_runtime_run_plan, goal_verifier_tool_plan,
 };
 
@@ -109,6 +109,7 @@ pub struct RuntimeRunVerification {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeRunRepair {
     pub attempted: bool,
+    pub attempts: usize,
     pub status: &'static str,
     pub summary: String,
     pub tool: RuntimeComposeStep,
@@ -146,6 +147,7 @@ pub struct RuntimeRunRecord {
     pub verification: RuntimeRunVerification,
     pub repair: RuntimeRunRepair,
     pub rollback: Option<RuntimeRunRollbackMetadata>,
+    pub elapsed_ms: u64,
     pub phase: RuntimeRunPhase,
     pub outcome: RuntimeRunOutcome,
     pub reason: String,
@@ -219,6 +221,7 @@ impl RuntimeRunRepair {
     pub fn skipped(summary: impl Into<String>) -> Self {
         Self {
             attempted: false,
+            attempts: 0,
             status: "skipped",
             summary: summary.into(),
             tool: RuntimeComposeStep::Skipped,
@@ -551,6 +554,7 @@ impl RuntimeComposeState {
 
         RuntimeRunRepair {
             attempted: true,
+            attempts: 1,
             status,
             summary,
             tool,
@@ -688,6 +692,20 @@ impl RuntimeComposeState {
         let tool_outputs = render_string_list(&execution.tool_outputs);
         let changed_paths = render_patch_targets(&execution.patch_artifacts);
         let evidence = render_patch_evidence(&execution.patch_artifacts);
+        let health = self.health();
+        let rollback_summary = run
+            .rollback
+            .as_ref()
+            .map(|rollback| {
+                format!(
+                    "metadata={},restore_path={},cleanup_path={},reason={}",
+                    rollback.metadata_path,
+                    rollback.restore_path,
+                    rollback.cleanup_path.as_deref().unwrap_or("none"),
+                    rollback.reason
+                )
+            })
+            .unwrap_or_else(|| String::from("none"));
         let files = [
             (
                 format!("{base}.plan.md"),
@@ -726,13 +744,14 @@ impl RuntimeComposeState {
             (
                 format!("{base}.verify.md"),
                 format!(
-                    "# Verify\n\nphase={}\nrepair_phase={}\nstatus={}\nsummary={}\nchecks={}\nrepair_attempted={}\nrepair_status={}\nrepair_summary={}\nfirst_failure={}\nstep_journal={}\n",
+                    "# Verify\n\nphase={}\nrepair_phase={}\nstatus={}\nsummary={}\nchecks={}\nrepair_attempted={}\nrepair_attempts={}\nrepair_status={}\nrepair_summary={}\nfirst_failure={}\nstep_journal={}\n",
                     run_phase_name(RuntimeRunPhase::Verifying),
                     run_phase_name(RuntimeRunPhase::Repairing),
                     run.verification.status,
                     run.verification.summary,
                     verification_checks,
                     run.repair.attempted,
+                    run.repair.attempts,
                     run.repair.status,
                     run.repair.summary,
                     execution
@@ -745,7 +764,7 @@ impl RuntimeComposeState {
             (
                 format!("{base}.report.md"),
                 format!(
-                    "# Report\n\nintent_id={}\nkind={}\noutcome={}\npolicy={}\nrun_phase={}\nrun_outcome={}\nrun_reason={}\nprovider={}\nprovider_cwd={}\nmemory={}\ntool={}\noutputs={}\nchanged_paths={}\nevidence={}\n",
+                    "# Report\n\nintent_id={}\nkind={}\noutcome={}\npolicy={}\nrun_phase={}\nrun_outcome={}\nrun_reason={}\nrun_reason_code={}\nrun_reason_detail={}\nrun_elapsed_ms={}\nrollback={}\nprovider_health_state={}\nprovider_health_detail={}\nprovider={}\nprovider_cwd={}\nmemory={}\ntool={}\noutputs={}\nchanged_paths={}\nevidence={}\n",
                     input.intent_id,
                     template_kind(template),
                     outcome_name(input.outcome),
@@ -753,6 +772,12 @@ impl RuntimeComposeState {
                     run_phase_name(run.phase),
                     run_outcome_name(run.outcome),
                     run.reason,
+                    run_reason_code(&run.reason),
+                    run_reason_detail(&run.reason),
+                    run.elapsed_ms,
+                    rollback_summary,
+                    health.provider.state,
+                    health.provider.detail,
                     step_name(&execution.provider),
                     execution.provider_cwd,
                     step_name(&execution.memory),
@@ -782,6 +807,18 @@ impl RuntimeComposeState {
         }
 
         Ok(patch_artifacts)
+    }
+
+    pub fn idle_execution(&self) -> RuntimeComposeExecution {
+        RuntimeComposeExecution {
+            provider_output: None,
+            provider_cwd: self.provider_cwd(),
+            provider: RuntimeComposeStep::Skipped,
+            memory: RuntimeComposeStep::Skipped,
+            tool: RuntimeComposeStep::Skipped,
+            tool_outputs: Vec::new(),
+            patch_artifacts: Vec::new(),
+        }
     }
 
     pub fn write_rollback_metadata(
@@ -972,61 +1009,23 @@ impl RuntimeComposeState {
                     ),
                 }
             }
-            ToolPlan::RunCommand {
-                label,
-                program,
-                args,
-            } => {
+            ToolPlan::RunCommands { commands } => {
                 let Some(tool) = self.tool.as_ref() else {
                     return (RuntimeComposeStep::Skipped, Vec::new(), Vec::new());
                 };
-                match tool.execute(ToolRequest::RunCommand { program, args }) {
-                    Ok(ToolResult::RunCommand(RunCommandOutput {
-                        profile,
-                        exit_code,
-                        artifact_path,
-                        ..
-                    })) if exit_code == 0 => (
-                        RuntimeComposeStep::Applied,
-                        vec![format!(
-                            "verifier={} profile={} exit_code={} artifact={}",
-                            label,
-                            profile.as_str(),
-                            exit_code,
-                            artifact_path.display()
-                        )],
-                        Vec::new(),
-                    ),
-                    Ok(ToolResult::RunCommand(RunCommandOutput {
-                        profile,
-                        exit_code,
-                        artifact_path,
-                        ..
-                    })) => (
-                        RuntimeComposeStep::Failed(format!(
-                            "runtime_compose.tool.verifier_failed: label={} exit_code={} artifact={}",
-                            label,
-                            exit_code,
-                            artifact_path.display()
-                        )),
-                        vec![format!(
-                            "verifier={} profile={} exit_code={} artifact={}",
-                            label,
-                            profile.as_str(),
-                            exit_code,
-                            artifact_path.display()
-                        )],
-                        Vec::new(),
-                    ),
-                    Ok(_) => (RuntimeComposeStep::Applied, Vec::new(), Vec::new()),
-                    Err(error) => (
-                        RuntimeComposeStep::Failed(format!(
-                            "runtime_compose.tool.run_command: {error}"
-                        )),
-                        Vec::new(),
-                        Vec::new(),
-                    ),
+                let mut outputs = Vec::new();
+                for command in commands {
+                    match execute_verifier_command(tool.as_ref(), command) {
+                        Ok(output) => outputs.push(output),
+                        Err((failure, output)) => {
+                            if let Some(output) = output {
+                                outputs.push(output);
+                            }
+                            return (RuntimeComposeStep::Failed(failure), outputs, Vec::new());
+                        }
+                    }
                 }
+                (RuntimeComposeStep::Applied, outputs, Vec::new())
             }
         }
     }
@@ -1060,6 +1059,57 @@ impl RuntimeComposeState {
         self.config.tool_workspace = Some(workspace);
         self.tool = Some(Arc::new(tool) as Arc<dyn ToolAdapter>);
         Ok(())
+    }
+}
+
+fn execute_verifier_command(
+    tool: &dyn ToolAdapter,
+    command: ToolCommandPlan,
+) -> Result<String, (String, Option<String>)> {
+    match tool.execute(ToolRequest::RunCommand {
+        program: command.program,
+        args: command.args,
+    }) {
+        Ok(ToolResult::RunCommand(RunCommandOutput {
+            profile,
+            exit_code,
+            artifact_path,
+            ..
+        })) if exit_code == 0 => Ok(format!(
+            "verifier={} profile={} exit_code={} artifact={}",
+            command.label,
+            profile.as_str(),
+            exit_code,
+            artifact_path.display()
+        )),
+        Ok(ToolResult::RunCommand(RunCommandOutput {
+            profile,
+            exit_code,
+            artifact_path,
+            ..
+        })) => {
+            let output = format!(
+                "verifier={} profile={} exit_code={} artifact={}",
+                command.label,
+                profile.as_str(),
+                exit_code,
+                artifact_path.display()
+            );
+            Err((
+                format!(
+                    "runtime_compose.tool.verifier_failed: label={} exit_code={} artifact={}",
+                    command.label,
+                    exit_code,
+                    artifact_path.display()
+                ),
+                Some(output),
+            ))
+        }
+        Ok(_) => Ok(String::new()),
+        Err(error) => Err((
+            format!("runtime_compose.tool.run_command: {error}"),
+            None,
+        )),
     }
 }
 
@@ -1360,6 +1410,9 @@ fn default_command_allowlist() -> Vec<String> {
         String::from("pwd"),
         String::from("git"),
         String::from("cargo"),
+        String::from("npm"),
+        String::from("node"),
+        String::from("python3"),
         String::from("rg"),
         String::from("ls"),
         String::from("cat"),
@@ -1534,6 +1587,56 @@ pub fn run_outcome_name(outcome: RuntimeRunOutcome) -> &'static str {
     }
 }
 
+pub fn run_reason_code(reason: &str) -> String {
+    if reason == "verification_passed"
+        || reason == "approval_required_before_execution"
+        || reason == "budget_exhausted_before_execution"
+        || reason.starts_with("budget_exhausted_elapsed_minutes:")
+        || reason == "operator_abort"
+        || reason == "provider_health_blocked"
+        || reason == "goal_execution_missing_verifier_output"
+    {
+        if reason.starts_with("budget_exhausted_elapsed_minutes:") {
+            return String::from("budget_exhausted_elapsed_minutes");
+        }
+        return reason.to_owned();
+    }
+    if reason.starts_with("repair_budget_exhausted:") {
+        return String::from("repair_budget_exhausted");
+    }
+    if reason.starts_with("report_write_failed:") {
+        return String::from("report_write_failed");
+    }
+    if reason.starts_with("done_condition_missing_report_artifact:") {
+        return String::from("done_condition_missing_report_artifact");
+    }
+    if reason.starts_with("blocked_by_policy=") {
+        return String::from("blocked_by_policy");
+    }
+    if reason.starts_with("stage=") {
+        return String::from("verification_failed");
+    }
+    if let Some((code, _)) = reason.split_once(':') {
+        return code.to_owned();
+    }
+    reason.to_owned()
+}
+
+pub fn run_reason_detail(reason: &str) -> String {
+    if reason.starts_with("stage=") {
+        return reason.to_owned();
+    }
+    if let Some((_, detail)) = reason.split_once(':') {
+        return detail.to_owned();
+    }
+    if let Some((_, detail)) = reason.split_once('=') {
+        if reason.starts_with("blocked_by_policy=") {
+            return detail.to_owned();
+        }
+    }
+    String::from("none")
+}
+
 fn step_name(step: &RuntimeComposeStep) -> &'static str {
     match step {
         RuntimeComposeStep::Skipped => "skipped",
@@ -1667,6 +1770,49 @@ mod tests {
     }
 
     #[test]
+    fn runtime_compose_repair_skips_non_tool_failures() {
+        let workspace = unique_dir("repair-skip");
+        fs::create_dir_all(&workspace).expect("workspace should exist");
+        let state = RuntimeComposeState::new(RuntimeComposeConfig {
+            memory_path: None,
+            tool_workspace: Some(workspace.clone()),
+            artifact_workspace: Some(workspace.clone()),
+            git_worktree_isolation: false,
+            tool_log_path: workspace.join("runtime.log").display().to_string(),
+            provider_id: String::from("mock-local"),
+            provider_model: String::from("mock-local"),
+            max_tokens: 256,
+            command_allowlist: None,
+        })
+        .expect("runtime compose state should init");
+
+        let prior = RuntimeComposeExecution {
+            provider_output: None,
+            provider_cwd: String::from("/tmp/workspace"),
+            provider: RuntimeComposeStep::Failed(String::from("provider-down")),
+            memory: RuntimeComposeStep::Skipped,
+            tool: RuntimeComposeStep::Skipped,
+            tool_outputs: Vec::new(),
+            patch_artifacts: Vec::new(),
+        };
+        let repair = state.repair_template(
+            &RunTemplate::LegacyIntent(LegacyIntentTemplate::Write {
+                key: String::from("alpha"),
+                value: String::from("42"),
+            }),
+            "cli-repair-skip",
+            DecisionOutcome::Accepted,
+            &prior,
+        );
+
+        assert!(!repair.attempted);
+        assert_eq!(repair.status, "skipped");
+        assert_eq!(repair.summary, "tool_step_not_failed");
+
+        let _ = fs::remove_dir_all(workspace);
+    }
+
+    #[test]
     fn runtime_compose_execution_carries_canonical_provider_workspace_binding() {
         let workspace = unique_dir("provider-cwd");
         fs::create_dir_all(&workspace).expect("workspace should exist");
@@ -1722,6 +1868,36 @@ mod tests {
         assert_eq!(
             run_outcome_name(super::RuntimeRunOutcome::Aborted),
             "aborted"
+        );
+    }
+
+    #[test]
+    fn run_reason_schema_extracts_code_and_detail() {
+        assert_eq!(super::run_reason_code("verification_passed"), "verification_passed");
+        assert_eq!(super::run_reason_detail("verification_passed"), "none");
+        assert_eq!(
+            super::run_reason_code("repair_budget_exhausted:attempts=1/1"),
+            "repair_budget_exhausted"
+        );
+        assert_eq!(
+            super::run_reason_detail("repair_budget_exhausted:attempts=1/1"),
+            "attempts=1/1"
+        );
+        assert_eq!(
+            super::run_reason_code("done_condition_missing_report_artifact:report"),
+            "done_condition_missing_report_artifact"
+        );
+        assert_eq!(
+            super::run_reason_detail("done_condition_missing_report_artifact:report"),
+            "report"
+        );
+        assert_eq!(
+            super::run_reason_code("stage=provider,message=boom"),
+            "verification_failed"
+        );
+        assert_eq!(
+            super::run_reason_detail("stage=provider,message=boom"),
+            "stage=provider,message=boom"
         );
     }
 

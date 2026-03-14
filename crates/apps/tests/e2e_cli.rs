@@ -370,6 +370,8 @@ fn e2e_cli_failed_isolated_run_writes_rollback_metadata() {
     assert!(replay.status.success(), "stderr:\n{}", stderr_of(&replay));
     let rollback_path = artifact_workspace.join(".axonrunner/artifacts/cli-1.rollback.json");
     assert!(rollback_path.exists(), "rollback metadata should exist");
+    let report_path = artifact_workspace.join(".axonrunner/artifacts/cli-1.report.md");
+    let report = fs::read_to_string(&report_path).expect("rollback report should be readable");
     let rollback_json: serde_json::Value = serde_json::from_str(
         &fs::read_to_string(&rollback_path).expect("rollback metadata should be readable"),
     )
@@ -388,6 +390,9 @@ fn e2e_cli_failed_isolated_run_writes_rollback_metadata() {
     let replay_stdout = stdout_of(&replay);
     assert!(replay_stdout.contains("replay rollback metadata="));
     assert!(replay_stdout.contains(canonical_repo_root.display().to_string().as_str()));
+    assert!(report.contains("rollback=metadata="));
+    assert!(report.contains("cli-1.rollback.json"));
+    assert!(report.contains("restore_path="));
 
     let _ = fs::remove_dir_all(repo_root);
     let _ = fs::remove_dir_all(artifact_workspace);
@@ -472,6 +477,8 @@ fn e2e_cli_run_composes_provider_memory_and_tool() {
     assert!(report.contains("kind=write"));
     assert!(report.contains("run_phase=completed"));
     assert!(report.contains("run_outcome=success"));
+    assert!(report.contains("run_reason_code=verification_passed"));
+    assert!(report.contains("run_reason_detail=none"));
     assert!(report.contains("outcome=accepted"));
     assert!(plan.contains("policy=allowed"));
     assert!(plan.contains("planned_steps=4"));
@@ -687,6 +694,21 @@ fn e2e_cli_goal_file_on_risk_requires_approval_before_execution() {
     assert!(stdout_of(&run).contains(
         "run intent_id=cli-1 phase=waiting_approval outcome=approval_required reason=approval_required_before_execution"
     ));
+    let pending_report = fs::read_to_string(workspace.join(".axonrunner/artifacts/cli-1.report.md"))
+        .expect("pending approval report should exist");
+    let pending_trace = fs::read_to_string(workspace.join(".axonrunner/trace/events.jsonl"))
+        .expect("pending approval trace should exist");
+    let pending_event: serde_json::Value = serde_json::from_str(
+        pending_trace
+            .lines()
+            .last()
+            .expect("pending trace line should exist"),
+    )
+    .expect("pending trace line should be valid json");
+    assert!(pending_report.contains("provider=skipped"));
+    assert!(pending_report.contains("tool=skipped"));
+    assert_eq!(pending_event["provider"], "skipped");
+    assert_eq!(pending_event["tool"], "skipped");
 
     let resume = run_cli_with_env(
         &["resume", "run-1"],
@@ -755,10 +777,42 @@ fn e2e_cli_goal_file_approval_can_resume_from_pending_run() {
         ],
         "goal-file-approval-run",
     );
+    let pending_status = run_cli_with_env(
+        &["status", "run-1"],
+        &[
+            ("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace)),
+            ("AXONRUNNER_RUNTIME_STATE_PATH", path_str(&state_path)),
+        ],
+        "goal-file-approval-pending-status",
+    );
+    let pending_doctor = run_cli_with_env(
+        &["doctor"],
+        &[
+            ("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace)),
+            ("AXONRUNNER_RUNTIME_STATE_PATH", path_str(&state_path)),
+        ],
+        "goal-file-approval-pending-doctor",
+    );
     assert!(run.status.success());
+    assert!(pending_status.status.success());
+    assert!(pending_doctor.status.success());
     assert!(stdout_of(&run).contains(
         "run intent_id=cli-1 phase=waiting_approval outcome=approval_required reason=approval_required_before_execution"
     ));
+    assert!(stdout_of(&pending_status).contains("status pending_run run_id=run-1"));
+    assert!(stdout_of(&pending_status).contains("approval_state=required verifier_state=skipped"));
+    assert!(stdout_of(&pending_doctor).contains("doctor pending_run run_id=run-1"));
+    assert!(stdout_of(&pending_doctor).contains("approval_state=required verifier_state=skipped"));
+    let pending_replay = run_cli_with_env(
+        &["replay", "run-1"],
+        &[("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
+        "goal-file-approval-pending-replay",
+    );
+    assert!(pending_replay.status.success());
+    assert!(
+        stdout_of(&pending_replay)
+            .contains("approval_state=required verifier_state=skipped")
+    );
 
     let resume = run_cli_with_env(
         &["resume", "run-1"],
@@ -850,6 +904,11 @@ fn e2e_cli_goal_file_pending_run_can_abort_cleanly() {
         &[("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
         "goal-file-abort-replay",
     );
+    let trace = fs::read_to_string(workspace.join(".axonrunner/trace/events.jsonl"))
+        .expect("trace should be readable");
+    let latest = trace.lines().last().expect("trace should contain latest event");
+    let latest: serde_json::Value =
+        serde_json::from_str(latest).expect("latest trace event should parse");
 
     assert!(abort.status.success());
     assert!(
@@ -860,6 +919,13 @@ fn e2e_cli_goal_file_pending_run_can_abort_cleanly() {
     assert!(stdout_of(&status).contains("status run run_id=run-1 phase=aborted outcome=aborted"));
     assert!(replay.status.success());
     assert!(stdout_of(&replay).contains("replay run run_id=run-1 phase=aborted outcome=aborted"));
+    assert_eq!(latest["provider"], "skipped");
+    assert_eq!(latest["memory"], "skipped");
+    assert_eq!(latest["tool"], "skipped");
+    assert_eq!(
+        latest["verification"]["summary"],
+        serde_json::Value::String(String::from("operator_abort"))
+    );
 
     let _ = fs::remove_dir_all(workspace);
     let _ = fs::remove_file(state_path);
@@ -918,6 +984,17 @@ fn e2e_cli_goal_file_blocks_when_step_budget_is_already_exhausted() {
         stdout_of(&replay)
             .contains("replay run run_id=run-1 phase=blocked outcome=budget_exhausted")
     );
+    assert!(
+        stdout_of(&replay).contains(
+            "reason_code=budget_exhausted_before_execution reason_detail=none"
+        )
+    );
+    let report = fs::read_to_string(workspace.join(".axonrunner/artifacts/cli-1.report.md"))
+        .expect("budget report should exist");
+    assert!(report.contains("provider=skipped"));
+    assert!(report.contains("tool=skipped"));
+    assert!(report.contains("run_reason_code=budget_exhausted_before_execution"));
+    assert!(report.contains("run_reason_detail=none"));
 
     let _ = fs::remove_dir_all(workspace);
     let _ = fs::remove_file(goal_file);
@@ -967,7 +1044,10 @@ fn e2e_cli_goal_file_uses_bounded_repair_budget() {
         stdout_of(&replay)
             .contains("replay run run_id=run-1 phase=blocked outcome=budget_exhausted")
     );
-    assert!(stdout_of(&replay).contains("replay repair attempted=true status=budget_exhausted"));
+    assert!(
+        stdout_of(&replay)
+            .contains("replay repair attempted=true attempts=1 status=budget_exhausted")
+    );
     assert!(stdout_of(&replay).contains("repair_budget_exhausted:attempts=1/1"));
 
     let _ = fs::remove_dir_all(workspace);
@@ -980,7 +1060,7 @@ fn e2e_cli_workspace_lock_blocks_mutating_commands_but_allows_status_reads() {
     fs::create_dir_all(workspace.join(".axonrunner")).expect("lock dir should exist");
     fs::write(
         workspace.join(".axonrunner/runtime.lock"),
-        "pid=999 command=run\n",
+        format!("pid={} command=run\n", std::process::id()),
     )
     .expect("lock file should exist");
 
@@ -1024,6 +1104,48 @@ fn e2e_cli_workspace_lock_blocks_mutating_commands_but_allows_status_reads() {
 }
 
 #[test]
+fn e2e_cli_workspace_lock_recovers_stale_pid_and_runs() {
+    let workspace = unique_path("workspace-stale-lock-workspace", "dir");
+    fs::create_dir_all(workspace.join(".axonrunner")).expect("lock dir should exist");
+    fs::write(
+        workspace.join(".axonrunner/runtime.lock"),
+        "pid=999999 command=run\n",
+    )
+    .expect("stale lock file should exist");
+
+    let goal_file = unique_path("workspace-stale-lock-goal", "json");
+    fs::write(
+        &goal_file,
+        r#"{
+  "summary": "Recover stale single writer lock",
+  "workspace_root": "/workspace",
+  "constraints": [],
+  "done_conditions": [
+    { "label": "report", "evidence": "report artifact exists" }
+  ],
+  "verification_checks": [
+    { "label": "release gate", "detail": "cargo test -p axonrunner_apps --test release_security_gate" }
+  ],
+  "budget": { "max_steps": 5, "max_minutes": 10, "max_tokens": 8000 },
+  "approval_mode": "never"
+}"#,
+    )
+    .expect("goal file should be written");
+
+    let run = run_cli_with_env(
+        &["run", path_str(&goal_file)],
+        &[("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
+        "workspace-stale-lock-run",
+    );
+
+    assert!(run.status.success(), "stderr:\n{}", stderr_of(&run));
+    assert!(stdout_of(&run).contains("phase=completed outcome=success"));
+
+    let _ = fs::remove_dir_all(workspace);
+    let _ = fs::remove_file(goal_file);
+}
+
+#[test]
 fn e2e_cli_rejected_control_action_surfaces_approval_required_outcome() {
     let workspace = unique_path("approval-required-workspace", "dir");
     let state_path = unique_path("approval-required-state", "snapshot");
@@ -1048,7 +1170,6 @@ fn e2e_cli_rejected_control_action_surfaces_approval_required_outcome() {
         &[("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
         "approval-required-replay",
     );
-
     assert!(run.status.success());
     assert!(status.status.success());
     assert!(replay.status.success());
@@ -1067,6 +1188,127 @@ fn e2e_cli_rejected_control_action_surfaces_approval_required_outcome() {
 
     let _ = fs::remove_dir_all(workspace);
     let _ = fs::remove_file(state_path);
+}
+
+#[test]
+fn e2e_cli_resume_rejects_non_pending_state_with_clear_error() {
+    let workspace = unique_path("resume-no-pending-workspace", "dir");
+    let state_path = unique_path("resume-no-pending-state", "snapshot");
+    let resume = run_cli_with_env(
+        &["resume", "latest"],
+        &[
+            ("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace)),
+            ("AXONRUNNER_RUNTIME_STATE_PATH", path_str(&state_path)),
+        ],
+        "resume-no-pending",
+    );
+
+    assert!(!resume.status.success());
+    assert!(
+        stderr_of(&resume).contains(
+            "resume only supports pending goal-file approval runs; no pending approval run is available"
+        )
+    );
+
+    let _ = fs::remove_dir_all(workspace);
+    let _ = fs::remove_file(state_path);
+}
+
+#[test]
+fn e2e_cli_run_missing_goal_file_surfaces_file_not_found_directly() {
+    let workspace = unique_path("missing-goal-workspace", "dir");
+    let output = run_cli_with_env(
+        &["run", "./missing-goal.json"],
+        &[("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
+        "missing-goal",
+    );
+
+    assert!(!output.status.success());
+    assert!(stderr_of(&output).contains("goal file not found: ./missing-goal.json"));
+
+    let _ = fs::remove_dir_all(workspace);
+}
+
+#[test]
+fn e2e_cli_goal_file_executes_external_workflow_pack_verifier_sequence() {
+    let workspace = unique_path("goal-pack-workspace", "dir");
+    let goal_file = unique_path("goal-pack-goal", "json");
+    let pack_file = unique_path("goal-pack-manifest", "json");
+    fs::write(
+        &pack_file,
+        r#"{
+  "pack_id": "custom-pack",
+  "version": "1",
+  "description": "custom verifier pack",
+  "entry_goal": "goal",
+  "planner_hints": ["prefer ordered verifier flow"],
+  "recommended_verifier_flow": ["lint", "build"],
+  "allowed_tools": [{"operation": "run_command", "scope": "workspace"}],
+  "verifier_rules": [
+    {
+      "label": "build-pass",
+      "profile": "build",
+      "command_example": "pwd",
+      "artifact_expectation": "build path exists",
+      "required": true
+    },
+    {
+      "label": "lint-pass",
+      "profile": "lint",
+      "command_example": "pwd",
+      "artifact_expectation": "lint path exists",
+      "required": true
+    }
+  ],
+  "risk_policy": {"approval_mode": "never", "max_mutating_steps": 5}
+}"#,
+    )
+    .expect("pack file should be written");
+    fs::write(
+        &goal_file,
+        format!(
+            r#"{{
+  "summary": "Use external workflow pack",
+  "workspace_root": "/workspace",
+  "constraints": [],
+  "done_conditions": [
+    {{ "label": "report", "evidence": "report artifact exists" }}
+  ],
+  "verification_checks": [
+    {{ "label": "placeholder", "detail": "pwd" }}
+  ],
+  "budget": {{ "max_steps": 5, "max_minutes": 10, "max_tokens": 8000 }},
+  "approval_mode": "never",
+  "workflow_pack": "{}"
+}}"#,
+            pack_file.display()
+        ),
+    )
+    .expect("goal file should be written");
+
+    let run = run_cli_with_env(
+        &["run", path_str(&goal_file)],
+        &[("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
+        "goal-pack-run",
+    );
+    let replay = run_cli_with_env(
+        &["replay", "run-1"],
+        &[("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
+        "goal-pack-replay",
+    );
+    let report = fs::read_to_string(workspace.join(".axonrunner/artifacts/cli-1.report.md"))
+        .expect("report should exist");
+
+    assert!(run.status.success(), "stderr:\n{}", stderr_of(&run));
+    assert!(replay.status.success(), "stderr:\n{}", stderr_of(&replay));
+    assert!(stdout_of(&run).contains("phase=completed outcome=success"));
+    let lint_idx = report.find("verifier=lint-pass").expect("lint verifier should exist");
+    let build_idx = report.find("verifier=build-pass").expect("build verifier should exist");
+    assert!(lint_idx < build_idx, "recommended verifier flow should drive execution order");
+
+    let _ = fs::remove_dir_all(workspace);
+    let _ = fs::remove_file(goal_file);
+    let _ = fs::remove_file(pack_file);
 }
 
 #[test]
@@ -1400,6 +1642,7 @@ fn e2e_cli_run_uses_codek_provider_selection() {
     assert!(failed_report.contains("outcome=accepted"));
     assert!(failed_report.contains("run_phase=blocked"));
     assert!(failed_report.contains("run_outcome=blocked"));
+    assert!(failed_report.contains("provider_health_state=blocked"));
     let failed_event: serde_json::Value = serde_json::from_str(
         failed_trace
             .lines()

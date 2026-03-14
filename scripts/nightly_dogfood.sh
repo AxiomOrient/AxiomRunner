@@ -22,6 +22,22 @@ if [ "$SKIP_BUILD" != "1" ]; then
   cargo build -p axonrunner_apps --bin axonrunner_apps
 fi
 
+scaffold_fixture_workspace() {
+  fixture_name=$1
+  workspace=$2
+  template_root="$REPO_ROOT/crates/apps/tests/fixtures/workspaces"
+  template_path=""
+  case "$fixture_name" in
+    rust_service) template_path="$template_root/rust_service" ;;
+    node_api|nextjs_app) template_path="$template_root/node_common" ;;
+    python_fastapi) template_path="$template_root/python_fastapi" ;;
+    *) ;;
+  esac
+  if [ -n "$template_path" ] && [ -d "$template_path" ]; then
+    cp -R "$template_path"/. "$workspace"/
+  fi
+}
+
 FAILURES=0
 : > "$SUMMARY_PATH"
 
@@ -47,6 +63,7 @@ for fixture in "$@"; do
   doctor_stderr="$LOG_DIR/$fixture_name.doctor.stderr.log"
 
   mkdir -p "$workspace" "$artifacts"
+  scaffold_fixture_workspace "$fixture_name" "$workspace"
 
   run_rc=0
   AXONRUNNER_RUNTIME_TOOL_WORKSPACE="$workspace" \

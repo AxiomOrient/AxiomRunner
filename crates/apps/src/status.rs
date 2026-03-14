@@ -1,3 +1,4 @@
+use crate::state_store::PendingRunSnapshot;
 use crate::display::mode_name;
 use crate::trace_store::TraceRunSummary;
 use axonrunner_core::ExecutionMode;
@@ -22,6 +23,7 @@ pub struct RuntimeStatusInput {
     pub tool_enabled: bool,
     pub tool_state: String,
     pub latest_run: Option<TraceRunSummary>,
+    pub pending_run: Option<PendingRunSnapshot>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -56,6 +58,7 @@ pub struct RuntimeSnapshot {
     pub tool_enabled: bool,
     pub tool_state: String,
     pub latest_run: Option<TraceRunSummary>,
+    pub pending_run: Option<PendingRunSnapshot>,
 }
 
 impl From<StatusInput> for StatusSnapshot {
@@ -78,6 +81,7 @@ impl From<StatusInput> for StatusSnapshot {
                 tool_enabled: input.runtime.tool_enabled,
                 tool_state: input.runtime.tool_state,
                 latest_run: input.runtime.latest_run,
+                pending_run: input.runtime.pending_run,
             },
         }
     }
@@ -114,6 +118,17 @@ pub fn render_status_lines(snapshot: &StatusSnapshot) -> Vec<String> {
             run.reason,
             run.planned_steps,
             run.step_ids.len()
+        ));
+    }
+    if let Some(pending) = &snapshot.runtime.pending_run {
+        lines.push(format!(
+            "status pending_run run_id={} goal_file_path={} phase={} reason={} approval_state={} verifier_state={}",
+            pending.run_id,
+            pending.goal_file_path,
+            pending.phase,
+            pending.reason,
+            pending.approval_state,
+            pending.verifier_state
         ));
     }
     lines

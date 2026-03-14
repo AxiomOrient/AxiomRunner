@@ -48,3 +48,4 @@ Transition references:
 ## Rule
 
 If a feature does not directly support the retained CLI surface, remove it instead of abstracting it.
+`resume` is approval-only pending goal-file control, not a generic interrupted-run resume.

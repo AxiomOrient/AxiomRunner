@@ -25,6 +25,10 @@ workflow pack manifest는 아래 필드를 가져야 한다.
 - `verifier_rules[]`
 - `risk_policy`
 
+goal file은 선택적으로 `workflow_pack` 경로를 가질 수 있다.
+경로가 주어지면 AxonRunner는 그 manifest를 먼저 읽고 검증한다.
+manifest가 깨졌으면 fail-closed 로 멈춘다.
+
 ## Allowed Tools
 
 `allowed_tools[]`는 기존 tool contract 안의 operation만 고를 수 있다.

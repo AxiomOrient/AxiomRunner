@@ -18,8 +18,7 @@
 2. `docs/AUTONOMOUS_AGENT_TARGET.md`
 3. `docs/AUTONOMOUS_AGENT_SPEC.md`
 4. `docs/DOCS_ALIGNMENT.md`
-5. `docs/transition/REMAINING_GAPS.md`
-6. `docs/transition/WORKFLOW_PACK_CONTRACT.md`
+5. `docs/transition/WORKFLOW_PACK_CONTRACT.md`
 
 ## Transition Sources
 
@@ -27,12 +26,11 @@
 
 1. `docs/AUTONOMOUS_AGENT_TARGET.md`
 2. `docs/AUTONOMOUS_AGENT_SPEC.md`
-3. `docs/transition/REMAINING_GAPS.md`
-4. `docs/transition/WORKFLOW_PACK_CONTRACT.md`
+3. `docs/transition/WORKFLOW_PACK_CONTRACT.md`
 
 ## Rules
 
 - 현재 제품 계약은 `README.md`, `docs/project-charter.md`, `docs/CAPABILITY_MATRIX.md`, `docs/RUNBOOK.md`가 소유한다.
 - 전환 문서는 현재 계약을 즉시 대체하지 않는다.
-- `REMAINING_GAPS.md` 는 active backlog가 아니라 closure note다.
+- 현재는 별도 active backlog transition 문서가 없다.
 - 삭제된 review bundle은 더 이상 current source of truth가 아니다.

@@ -32,12 +32,13 @@ AxonRunner 문서는 두 층으로 읽는다.
 - `docs/RUNBOOK.md`
 - `docs/VERSIONING.md`
 
+v1 core doc set은 위 5개로 고정한다.
+
 ## Transition Docs
 
 - `docs/AUTONOMOUS_AGENT_TARGET.md`
 - `docs/AUTONOMOUS_AGENT_SPEC.md`
 - `docs/transition/README.md`
-- `docs/transition/REMAINING_GAPS.md`
 - `docs/transition/WORKFLOW_PACK_CONTRACT.md`
 
 ## Rules

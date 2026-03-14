@@ -15,5 +15,6 @@
     { "label": "smoke", "detail": "node scripts/smoke.js" }
   ],
   "budget": { "max_steps": 9, "max_minutes": 10, "max_tokens": 8000 },
-  "approval_mode": "never"
+  "approval_mode": "never",
+  "workflow_pack": "../packs/nextjs_app.json"
 }

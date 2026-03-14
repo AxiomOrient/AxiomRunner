@@ -26,6 +26,8 @@ pub struct PendingRunSnapshot {
     pub goal_file_path: String,
     pub phase: String,
     pub reason: String,
+    pub approval_state: String,
+    pub verifier_state: String,
 }
 
 #[derive(Debug, Clone)]
@@ -53,15 +55,27 @@ impl StateStore {
     }
 
     pub fn load_snapshot(&self) -> Result<RuntimeStateSnapshot, String> {
-        match fs::read_to_string(&self.path) {
-            Ok(raw) => parse_snapshot(&raw),
-            Err(error) if error.kind() == ErrorKind::NotFound => {
-                Ok(RuntimeStateSnapshot::default())
-            }
-            Err(error) => Err(format!(
-                "read state snapshot '{}' failed: {error}",
-                self.path.display()
-            )),
+        match read_snapshot_file(&self.path) {
+            Ok(snapshot) => Ok(snapshot),
+            Err(primary_error) => match read_snapshot_file(&self.temp_path()) {
+                Ok(snapshot) => Ok(snapshot),
+                Err(temp_error) if is_missing_snapshot_error(&primary_error) => {
+                    if is_missing_snapshot_error(&temp_error) {
+                        Ok(RuntimeStateSnapshot::default())
+                    } else {
+                        Err(format!(
+                            "read state snapshot '{}' fallback '{}' failed: {temp_error}",
+                            self.path.display(),
+                            self.temp_path().display()
+                        ))
+                    }
+                }
+                Err(temp_error) => Err(format!(
+                    "read state snapshot '{}' failed: {primary_error}; fallback '{}' failed: {temp_error}",
+                    self.path.display(),
+                    self.temp_path().display()
+                )),
+            },
         }
     }
 
@@ -112,6 +126,20 @@ impl StateStore {
     pub fn path(&self) -> &PathBuf {
         &self.path
     }
+
+    fn temp_path(&self) -> PathBuf {
+        self.path.with_extension("tmp")
+    }
+}
+
+fn read_snapshot_file(path: &PathBuf) -> Result<RuntimeStateSnapshot, String> {
+    let raw = fs::read_to_string(path)
+        .map_err(|error| format!("read '{}' failed: {error}", path.display()))?;
+    parse_snapshot(&raw).map_err(|error| format!("parse '{}' failed: {error}", path.display()))
+}
+
+fn is_missing_snapshot_error(error: &str) -> bool {
+    error.contains("No such file or directory") || error.contains("os error 2")
 }
 
 fn serialize_snapshot(snapshot: &RuntimeStateSnapshot) -> String {
@@ -162,6 +190,14 @@ fn serialize_snapshot(snapshot: &RuntimeStateSnapshot) -> String {
             "pending_run.reason={}",
             hex_encode(pending_run.reason.as_bytes())
         ));
+        lines.push(format!(
+            "pending_run.approval_state={}",
+            hex_encode(pending_run.approval_state.as_bytes())
+        ));
+        lines.push(format!(
+            "pending_run.verifier_state={}",
+            hex_encode(pending_run.verifier_state.as_bytes())
+        ));
     }
 
     for (key, value) in &snapshot.state.facts {
@@ -186,6 +222,8 @@ fn parse_snapshot(raw: &str) -> Result<RuntimeStateSnapshot, String> {
         goal_file_path: String::new(),
         phase: String::new(),
         reason: String::new(),
+        approval_state: String::new(),
+        verifier_state: String::new(),
     };
     let mut saw_pending_run = false;
 
@@ -219,6 +257,8 @@ fn parse_snapshot(raw: &str) -> Result<RuntimeStateSnapshot, String> {
                 "goal_file_path" => pending_run.goal_file_path = decoded,
                 "phase" => pending_run.phase = decoded,
                 "reason" => pending_run.reason = decoded,
+                "approval_state" => pending_run.approval_state = decoded,
+                "verifier_state" => pending_run.verifier_state = decoded,
                 _ => {
                     return Err(format!(
                         "unknown pending run key '{}' on line {}",
@@ -275,6 +315,15 @@ fn parse_snapshot(raw: &str) -> Result<RuntimeStateSnapshot, String> {
         snapshot.next_run_seq = snapshot.next_intent_seq;
     }
     if saw_pending_run {
+        if pending_run.approval_state.is_empty() {
+            pending_run.approval_state = match pending_run.phase.as_str() {
+                "waiting_approval" => String::from("required"),
+                _ => String::from("unknown"),
+            };
+        }
+        if pending_run.verifier_state.is_empty() {
+            pending_run.verifier_state = String::from("unknown");
+        }
         snapshot.pending_run = Some(pending_run);
     }
     Ok(snapshot)
@@ -378,8 +427,10 @@ fn hex_decode(hex: &str) -> Option<Vec<u8>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{RuntimeStateSnapshot, parse_snapshot, serialize_snapshot};
+    use super::{PendingRunSnapshot, RuntimeStateSnapshot, StateStore, parse_snapshot, serialize_snapshot};
     use axonrunner_core::{AgentState, DecisionOutcome, ExecutionMode, PolicyCode};
+    use std::fs;
+    use std::path::PathBuf;
 
     #[test]
     fn state_snapshot_round_trips() {
@@ -399,7 +450,15 @@ mod tests {
             },
             next_intent_seq: 3,
             next_run_seq: 3,
-            pending_run: None,
+            pending_run: Some(PendingRunSnapshot {
+                run_id: String::from("run-3"),
+                intent_id: String::from("cli-3"),
+                goal_file_path: String::from("/tmp/goal.json"),
+                phase: String::from("waiting_approval"),
+                reason: String::from("approval_required_before_execution"),
+                approval_state: String::from("required"),
+                verifier_state: String::from("passed"),
+            }),
         };
 
         let encoded = serialize_snapshot(&snapshot);
@@ -453,5 +512,85 @@ audit_count=0
         let decoded = parse_snapshot(raw).expect("legacy snapshot should parse");
         assert_eq!(decoded.next_intent_seq, 9);
         assert_eq!(decoded.next_run_seq, 9);
+    }
+
+    #[test]
+    fn state_snapshot_legacy_pending_run_defaults_new_fields() {
+        let raw = "\
+version=axonrunner-state-v1
+next_intent_seq=2
+next_run_seq=2
+revision=1
+mode=active
+last_intent_id=-
+last_actor_id=-
+last_decision=-
+last_policy_code=-
+denied_count=0
+audit_count=0
+pending_run.run_id=72756e2d31
+pending_run.intent_id=636c692d31
+pending_run.goal_file_path=2f746d702f676f616c2e6a736f6e
+pending_run.phase=77616974696e675f617070726f76616c
+pending_run.reason=617070726f76616c5f72657175697265645f6265666f72655f657865637574696f6e
+";
+
+        let decoded = parse_snapshot(raw).expect("legacy pending snapshot should parse");
+        let pending = decoded.pending_run.expect("pending run should exist");
+
+        assert_eq!(pending.approval_state, "required");
+        assert_eq!(pending.verifier_state, "unknown");
+    }
+
+    fn unique_snapshot_path(label: &str) -> PathBuf {
+        let tick = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock should be after epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "axonrunner-state-store-{label}-{}-{tick}.snapshot",
+            std::process::id()
+        ))
+    }
+
+    #[test]
+    fn state_store_loads_tmp_snapshot_when_primary_is_missing() {
+        let path = unique_snapshot_path("tmp-fallback-missing");
+        let store = StateStore { path: path.clone() };
+        let snapshot = RuntimeStateSnapshot {
+            state: AgentState::default(),
+            next_intent_seq: 7,
+            next_run_seq: 9,
+            pending_run: None,
+        };
+
+        fs::write(store.temp_path(), serialize_snapshot(&snapshot)).expect("tmp snapshot should exist");
+
+        let loaded = store.load_snapshot().expect("tmp snapshot should load");
+        assert_eq!(loaded, snapshot);
+
+        let _ = fs::remove_file(store.temp_path());
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn state_store_loads_tmp_snapshot_when_primary_is_corrupt() {
+        let path = unique_snapshot_path("tmp-fallback-corrupt");
+        let store = StateStore { path: path.clone() };
+        let snapshot = RuntimeStateSnapshot {
+            state: AgentState::default(),
+            next_intent_seq: 3,
+            next_run_seq: 4,
+            pending_run: None,
+        };
+
+        fs::write(&path, "not-a-valid-snapshot").expect("corrupt primary should exist");
+        fs::write(store.temp_path(), serialize_snapshot(&snapshot)).expect("tmp snapshot should exist");
+
+        let loaded = store.load_snapshot().expect("tmp snapshot should load");
+        assert_eq!(loaded, snapshot);
+
+        let _ = fs::remove_file(store.temp_path());
+        let _ = fs::remove_file(path);
     }
 }

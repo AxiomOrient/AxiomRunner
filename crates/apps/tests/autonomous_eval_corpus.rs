@@ -24,6 +24,19 @@ fn fixture_goal_path(name: &str) -> PathBuf {
         .join(name)
 }
 
+fn fixture_workspace_template(name: &str) -> Option<PathBuf> {
+    let templates = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("workspaces");
+    match name {
+        "rust_service.json" => Some(templates.join("rust_service")),
+        "node_api.json" | "nextjs_app.json" => Some(templates.join("node_common")),
+        "python_fastapi.json" => Some(templates.join("python_fastapi")),
+        _ => None,
+    }
+}
+
 fn assert_representative_goal_run(
     fixture_name: &str,
     expected_flow: &str,
@@ -31,6 +44,7 @@ fn assert_representative_goal_run(
     expected_verifiers: usize,
 ) {
     let workspace = unique_path(fixture_name, "dir");
+    scaffold_fixture_workspace(&workspace, fixture_name);
     let run = run_cli_with_env(
         &[
             "run",
@@ -63,6 +77,28 @@ fn assert_representative_goal_run(
     assert!(plan.contains(&format!("queued_verifiers={expected_verifiers}")));
 
     let _ = fs::remove_dir_all(workspace);
+}
+
+fn scaffold_fixture_workspace(workspace: &Path, fixture_name: &str) {
+    fs::create_dir_all(workspace).expect("workspace should exist");
+    if let Some(template) = fixture_workspace_template(fixture_name) {
+        copy_dir_all(&template, workspace).expect("fixture template should copy");
+    }
+}
+
+fn copy_dir_all(from: &Path, to: &Path) -> std::io::Result<()> {
+    fs::create_dir_all(to)?;
+    for entry in fs::read_dir(from)? {
+        let entry = entry?;
+        let file_type = entry.file_type()?;
+        let target = to.join(entry.file_name());
+        if file_type.is_dir() {
+            copy_dir_all(&entry.path(), &target)?;
+        } else {
+            fs::copy(entry.path(), target)?;
+        }
+    }
+    Ok(())
 }
 
 #[test]
@@ -219,7 +255,7 @@ fn autonomous_eval_corpus_representative_runs_remain_green() {
         fs::create_dir_all(workspace.join(".axonrunner")).expect("lock dir should exist");
         fs::write(
             workspace.join(".axonrunner/runtime.lock"),
-            "pid=999 command=run\n",
+            format!("pid={} command=run\n", std::process::id()),
         )
         .expect("lock file should exist");
         let run = run_cli_with_env(
@@ -251,13 +287,13 @@ fn autonomous_eval_corpus_representative_runs_remain_green() {
     assert_representative_goal_run("rust_service.json", "build>test>lint", 2, 3);
     passed += 1;
 
-    assert_representative_goal_run("node_api.json", "build>test>lint", 2, 3);
+    assert_representative_goal_run("node_api.json", "generic>lint>test>build", 2, 3);
     passed += 1;
 
-    assert_representative_goal_run("nextjs_app.json", "build>test>lint>generic", 2, 4);
+    assert_representative_goal_run("nextjs_app.json", "lint>generic>test>build", 2, 4);
     passed += 1;
 
-    assert_representative_goal_run("python_fastapi.json", "test>generic", 2, 2);
+    assert_representative_goal_run("python_fastapi.json", "generic>test", 2, 2);
     passed += 1;
 
     assert_eq!(

@@ -1,0 +1,13 @@
+{
+  "summary": "Check one bounded workspace contract",
+  "workspace_root": ".",
+  "constraints": [],
+  "done_conditions": [
+    { "label": "report", "evidence": "report artifact exists" }
+  ],
+  "verification_checks": [
+    { "label": "workspace", "detail": "pwd" }
+  ],
+  "budget": { "max_steps": 5, "max_minutes": 10, "max_tokens": 8000 },
+  "approval_mode": "never"
+}

@@ -1,4 +1,5 @@
 use crate::error::AdapterResult;
+use serde::{Deserialize, Serialize};
 use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
@@ -163,7 +164,8 @@ pub enum SearchMode {
     Regex,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum RunCommandProfile {
     Generic,
     Build,
@@ -271,7 +273,7 @@ pub trait ToolAdapter: Send + Sync {
     fn execute(&self, request: ToolRequest) -> AdapterResult<ToolResult>;
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkflowPackContract {
     pub pack_id: String,
     pub version: String,
@@ -325,13 +327,13 @@ impl WorkflowPackContract {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkflowPackAllowedTool {
     pub operation: String,
     pub scope: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkflowPackVerifierRule {
     pub label: String,
     pub profile: RunCommandProfile,
@@ -340,7 +342,7 @@ pub struct WorkflowPackVerifierRule {
     pub required: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkflowPackRiskPolicy {
     pub approval_mode: String,
     pub max_mutating_steps: u64,

@@ -1,0 +1,10 @@
+{
+  "name": "fixture-node",
+  "version": "1.0.0",
+  "scripts": {
+    "build": "node -e \"process.exit(0)\"",
+    "test": "node --test",
+    "lint": "node -e \"process.exit(0)\"",
+    "typecheck": "node -e \"process.exit(0)\""
+  }
+}

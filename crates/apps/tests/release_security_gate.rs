@@ -161,6 +161,7 @@ fn release_security_gate_truth_surface_docs_match_retained_commands() {
     let capability_matrix = include_str!("../../../docs/CAPABILITY_MATRIX.md");
     let runbook = include_str!("../../../docs/RUNBOOK.md");
     let charter = include_str!("../../../docs/project-charter.md");
+    let changelog = include_str!("../../../CHANGELOG.md");
 
     for command in [
         "run", "status", "replay", "resume", "abort", "doctor", "health", "help",
@@ -184,6 +185,10 @@ fn release_security_gate_truth_surface_docs_match_retained_commands() {
         assert!(
             charter.contains(command),
             "charter missing command: {command}"
+        );
+        assert!(
+            changelog.contains(command),
+            "changelog missing command: {command}"
         );
     }
 

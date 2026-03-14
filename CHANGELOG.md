@@ -3,7 +3,8 @@
 ## 0.0.1
 
 - reduced AxonRunner to a minimal CLI agent runtime
-- kept only `run`, `batch`, `doctor`, `replay`, `status`, `health`, `help`
+- kept only `run`, `status`, `replay`, `resume`, `abort`, `doctor`, `health`, `help`
+- kept `batch` as compatibility surface instead of primary product surface
 - kept legacy single-intent aliases `read`, `write`, `remove`, `freeze`, `halt`
 - removed multi-channel, daemon, gateway, service, cron, skills, integrations, benchmark, and rehearsal surfaces
 - collapsed workspace to `core`, `apps`, `adapters`

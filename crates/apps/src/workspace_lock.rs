@@ -10,6 +10,14 @@ pub struct WorkspaceLock {
 
 impl WorkspaceLock {
     pub fn acquire(workspace_root: &Path, command_name: &str) -> Result<Self, String> {
+        Self::acquire_inner(workspace_root, command_name, true)
+    }
+
+    fn acquire_inner(
+        workspace_root: &Path,
+        command_name: &str,
+        allow_stale_recovery: bool,
+    ) -> Result<Self, String> {
         let path = lock_path(workspace_root);
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).map_err(|error| {
@@ -28,6 +36,21 @@ impl WorkspaceLock {
                     .map(|raw| raw.trim().to_owned())
                     .filter(|raw| !raw.is_empty())
                     .unwrap_or_else(|| String::from("holder=unknown"));
+                if allow_stale_recovery && lock_holder_is_stale(&holder) {
+                    match fs::remove_file(&path) {
+                        Ok(()) => return Self::acquire_inner(workspace_root, command_name, false),
+                        Err(remove_error) if remove_error.kind() == ErrorKind::NotFound => {
+                            return Self::acquire_inner(workspace_root, command_name, false);
+                        }
+                        Err(remove_error) => {
+                            return Err(format!(
+                                "workspace lock stale recovery failed path={} holder={} error={remove_error}",
+                                path.display(),
+                                holder
+                            ));
+                        }
+                    }
+                }
                 return Err(format!(
                     "workspace lock is active path={} {}",
                     path.display(),
@@ -59,4 +82,73 @@ impl Drop for WorkspaceLock {
 
 pub fn lock_path(workspace_root: &Path) -> PathBuf {
     workspace_root.join(".axonrunner").join("runtime.lock")
+}
+
+fn lock_holder_is_stale(holder: &str) -> bool {
+    let pid = holder
+        .split_whitespace()
+        .find_map(|part| part.strip_prefix("pid="))
+        .and_then(|raw| raw.parse::<u32>().ok());
+    let Some(pid) = pid else {
+        return false;
+    };
+    !process_is_alive(pid)
+}
+
+#[cfg(unix)]
+fn process_is_alive(pid: u32) -> bool {
+    std::process::Command::new("kill")
+        .arg("-0")
+        .arg(pid.to_string())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(true)
+}
+
+#[cfg(not(unix))]
+fn process_is_alive(_pid: u32) -> bool {
+    true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{WorkspaceLock, lock_holder_is_stale, lock_path};
+    use std::fs;
+
+    fn unique_workspace(label: &str) -> std::path::PathBuf {
+        let tick = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock should be after epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "axonrunner-workspace-lock-{label}-{}-{tick}",
+            std::process::id()
+        ))
+    }
+
+    #[test]
+    fn stale_holder_is_detected_from_dead_pid() {
+        assert!(lock_holder_is_stale("pid=999999 command=run"));
+        assert!(!lock_holder_is_stale(&format!("pid={} command=run", std::process::id())));
+    }
+
+    #[test]
+    fn acquire_recovers_stale_lock_once() {
+        let workspace = unique_workspace("stale");
+        fs::create_dir_all(workspace.join(".axonrunner")).expect("lock dir should exist");
+        fs::write(
+            workspace.join(".axonrunner/runtime.lock"),
+            "pid=999999 command=run\n",
+        )
+        .expect("stale lock should exist");
+
+        let lock = WorkspaceLock::acquire(&workspace, "run").expect("stale lock should recover");
+        assert!(lock_path(&workspace).exists());
+        drop(lock);
+        assert!(!lock_path(&workspace).exists());
+
+        let _ = fs::remove_dir_all(workspace);
+    }
 }

@@ -1,3 +1,4 @@
+use crate::state_store::PendingRunSnapshot;
 use crate::async_runtime_host::global_async_runtime_host_status;
 use crate::config_loader::AppConfig;
 use crate::display::mode_name;
@@ -18,6 +19,7 @@ pub struct DoctorReport {
     pub state: DoctorState,
     pub runtime: DoctorRuntime,
     pub paths: DoctorPaths,
+    pub pending_run: Option<DoctorPendingRun>,
     pub checks: Vec<DoctorCheck>,
 }
 
@@ -50,6 +52,17 @@ pub struct DoctorPaths {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct DoctorPendingRun {
+    pub run_id: String,
+    pub intent_id: String,
+    pub goal_file_path: String,
+    pub phase: String,
+    pub reason: String,
+    pub approval_state: String,
+    pub verifier_state: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct DoctorCheck {
     pub name: String,
     pub state: String,
@@ -62,6 +75,7 @@ pub fn build_doctor_report(
     compose: &RuntimeComposeHealth,
     trace_store: &TraceStore,
     state_path: &Path,
+    pending_run: Option<&PendingRunSnapshot>,
 ) -> DoctorReport {
     let compose_config = RuntimeComposeConfig::from_app_config(config);
     let async_host = global_async_runtime_host_status();
@@ -115,6 +129,15 @@ pub fn build_doctor_report(
             trace_events_path: trace_path,
             tool_log_path: compose_config.tool_log_path,
         },
+        pending_run: pending_run.map(|pending| DoctorPendingRun {
+            run_id: pending.run_id.clone(),
+            intent_id: pending.intent_id.clone(),
+            goal_file_path: pending.goal_file_path.clone(),
+            phase: pending.phase.clone(),
+            reason: pending.reason.clone(),
+            approval_state: pending.approval_state.clone(),
+            verifier_state: pending.verifier_state.clone(),
+        }),
         checks,
     }
 }
@@ -159,6 +182,19 @@ pub fn render_doctor_lines(report: &DoctorReport) -> Vec<String> {
             report.paths.tool_log_path
         ),
     ];
+
+    if let Some(pending) = &report.pending_run {
+        lines.push(format!(
+            "doctor pending_run run_id={} intent_id={} goal_file_path={} phase={} reason={} approval_state={} verifier_state={}",
+            pending.run_id,
+            pending.intent_id,
+            pending.goal_file_path,
+            pending.phase,
+            pending.reason,
+            pending.approval_state,
+            pending.verifier_state
+        ));
+    }
 
     for check in &report.checks {
         lines.push(format!(

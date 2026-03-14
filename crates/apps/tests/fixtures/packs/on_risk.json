@@ -1,0 +1,27 @@
+{
+  "pack_id": "goal-on-risk-basic",
+  "version": "1",
+  "description": "On-risk approval example pack",
+  "entry_goal": "pause before execution when risk policy demands approval",
+  "planner_hints": [
+    "treat high-risk mutation steps as approval boundaries"
+  ],
+  "recommended_verifier_flow": ["generic"],
+  "allowed_tools": [
+    { "operation": "read_file", "scope": "workspace" },
+    { "operation": "run_command", "scope": "workspace" }
+  ],
+  "verifier_rules": [
+    {
+      "label": "workspace verifier",
+      "profile": "generic",
+      "command_example": "pwd",
+      "artifact_expectation": "workspace path is visible",
+      "required": true
+    }
+  ],
+  "risk_policy": {
+    "approval_mode": "on-risk",
+    "max_mutating_steps": 5
+  }
+}

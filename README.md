@@ -145,7 +145,8 @@ env-only runtime knobs:
 ## 실행 의미
 
 - `run <goal-file>`은 run id, step journal, verify/report artifact를 남긴다.
-- `resume`과 `abort`는 pending run control state를 기준으로 동작한다.
+- `resume`은 `waiting_approval` 상태의 goal-file pending run 전용이다.
+- `abort`는 pending run control state를 기준으로 동작하는 terminal control이다.
 - compatibility 경로의 `read`, `write`, `remove`, `freeze`, `halt`도 기존 canonical path를 유지한다.
 - provider/tool/memory 단계 실패는 성공 종료로 숨기지 않고 process failure로 승격된다.
 - provider health는 `ready`, `degraded`, `blocked`로 노출된다.

@@ -1,0 +1,42 @@
+{
+  "pack_id": "python-fastapi-basic",
+  "version": "1",
+  "description": "Python FastAPI verifier pack",
+  "entry_goal": "implement one bounded Python FastAPI task",
+  "planner_hints": [
+    "use python3-only verifier path",
+    "treat format and import smoke as generic checks"
+  ],
+  "recommended_verifier_flow": ["generic", "test"],
+  "allowed_tools": [
+    { "operation": "read_file", "scope": "workspace" },
+    { "operation": "run_command", "scope": "workspace" }
+  ],
+  "verifier_rules": [
+    {
+      "label": "format",
+      "profile": "generic",
+      "command_example": "python3 -m compileall app.py",
+      "artifact_expectation": "format-style smoke succeeds",
+      "required": true
+    },
+    {
+      "label": "test",
+      "profile": "test",
+      "command_example": "python3 -m unittest -q",
+      "artifact_expectation": "unit tests succeed",
+      "required": true
+    },
+    {
+      "label": "import smoke",
+      "profile": "generic",
+      "command_example": "python3 app.py",
+      "artifact_expectation": "module imports cleanly",
+      "required": true
+    }
+  ],
+  "risk_policy": {
+    "approval_mode": "never",
+    "max_mutating_steps": 8
+  }
+}

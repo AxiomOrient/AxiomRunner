@@ -1,0 +1,27 @@
+{
+  "pack_id": "minimal-workspace-pack",
+  "version": "1",
+  "description": "Minimal sample workflow pack",
+  "entry_goal": "verify one bounded workspace path",
+  "planner_hints": [
+    "keep verifier steps replayable"
+  ],
+  "recommended_verifier_flow": ["generic"],
+  "allowed_tools": [
+    { "operation": "read_file", "scope": "workspace" },
+    { "operation": "run_command", "scope": "workspace" }
+  ],
+  "verifier_rules": [
+    {
+      "label": "workspace",
+      "profile": "generic",
+      "command_example": "pwd",
+      "artifact_expectation": "workspace path is visible",
+      "required": true
+    }
+  ],
+  "risk_policy": {
+    "approval_mode": "never",
+    "max_mutating_steps": 5
+  }
+}

@@ -1,4 +1,4 @@
-use crate::goal_file::parse_goal_file;
+use crate::goal_file::parse_goal_file_template;
 use axonrunner_core::{Intent, RunGoal};
 use std::path::Path;
 
@@ -102,6 +102,7 @@ pub enum RunTemplate {
 pub struct GoalFileTemplate {
     pub path: String,
     pub goal: RunGoal,
+    pub workflow_pack: Option<axonrunner_adapters::WorkflowPackContract>,
 }
 
 impl RunTemplate {
@@ -161,14 +162,31 @@ fn parse_replay_command(args: &[String]) -> Result<CliCommand, String> {
 fn parse_run_command(args: &[String]) -> Result<CliCommand, String> {
     let intent_spec = exactly_one_arg("run", args)?;
     if Path::new(&intent_spec).is_file() {
-        return Ok(CliCommand::Run(RunTemplate::GoalFile(GoalFileTemplate {
-            path: intent_spec.clone(),
-            goal: parse_goal_file(&intent_spec)?,
-        })));
+        return Ok(CliCommand::Run(RunTemplate::GoalFile(
+            parse_goal_file_template(&intent_spec)?,
+        )));
+    }
+    if looks_like_goal_file_path(&intent_spec) {
+        return Err(format!("goal file not found: {intent_spec}"));
     }
     Ok(CliCommand::Run(RunTemplate::LegacyIntent(
         parse_legacy_intent_spec(&intent_spec)?,
     )))
+}
+
+fn looks_like_goal_file_path(raw: &str) -> bool {
+    let pathish_prefix = raw.starts_with('.') || raw.starts_with('/') || raw.starts_with('~');
+    let pathish_body = raw.contains(std::path::MAIN_SEPARATOR)
+        || if std::path::MAIN_SEPARATOR != '/' {
+            raw.contains('/')
+        } else {
+            false
+        };
+    let lower = raw.to_ascii_lowercase();
+    let goalish_suffix = [".json", ".yaml", ".yml", ".toml"]
+        .iter()
+        .any(|suffix| lower.ends_with(suffix));
+    pathish_prefix || pathish_body || goalish_suffix
 }
 
 fn parse_resume_command(args: &[String]) -> Result<CliCommand, String> {

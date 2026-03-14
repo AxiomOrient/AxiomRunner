@@ -10,6 +10,8 @@
 - 현재 cached session은 `cwd`와 `model`이 모두 같은 경우에만 재사용한다.
 - `cwd` 또는 `model`이 달라지면 기존 session을 닫고 새 session을 만든다.
 - closed session은 재사용하지 않는다.
+- 같은 provider 인스턴스 안에서는 `ask` 를 동시에 두 번 보내지 않는다.
+- 즉 session reuse가 있더라도 현재 정책은 per-session serialization 이다.
 
 ## Workspace Binding
 

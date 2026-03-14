@@ -46,11 +46,16 @@ pub(super) enum ToolPlan {
         path: String,
         line_prefix: String,
     },
-    RunCommand {
-        label: String,
-        program: String,
-        args: Vec<String>,
+    RunCommands {
+        commands: Vec<ToolCommandPlan>,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct ToolCommandPlan {
+    pub(super) label: String,
+    pub(super) program: String,
+    pub(super) args: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -101,6 +106,7 @@ fn build_goal_runtime_run_plan(
     run_id: &str,
     intent_id: &str,
 ) -> RuntimeRunPlan {
+    let workflow_pack = goal_workflow_pack(goal_file);
     let mut queue = goal_file
         .goal
         .done_conditions
@@ -182,8 +188,8 @@ fn build_goal_runtime_run_plan(
             "intent_id={intent_id} goal_file={} workspace_root={} workflow_pack={} verifier_flow={} queued_done_conditions={} queued_verifiers={}",
             goal_file.path,
             goal_file.goal.workspace_root,
-            default_goal_workflow_pack(goal_file).pack_id,
-            render_verifier_flow(&default_goal_workflow_pack(goal_file).recommended_verifier_flow),
+            workflow_pack.pack_id,
+            render_verifier_flow(&workflow_pack.recommended_verifier_flow),
             goal_file.goal.done_conditions.len(),
             goal_file.goal.verification_checks.len()
         ),
@@ -218,7 +224,7 @@ pub(super) fn build_runtime_compose_plan(
 
     match template {
         RunTemplate::GoalFile(goal_file) => RuntimeComposePlan {
-            workflow_pack: Some(default_goal_workflow_pack(goal_file)),
+            workflow_pack: Some(goal_workflow_pack(goal_file)),
             provider: None,
             memory: MemoryPlan::None,
             tool: None,
@@ -527,18 +533,18 @@ fn default_goal_workflow_pack(
                 scope: String::from("workspace"),
             },
         ],
-        verifier_rules: vec![WorkflowPackVerifierRule {
-            label: String::from("workspace verifier"),
-            profile: RunCommandProfile::Generic,
-            command_example: String::from("pwd"),
-            artifact_expectation: goal_file
-                .goal
-                .verification_checks
-                .first()
-                .map(|check| check.detail.clone())
-                .unwrap_or_else(|| String::from("verify/report artifact exists")),
-            required: true,
-        }],
+        verifier_rules: goal_file
+            .goal
+            .verification_checks
+            .iter()
+            .map(|check| WorkflowPackVerifierRule {
+                label: check.label.clone(),
+                profile: verifier_profile_for_detail(&check.detail),
+                command_example: String::from("pwd"),
+                artifact_expectation: format!("verifier `{}` passes", check.label),
+                required: true,
+            })
+            .collect(),
         risk_policy: WorkflowPackRiskPolicy {
             approval_mode: approval_mode_name(goal_file.goal.approval_mode).to_owned(),
             max_mutating_steps: goal_file.goal.budget.max_steps,
@@ -551,17 +557,7 @@ fn recommended_goal_verifier_flow(
 ) -> Vec<RunCommandProfile> {
     let mut flow = Vec::new();
     for check in &goal_file.goal.verification_checks {
-        let detail = check.detail.to_ascii_lowercase();
-        let profile =
-            if detail.contains("clippy") || detail.contains("eslint") || detail.contains("lint") {
-                RunCommandProfile::Lint
-            } else if detail.contains("build") {
-                RunCommandProfile::Build
-            } else if detail.contains("test") {
-                RunCommandProfile::Test
-            } else {
-                RunCommandProfile::Generic
-            };
+        let profile = verifier_profile_for_detail(&check.detail);
         if !flow.contains(&profile) {
             flow.push(profile);
         }
@@ -589,7 +585,56 @@ fn approval_mode_name(mode: axonrunner_core::RunApprovalMode) -> &'static str {
 
 pub(super) fn goal_verifier_tool_plan(plan: &RuntimeComposePlan) -> Option<ToolPlan> {
     let pack = plan.workflow_pack.as_ref()?;
-    let rule = pack.verifier_rules.iter().find(|rule| rule.required)?;
+    let mut commands = Vec::new();
+    let mut used = vec![false; pack.verifier_rules.len()];
+
+    for profile in &pack.recommended_verifier_flow {
+        for (index, rule) in pack.verifier_rules.iter().enumerate() {
+            if used[index] || rule.profile != *profile {
+                continue;
+            }
+            if let Some(command) = command_plan_from_rule(rule) {
+                commands.push(command);
+                used[index] = true;
+            }
+        }
+    }
+    for (index, rule) in pack.verifier_rules.iter().enumerate() {
+        if used[index] {
+            continue;
+        }
+        if let Some(command) = command_plan_from_rule(rule) {
+            commands.push(command);
+        }
+    }
+    if commands.is_empty() {
+        None
+    } else {
+        Some(ToolPlan::RunCommands { commands })
+    }
+}
+
+fn goal_workflow_pack(goal_file: &crate::cli_command::GoalFileTemplate) -> WorkflowPackContract {
+    goal_file
+        .workflow_pack
+        .clone()
+        .unwrap_or_else(|| default_goal_workflow_pack(goal_file))
+}
+
+fn verifier_profile_for_detail(detail: &str) -> RunCommandProfile {
+    let detail = detail.to_ascii_lowercase();
+    if detail.contains("clippy") || detail.contains("eslint") || detail.contains("lint") {
+        RunCommandProfile::Lint
+    } else if detail.contains("build") {
+        RunCommandProfile::Build
+    } else if detail.contains("test") {
+        RunCommandProfile::Test
+    } else {
+        RunCommandProfile::Generic
+    }
+}
+
+fn command_plan_from_rule(rule: &WorkflowPackVerifierRule) -> Option<ToolCommandPlan> {
     let mut parts = rule
         .command_example
         .split_whitespace()
@@ -597,7 +642,7 @@ pub(super) fn goal_verifier_tool_plan(plan: &RuntimeComposePlan) -> Option<ToolP
         .collect::<Vec<_>>();
     let program = parts.first()?.clone();
     let args = parts.split_off(1);
-    Some(ToolPlan::RunCommand {
+    Some(ToolCommandPlan {
         label: rule.label.clone(),
         program,
         args,
@@ -690,6 +735,7 @@ mod tests {
         let template = RunTemplate::GoalFile(crate::cli_command::GoalFileTemplate {
             path: String::from("GOAL.json"),
             goal,
+            workflow_pack: None,
         });
 
         let plan = build_runtime_compose_plan(
@@ -733,6 +779,7 @@ mod tests {
         let template = RunTemplate::GoalFile(crate::cli_command::GoalFileTemplate {
             path: String::from("GOAL.json"),
             goal,
+            workflow_pack: None,
         });
 
         let plan = build_runtime_compose_plan(
@@ -744,12 +791,13 @@ mod tests {
             "runtime.log",
         );
 
-        let Some(ToolPlan::RunCommand { program, args, .. }) = goal_verifier_tool_plan(&plan)
+        let Some(ToolPlan::RunCommands { commands }) = goal_verifier_tool_plan(&plan)
         else {
             panic!("expected verifier command tool plan");
         };
-        assert_eq!(program, "pwd");
-        assert!(args.is_empty());
+        assert_eq!(commands.len(), 1);
+        assert_eq!(commands[0].program, "pwd");
+        assert!(commands[0].args.is_empty());
     }
 
     #[test]
@@ -786,6 +834,7 @@ mod tests {
         let template = RunTemplate::GoalFile(crate::cli_command::GoalFileTemplate {
             path: String::from("GOAL.json"),
             goal,
+            workflow_pack: None,
         });
 
         let plan = build_runtime_compose_plan(
@@ -843,6 +892,7 @@ mod tests {
         let template = RunTemplate::GoalFile(crate::cli_command::GoalFileTemplate {
             path: String::from("GOAL.json"),
             goal,
+            workflow_pack: None,
         });
 
         let plan = build_runtime_run_plan(&template, "run-1", "cli-1", DecisionOutcome::Accepted);
@@ -883,6 +933,7 @@ mod tests {
         let template = RunTemplate::GoalFile(crate::cli_command::GoalFileTemplate {
             path: String::from("GOAL.json"),
             goal,
+            workflow_pack: None,
         });
 
         let plan = build_runtime_run_plan(&template, "run-2", "cli-2", DecisionOutcome::Accepted);

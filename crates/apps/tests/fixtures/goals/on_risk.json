@@ -9,5 +9,6 @@
     { "label": "release gate", "detail": "cargo test -p axonrunner_apps --test release_security_gate" }
   ],
   "budget": { "max_steps": 5, "max_minutes": 10, "max_tokens": 8000 },
-  "approval_mode": "on-risk"
+  "approval_mode": "on-risk",
+  "workflow_pack": "../packs/on_risk.json"
 }

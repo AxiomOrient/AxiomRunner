@@ -14,5 +14,6 @@
     { "label": "lint", "detail": "npm run lint" }
   ],
   "budget": { "max_steps": 8, "max_minutes": 10, "max_tokens": 8000 },
-  "approval_mode": "never"
+  "approval_mode": "never",
+  "workflow_pack": "../packs/node_api.json"
 }

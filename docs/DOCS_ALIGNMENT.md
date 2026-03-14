@@ -23,7 +23,6 @@
 | `docs/VERSIONING.md` | 버전/체인지로그 정책 | current truth |
 | `docs/AUTONOMOUS_AGENT_TARGET.md` | 남은 목표 브리지 | transition bridge |
 | `docs/transition/README.md` | 전환 문서 인덱스 | transition index |
-| `docs/transition/REMAINING_GAPS.md` | 이번 cycle closure note와 다음 backlog 경계 | transition analysis |
 | `docs/transition/WORKFLOW_PACK_CONTRACT.md` | workflow pack / adapter 경계 | transition guidance |
 
 ## Reading Rule
@@ -32,8 +31,8 @@
 |---|---|---|---|
 | 제품 정체성 | `project-charter.md` | `AUTONOMOUS_AGENT_TARGET.md` | charter는 현재 truth, transition docs는 future extension 경계 |
 | CLI surface | `CAPABILITY_MATRIX.md`, `RUNBOOK.md`, `README.md` | `AUTONOMOUS_AGENT_TARGET.md` | 현재 shipped truth는 `run <goal-file>` 중심 |
-| tool/runtime contract | `CAPABILITY_MATRIX.md`, `CODEK_RUNTIME_CONTRACT.md`, `RUNBOOK.md` | `REMAINING_GAPS.md` | runtime contract는 현재 docs가 우선 |
-| safety / approval / eval | `RUNBOOK.md`, `CAPABILITY_MATRIX.md` | `REMAINING_GAPS.md`, `WORKFLOW_PACK_CONTRACT.md` | current docs는 shipped behavior, transition docs는 closure context와 future extension 경계 |
+| tool/runtime contract | `CAPABILITY_MATRIX.md`, `CODEK_RUNTIME_CONTRACT.md`, `RUNBOOK.md` | `WORKFLOW_PACK_CONTRACT.md` | runtime contract는 현재 docs가 우선 |
+| safety / approval / eval | `RUNBOOK.md`, `CAPABILITY_MATRIX.md` | `WORKFLOW_PACK_CONTRACT.md` | current docs는 shipped behavior, transition docs는 future extension 경계를 준다 |
 
 ## Historical Conflict
 
@@ -60,5 +59,4 @@ future target drafts once used `run <goal>`.
 closure context와 future extension까지 보려면:
 
 1. `docs/transition/README.md`
-2. `docs/transition/REMAINING_GAPS.md`
-3. `docs/transition/WORKFLOW_PACK_CONTRACT.md`
+2. `docs/transition/WORKFLOW_PACK_CONTRACT.md`

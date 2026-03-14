@@ -1,5 +1,5 @@
 use crate::config_loader::AppConfig;
-use crate::runtime_compose::RuntimeComposeConfig;
+use crate::runtime_compose::{RuntimeComposeConfig, run_reason_code, run_reason_detail};
 use crate::trace_store::TraceStore;
 
 pub fn execute_replay(config: &AppConfig, target: &str) -> Result<(), String> {
@@ -69,12 +69,23 @@ pub fn execute_replay(config: &AppConfig, target: &str) -> Result<(), String> {
     );
     if let Some(run) = &latest.run {
         println!(
-            "replay run run_id={} phase={} outcome={} reason={} planned_steps={} summary={}",
-            run.run_id, run.phase, run.outcome, run.reason, run.planned_steps, run.plan_summary
+            "replay run run_id={} phase={} outcome={} reason={} reason_code={} reason_detail={} approval_state={} verifier_state={} elapsed_ms={} planned_steps={} summary={}",
+            run.run_id,
+            run.phase,
+            run.outcome,
+            run.reason,
+            run_reason_code(&run.reason),
+            run_reason_detail(&run.reason),
+            run.approval_state,
+            run.verifier_state,
+            run.elapsed_ms,
+            run.planned_steps,
+            run.plan_summary
         );
         println!(
-            "replay repair attempted={} status={} summary={} step_ids={}",
+            "replay repair attempted={} attempts={} status={} summary={} step_ids={}",
             run.repair.attempted,
+            run.repair.attempts,
             run.repair.status,
             run.repair.summary,
             if run.step_ids.is_empty() {
