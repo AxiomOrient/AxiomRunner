@@ -158,7 +158,6 @@ AxonRunner 저장소는 크게 3개 실행 크레이트와 몇 개 보조 폴더
 
 필요할 때만 보는 보조 문서:
 
-- `docs/DOCS_ALIGNMENT.md`
 - `docs/AUTONOMOUS_AGENT_TARGET.md`
 - `docs/AUTONOMOUS_AGENT_SPEC.md`
 

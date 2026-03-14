@@ -12,6 +12,8 @@
 
 여기까지 읽으면 이 저장소가 무엇이고, 어떻게 돌리며, 어디를 봐야 하는지 잡힌다.
 
+현재 shipped truth의 시작점은 `run <goal-file>` 중심 CLI다.
+
 ## docs 안에서 꼭 필요한 파일
 
 - `docs/project-charter.md` — 제품 정의
@@ -26,7 +28,6 @@
 
 ## 필요할 때만 보는 파일
 
-- `docs/DOCS_ALIGNMENT.md` — 문서 경계 설명
 - `docs/AUTONOMOUS_AGENT_TARGET.md` — 앞으로 가고 싶은 목표
 - `docs/AUTONOMOUS_AGENT_SPEC.md` — goal contract 세부 규칙
 
@@ -43,4 +44,4 @@
 - 루트 `README.md`가 가장 먼저다.
 - 현재 제품 설명이 필요하면 `project-charter`, `RUNBOOK`, `CAPABILITY_MATRIX`를 본다.
 - 구조가 헷갈리면 `PROJECT_STRUCTURE.md`를 본다.
-- 현재 설명과 transition 문서가 다르면 현재 문서가 우선이다.
+- 현재 설명과 bridge 문서가 다르면 현재 문서가 우선이다.

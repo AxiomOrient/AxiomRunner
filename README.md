@@ -105,6 +105,10 @@ autonomy evidence 기본 묶음:
 - `cargo test -p axonrunner_apps --test nightly_dogfood_contract`
 - `cargo test -p axonrunner_apps --test release_security_gate`
 
+nightly 운영 경로:
+
+- 기본 경로는 GitHub CI가 아니라 로컬/외부 스케줄러 + `scripts/nightly_dogfood.sh`
+
 representative verifier examples:
 
 - `examples/rust_service`
@@ -172,4 +176,3 @@ env-only runtime knobs:
 - 제품 charter: [docs/project-charter.md](docs/project-charter.md)
 - autonomous target bridge: [docs/AUTONOMOUS_AGENT_TARGET.md](docs/AUTONOMOUS_AGENT_TARGET.md)
 - autonomous run contract: [docs/AUTONOMOUS_AGENT_SPEC.md](docs/AUTONOMOUS_AGENT_SPEC.md)
-- docs alignment guide: [docs/DOCS_ALIGNMENT.md](docs/DOCS_ALIGNMENT.md)

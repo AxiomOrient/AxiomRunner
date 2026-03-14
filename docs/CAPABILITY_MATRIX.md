@@ -12,7 +12,6 @@
 
 - `docs/AUTONOMOUS_AGENT_TARGET.md`와 `docs/AUTONOMOUS_AGENT_SPEC.md`는 다음 단계의 target contract를 설명한다.
 - current truth와 target contract가 다를 때는 current truth가 release 기준이다.
-- `docs/DOCS_ALIGNMENT.md`는 현재 contract와 전환 계획을 함께 읽을 때의 해석 규칙을 제공한다.
 
 ## 2. v1 Core Capability
 
@@ -196,5 +195,4 @@ autonomy evidence가 만족해야 하는 추가 기준:
 
 - `docs/AUTONOMOUS_AGENT_TARGET.md`
 - `docs/AUTONOMOUS_AGENT_SPEC.md`
-- `docs/DOCS_ALIGNMENT.md`
 - `docs/WORKFLOW_PACK_CONTRACT.md`

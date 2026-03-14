@@ -211,17 +211,17 @@ fn release_security_gate_truth_surface_docs_match_retained_commands() {
 }
 
 #[test]
-fn release_security_gate_transition_docs_lock_autonomous_target_contract() {
+fn release_security_gate_bridge_docs_lock_autonomous_target_contract() {
     let readme = include_str!("../../../README.md");
+    let docs_guide = include_str!("../../../docs/README.md");
     let target = include_str!("../../../docs/AUTONOMOUS_AGENT_TARGET.md");
     let spec = include_str!("../../../docs/AUTONOMOUS_AGENT_SPEC.md");
-    let alignment = include_str!("../../../docs/DOCS_ALIGNMENT.md");
     let workflow_pack = include_str!("../../../docs/WORKFLOW_PACK_CONTRACT.md");
 
     for token in ["run <goal>", "resume", "abort", "goal", "approval", "trace"] {
         assert!(
             target.contains(token) || spec.contains(token),
-            "transition docs missing token: {token}"
+            "bridge docs missing token: {token}"
         );
     }
 
@@ -242,21 +242,21 @@ fn release_security_gate_transition_docs_lock_autonomous_target_contract() {
         );
     }
 
-    for token in ["current truth", "future", "run <intent-spec>", "run <goal>"] {
+    for token in ["README.md", "PROJECT_STRUCTURE.md", "bridge", "run <goal-file>"] {
         assert!(
-            alignment.contains(token),
-            "docs alignment missing token: {token}"
+            docs_guide.contains(token),
+            "docs guide missing token: {token}"
         );
     }
 
-    for doc in [readme, target, alignment] {
+    for doc in [readme, target, docs_guide] {
         assert!(
             !doc.contains("docs/transition/README.md"),
             "root docs must not point at removed docs/transition/README.md"
         );
         assert!(
             !doc.contains("docs/roadmap/"),
-            "root transition references must not point at deleted docs/roadmap paths"
+            "root bridge references must not point at deleted docs/roadmap paths"
         );
     }
 

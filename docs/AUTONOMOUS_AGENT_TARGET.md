@@ -56,5 +56,5 @@
 
 자세한 현재 경계와 future extension 근거는 아래 문서가 소유한다.
 
-1. `docs/DOCS_ALIGNMENT.md`
+1. `docs/README.md`
 2. `docs/WORKFLOW_PACK_CONTRACT.md`
