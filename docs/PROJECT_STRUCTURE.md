@@ -11,7 +11,6 @@ AxonRunner 저장소는 크게 3개 실행 크레이트와 몇 개 보조 폴더
 - `examples` — goal/pack 연결을 보여주는 representative verifier 예제를 둔다.
 - `packs` — workflow pack 관련 참고 문서를 둔다.
 - `scripts` — 반복 실행용 스크립트를 둔다.
-- `plans` — 작업 계획과 리뷰 메모를 둔다. shipped product docs는 아니다.
 - `target` — 빌드 결과물이다. 생성 파일이므로 읽기 대상이 아니다.
 
 ## 폴더별 설명
@@ -122,11 +121,6 @@ AxonRunner 저장소는 크게 3개 실행 크레이트와 몇 개 보조 폴더
   주요 파일:
   - `nightly_dogfood.sh`
 
-- `plans` — owns: 리뷰, 청사진, 계획, 태스크, 셀프 리뷰
-  interacts with: 작업 중 판단
-  주의:
-  - 제품 사용 문서가 아니라 작업 문서다.
-
 ## 어떻게 연결되는가
 
 - 사용자는 `crates/apps`의 CLI로 시작한다.
@@ -164,5 +158,5 @@ AxonRunner 저장소는 크게 3개 실행 크레이트와 몇 개 보조 폴더
 판단:
 
 - 불필요한 옛 분석 문서가 `docs/`에 많이 남아 있지는 않다.
-- 작업용 문서는 `plans/`로 빠져 있어서 분리가 잘 되어 있다.
+- 문서 표면은 현재 제품 문서와 bridge 문서로 충분히 좁혀졌다.
 - 지금 필요한 것은 삭제보다 문서 입구를 더 쉽게 만드는 일이다.
