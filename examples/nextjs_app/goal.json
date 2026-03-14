@@ -1,0 +1,20 @@
+{
+  "summary": "Next.js app representative verifier run",
+  "workspace_root": ".",
+  "constraints": [
+    { "label": "domain", "detail": "nextjs-app-basic representative path" }
+  ],
+  "done_conditions": [
+    { "label": "report", "evidence": "report artifact exists" },
+    { "label": "ui", "evidence": "report artifact exists" }
+  ],
+  "verification_checks": [
+    { "label": "lint", "detail": "npm run lint" },
+    { "label": "typecheck", "detail": "npm run typecheck" },
+    { "label": "test", "detail": "npm test" },
+    { "label": "build", "detail": "npm run build" }
+  ],
+  "budget": { "max_steps": 10, "max_minutes": 10, "max_tokens": 8000 },
+  "approval_mode": "never",
+  "workflow_pack": "pack.json"
+}

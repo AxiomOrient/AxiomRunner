@@ -52,9 +52,9 @@
 - operator-visible failure reason
 - eval-driven release
 
-## Transition References
+## Supporting References
 
-자세한 closure context와 future extension 근거는 아래 문서가 소유한다.
+자세한 현재 경계와 future extension 근거는 아래 문서가 소유한다.
 
-1. `docs/transition/README.md`
-2. `docs/transition/WORKFLOW_PACK_CONTRACT.md`
+1. `docs/DOCS_ALIGNMENT.md`
+2. `docs/WORKFLOW_PACK_CONTRACT.md`

@@ -3,9 +3,7 @@
 ## Status
 
 This document describes the canonical goal/run contract that the shipped
-AxonRunner product now uses. The current delivery cycle is already closed, and
-`docs/transition/*.md` now exist as closure context plus future backlog
-boundaries rather than an active transition checklist. The public runtime surface is
+AxonRunner product now uses. The public runtime surface is
 documented by `README.md`, `docs/project-charter.md`,
 `docs/CAPABILITY_MATRIX.md`, and `docs/RUNBOOK.md`.
 

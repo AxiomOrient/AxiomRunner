@@ -104,7 +104,7 @@ fn copy_dir_all(from: &Path, to: &Path) -> std::io::Result<()> {
 #[test]
 fn autonomous_eval_corpus_representative_runs_remain_green() {
     let mut passed = 0usize;
-    let total = 9usize;
+    let total = 10usize;
 
     {
         let workspace = unique_path("eval-intake-workspace", "dir");
@@ -280,6 +280,29 @@ fn autonomous_eval_corpus_representative_runs_remain_green() {
         assert_eq!(run.status.code(), Some(6), "stderr:\n{}", stderr_of(&run));
         assert!(stderr_of(&run).contains("workspace lock is active"));
         assert!(status.status.success(), "stderr:\n{}", stderr_of(&status));
+        passed += 1;
+        let _ = fs::remove_dir_all(workspace);
+    }
+
+    {
+        let workspace = unique_path("eval-provider-blocked-workspace", "dir");
+        let missing_bin = workspace.join("missing-codex");
+        fs::create_dir_all(&workspace).expect("workspace should exist");
+        let doctor = run_cli_with_env(
+            &["doctor", "--json"],
+            &[
+                (
+                    "AXONRUNNER_RUNTIME_TOOL_WORKSPACE",
+                    workspace.to_str().expect("utf8 path"),
+                ),
+                ("AXONRUNNER_RUNTIME_PROVIDER", "codek"),
+                ("AXONRUNNER_CODEX_BIN", missing_bin.to_str().expect("utf8 path")),
+            ],
+        );
+        assert!(doctor.status.success(), "stderr:\n{}", stderr_of(&doctor));
+        let doctor_json: serde_json::Value =
+            serde_json::from_str(&stdout_of(&doctor)).expect("doctor json should parse");
+        assert_eq!(doctor_json["runtime"]["provider_state"], "blocked");
         passed += 1;
         let _ = fs::remove_dir_all(workspace);
     }

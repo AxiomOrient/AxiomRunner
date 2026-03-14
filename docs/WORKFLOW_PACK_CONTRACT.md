@@ -3,7 +3,7 @@
 ## Purpose
 
 이 문서는 workflow pack과 adapter가 AxonRunner 안에 들어올 때 지켜야 할
-최소 계약을 고정한다.
+현재 계약을 고정한다.
 
 핵심 원칙:
 

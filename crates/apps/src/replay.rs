@@ -82,18 +82,26 @@ pub fn execute_replay(config: &AppConfig, target: &str) -> Result<(), String> {
             run.planned_steps,
             run.plan_summary
         );
-        println!(
-            "replay repair attempted={} attempts={} status={} summary={} step_ids={}",
-            run.repair.attempted,
-            run.repair.attempts,
-            run.repair.status,
-            run.repair.summary,
-            if run.step_ids.is_empty() {
-                String::from("none")
-            } else {
-                run.step_ids.join(",")
-            }
-        );
+        let step_ids = if run.step_ids.is_empty() {
+            String::from("none")
+        } else {
+            run.step_ids.join(",")
+        };
+        if run.repair.attempted {
+            println!(
+                "replay repair attempted={} attempts={} status={} summary={} step_ids={}",
+                run.repair.attempted,
+                run.repair.attempts,
+                run.repair.status,
+                run.repair.summary,
+                step_ids
+            );
+        } else {
+            println!(
+                "replay repair attempted={} status={} step_ids={}",
+                run.repair.attempted, run.repair.status, step_ids
+            );
+        }
         if let Some(rollback) = &run.rollback {
             println!(
                 "replay rollback metadata={} restore_path={} cleanup_path={} reason={}",

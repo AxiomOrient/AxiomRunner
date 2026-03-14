@@ -21,6 +21,14 @@ cargo build
 - `examples/minimal_goal.json`
 - `examples/minimal_pack.json`
 
+representative verifier examples:
+
+- `examples/rust_service`
+- `examples/node_api`
+- `examples/nextjs_app`
+- `examples/python_fastapi`
+- 실행 예와 파일 설명: `examples/README.md`
+
 ## 2. Doctor
 
 ```bash

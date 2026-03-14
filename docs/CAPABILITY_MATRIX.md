@@ -190,10 +190,11 @@ autonomy evidence가 만족해야 하는 추가 기준:
 - nightly dogfood driver가 대표 fixture 로그 번들을 남겨야 한다.
 - fault path suite가 provider/tool/workspace substrate 고장 경로를 통과해야 한다.
 
-## 10. Transition References
+## 10. Bridge References
 
 현재 제품 truth를 유지한 상태에서 다음 전환 목표를 추적하는 문서:
 
 - `docs/AUTONOMOUS_AGENT_TARGET.md`
 - `docs/AUTONOMOUS_AGENT_SPEC.md`
 - `docs/DOCS_ALIGNMENT.md`
+- `docs/WORKFLOW_PACK_CONTRACT.md`

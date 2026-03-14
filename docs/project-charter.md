@@ -15,6 +15,7 @@ Transition references:
 - `docs/AUTONOMOUS_AGENT_TARGET.md`
 - `docs/AUTONOMOUS_AGENT_SPEC.md`
 - `docs/DOCS_ALIGNMENT.md`
+- `docs/WORKFLOW_PACK_CONTRACT.md`
 
 ## Retained Surface
 

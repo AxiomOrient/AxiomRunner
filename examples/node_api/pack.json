@@ -1,0 +1,49 @@
+{
+  "pack_id": "node-api-basic",
+  "version": "1",
+  "description": "Node API verifier pack",
+  "entry_goal": "implement one bounded Node API task",
+  "planner_hints": [
+    "install before verifier commands",
+    "run lint then test then build"
+  ],
+  "recommended_verifier_flow": ["generic", "lint", "test", "build"],
+  "allowed_tools": [
+    { "operation": "read_file", "scope": "workspace" },
+    { "operation": "run_command", "scope": "workspace" }
+  ],
+  "verifier_rules": [
+    {
+      "label": "install",
+      "profile": "generic",
+      "command_example": "npm install --ignore-scripts",
+      "artifact_expectation": "npm install succeeds",
+      "required": true
+    },
+    {
+      "label": "lint",
+      "profile": "lint",
+      "command_example": "npm run lint",
+      "artifact_expectation": "lint succeeds",
+      "required": true
+    },
+    {
+      "label": "test",
+      "profile": "test",
+      "command_example": "npm test",
+      "artifact_expectation": "tests succeed",
+      "required": true
+    },
+    {
+      "label": "build",
+      "profile": "build",
+      "command_example": "npm run build",
+      "artifact_expectation": "build succeeds",
+      "required": true
+    }
+  ],
+  "risk_policy": {
+    "approval_mode": "never",
+    "max_mutating_steps": 8
+  }
+}

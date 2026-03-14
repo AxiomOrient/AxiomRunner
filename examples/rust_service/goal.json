@@ -1,0 +1,19 @@
+{
+  "summary": "Rust service representative verifier run",
+  "workspace_root": ".",
+  "constraints": [
+    { "label": "domain", "detail": "rust-service-basic representative path" }
+  ],
+  "done_conditions": [
+    { "label": "report", "evidence": "report artifact exists" },
+    { "label": "tests", "evidence": "report artifact exists" }
+  ],
+  "verification_checks": [
+    { "label": "build", "detail": "cargo build" },
+    { "label": "test", "detail": "cargo test" },
+    { "label": "lint", "detail": "cargo clippy -- -D warnings" }
+  ],
+  "budget": { "max_steps": 8, "max_minutes": 10, "max_tokens": 8000 },
+  "approval_mode": "never",
+  "workflow_pack": "pack.json"
+}

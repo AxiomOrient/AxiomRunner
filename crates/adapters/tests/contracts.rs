@@ -165,7 +165,7 @@ fn tool_contract_replace_request_shape_stays_explicit() {
 
 #[test]
 fn workflow_pack_contract_docs_lock_manifest_and_ownership_rules() {
-    let docs = include_str!("../../../docs/transition/WORKFLOW_PACK_CONTRACT.md");
+    let docs = include_str!("../../../docs/WORKFLOW_PACK_CONTRACT.md");
 
     for token in [
         "pack_id",

@@ -216,7 +216,7 @@ fn release_security_gate_transition_docs_lock_autonomous_target_contract() {
     let target = include_str!("../../../docs/AUTONOMOUS_AGENT_TARGET.md");
     let spec = include_str!("../../../docs/AUTONOMOUS_AGENT_SPEC.md");
     let alignment = include_str!("../../../docs/DOCS_ALIGNMENT.md");
-    let transition = include_str!("../../../docs/transition/README.md");
+    let workflow_pack = include_str!("../../../docs/WORKFLOW_PACK_CONTRACT.md");
 
     for token in ["run <goal>", "resume", "abort", "goal", "approval", "trace"] {
         assert!(
@@ -251,8 +251,8 @@ fn release_security_gate_transition_docs_lock_autonomous_target_contract() {
 
     for doc in [readme, target, alignment] {
         assert!(
-            doc.contains("docs/transition/README.md"),
-            "root transition references must point at docs/transition/README.md"
+            !doc.contains("docs/transition/README.md"),
+            "root docs must not point at removed docs/transition/README.md"
         );
         assert!(
             !doc.contains("docs/roadmap/"),
@@ -260,10 +260,10 @@ fn release_security_gate_transition_docs_lock_autonomous_target_contract() {
         );
     }
 
-    for token in ["current truth", "transition", "review bundle", "AxonRunner"] {
+    for token in ["pack_id", "allowed_tools", "resume", "abort", "replay"] {
         assert!(
-            transition.contains(token),
-            "transition index missing token: {token}"
+            workflow_pack.contains(token),
+            "workflow pack contract missing token: {token}"
         );
     }
 }

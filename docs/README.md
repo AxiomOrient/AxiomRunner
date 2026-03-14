@@ -1,48 +1,46 @@
 # Docs Guide
 
-AxonRunner 문서는 두 층으로 읽는다.
+문서를 처음 읽을 때는 아래처럼 보면 된다.
 
-- current truth: 현재 제품 계약과 운영 기준
-- transition docs: 이번 사이클 종료 정리와 다음 확장 경계
+## 제일 먼저 볼 것
 
-과거 review bundle과 임시 분석 문서는 정리됐다.
-현재 기준은 이 디렉터리와 루트 `README.md`만 본다.
+1. `README.md`
+2. `docs/project-charter.md`
+3. `docs/RUNBOOK.md`
+4. `docs/CAPABILITY_MATRIX.md`
+5. `docs/PROJECT_STRUCTURE.md`
 
-## Recommended Reading Order
+여기까지 읽으면 이 저장소가 무엇이고, 어떻게 돌리며, 어디를 봐야 하는지 잡힌다.
 
-현재 제품만 빠르게 보려면:
+## docs 안에서 꼭 필요한 파일
 
-1. `docs/project-charter.md`
-2. `docs/CAPABILITY_MATRIX.md`
-3. `docs/CODEK_RUNTIME_CONTRACT.md`
-4. `docs/RUNBOOK.md`
+- `docs/project-charter.md` — 제품 정의
+- `docs/RUNBOOK.md` — 실행 순서
+- `docs/CAPABILITY_MATRIX.md` — 공식 지원 범위
+- `docs/CODEK_RUNTIME_CONTRACT.md` — codek runtime 규칙
+- `docs/WORKFLOW_PACK_CONTRACT.md` — workflow pack 경계
+- `docs/VERSIONING.md` — 버전 정책
+- `docs/PROJECT_STRUCTURE.md` — 폴더 구조 설명
 
-문서 경계까지 같이 보려면:
+이 7개가 기본 문서 세트다.
 
-1. `docs/DOCS_ALIGNMENT.md`
-2. `docs/AUTONOMOUS_AGENT_TARGET.md`
-3. `docs/AUTONOMOUS_AGENT_SPEC.md`
-4. `docs/transition/README.md`
+## 필요할 때만 보는 파일
 
-## Current Truth
+- `docs/DOCS_ALIGNMENT.md` — 문서 경계 설명
+- `docs/AUTONOMOUS_AGENT_TARGET.md` — 앞으로 가고 싶은 목표
+- `docs/AUTONOMOUS_AGENT_SPEC.md` — goal contract 세부 규칙
 
-- `docs/project-charter.md`
-- `docs/CAPABILITY_MATRIX.md`
-- `docs/CODEK_RUNTIME_CONTRACT.md`
-- `docs/RUNBOOK.md`
-- `docs/VERSIONING.md`
+이 문서들은 보조 문서다. 기본 흐름을 이해한 뒤에 보면 된다.
 
-v1 core doc set은 위 5개로 고정한다.
+## 지금 상태 판단
 
-## Transition Docs
+- `docs/`는 이미 꽤 작다.
+- 옛 작업 메모는 `plans/`로 빠져 있어서 제품 문서와 섞이지 않는다.
+- 그래서 지금 필요한 일은 삭제보다 “입구를 쉽게 만들기”다.
 
-- `docs/AUTONOMOUS_AGENT_TARGET.md`
-- `docs/AUTONOMOUS_AGENT_SPEC.md`
-- `docs/transition/README.md`
-- `docs/transition/WORKFLOW_PACK_CONTRACT.md`
+## 규칙
 
-## Rules
-
-- 루트 `README.md`는 제품 진입점이다.
-- `docs/*.md` 안에서도 bridge나 transition 문서는 explicit하게 표시된 것만 예외다.
-- 현재 계약과 전환 문서가 다르면 current truth 문서가 우선이다.
+- 루트 `README.md`가 가장 먼저다.
+- 현재 제품 설명이 필요하면 `project-charter`, `RUNBOOK`, `CAPABILITY_MATRIX`를 본다.
+- 구조가 헷갈리면 `PROJECT_STRUCTURE.md`를 본다.
+- 현재 설명과 transition 문서가 다르면 현재 문서가 우선이다.

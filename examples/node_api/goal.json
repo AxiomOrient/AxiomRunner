@@ -1,0 +1,20 @@
+{
+  "summary": "Node API representative verifier run",
+  "workspace_root": ".",
+  "constraints": [
+    { "label": "domain", "detail": "node-api-basic representative path" }
+  ],
+  "done_conditions": [
+    { "label": "report", "evidence": "report artifact exists" },
+    { "label": "bundle", "evidence": "report artifact exists" }
+  ],
+  "verification_checks": [
+    { "label": "install", "detail": "npm install --ignore-scripts" },
+    { "label": "lint", "detail": "npm run lint" },
+    { "label": "test", "detail": "npm test" },
+    { "label": "build", "detail": "npm run build" }
+  ],
+  "budget": { "max_steps": 10, "max_minutes": 10, "max_tokens": 8000 },
+  "approval_mode": "never",
+  "workflow_pack": "pack.json"
+}

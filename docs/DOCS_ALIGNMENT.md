@@ -2,13 +2,12 @@
 
 ## Purpose
 
-이 문서는 `docs/`와 `docs/transition/`을 함께 읽을 때 생기는 혼선을 줄이기 위한 정렬 문서다.
+이 문서는 current docs와 bridge docs를 함께 읽을 때 생기는 혼선을 줄이기 위한 정렬 문서다.
 
 핵심 원칙:
 
 - `docs/*.md`: 기본은 current truth
-- `docs/` 루트의 bridge 문서만 예외로 transition bridge 역할을 가진다
-- `docs/transition/*.md`: closure context와 future extension 경계
+- `docs/` 루트의 일부 bridge 문서는 future extension 경계를 함께 설명한다
 - historical 표현인 `run <intent-spec>` 와 future draft 표현인 `run <goal>` 은 현재 shipped truth가 아니다
 
 ## Inventory
@@ -19,11 +18,11 @@
 | `docs/README.md` | 문서 읽기 시작점 | current truth |
 | `docs/CAPABILITY_MATRIX.md` | 현재 capability / release blocker 정의 | current truth |
 | `docs/CODEK_RUNTIME_CONTRACT.md` | `codek` substrate 계약 | current truth |
+| `docs/WORKFLOW_PACK_CONTRACT.md` | workflow pack / adapter 경계 | current truth |
 | `docs/RUNBOOK.md` | 현재 운영 절차 | current truth |
 | `docs/VERSIONING.md` | 버전/체인지로그 정책 | current truth |
 | `docs/AUTONOMOUS_AGENT_TARGET.md` | 남은 목표 브리지 | transition bridge |
-| `docs/transition/README.md` | 전환 문서 인덱스 | transition index |
-| `docs/transition/WORKFLOW_PACK_CONTRACT.md` | workflow pack / adapter 경계 | transition guidance |
+| `docs/AUTONOMOUS_AGENT_SPEC.md` | goal/run contract 세부 규칙 | bridge doc |
 
 ## Reading Rule
 
@@ -31,8 +30,8 @@
 |---|---|---|---|
 | 제품 정체성 | `project-charter.md` | `AUTONOMOUS_AGENT_TARGET.md` | charter는 현재 truth, transition docs는 future extension 경계 |
 | CLI surface | `CAPABILITY_MATRIX.md`, `RUNBOOK.md`, `README.md` | `AUTONOMOUS_AGENT_TARGET.md` | 현재 shipped truth는 `run <goal-file>` 중심 |
-| tool/runtime contract | `CAPABILITY_MATRIX.md`, `CODEK_RUNTIME_CONTRACT.md`, `RUNBOOK.md` | `WORKFLOW_PACK_CONTRACT.md` | runtime contract는 현재 docs가 우선 |
-| safety / approval / eval | `RUNBOOK.md`, `CAPABILITY_MATRIX.md` | `WORKFLOW_PACK_CONTRACT.md` | current docs는 shipped behavior, transition docs는 future extension 경계를 준다 |
+| tool/runtime contract | `CAPABILITY_MATRIX.md`, `CODEK_RUNTIME_CONTRACT.md`, `RUNBOOK.md`, `WORKFLOW_PACK_CONTRACT.md` | `AUTONOMOUS_AGENT_SPEC.md` | runtime contract는 current docs가 우선 |
+| safety / approval / eval | `RUNBOOK.md`, `CAPABILITY_MATRIX.md`, `WORKFLOW_PACK_CONTRACT.md` | `AUTONOMOUS_AGENT_SPEC.md` | current docs는 shipped behavior를 먼저 설명한다 |
 
 ## Historical Conflict
 
@@ -44,7 +43,7 @@ future target drafts once used `run <goal>`.
 
 - review bundle은 삭제한다
 - root docs는 current truth만 설명한다
-- `docs/transition/`은 closure context와 다음 backlog 경계 문서로 유지한다
+- workflow pack 경계는 `docs/WORKFLOW_PACK_CONTRACT.md`로 흡수한다
 
 ## Recommended Reading Order
 
@@ -56,7 +55,8 @@ future target drafts once used `run <goal>`.
 4. `docs/CODEK_RUNTIME_CONTRACT.md`
 5. `docs/RUNBOOK.md`
 
-closure context와 future extension까지 보려면:
+bridge docs까지 보려면:
 
-1. `docs/transition/README.md`
-2. `docs/transition/WORKFLOW_PACK_CONTRACT.md`
+1. `docs/AUTONOMOUS_AGENT_TARGET.md`
+2. `docs/AUTONOMOUS_AGENT_SPEC.md`
+3. `docs/WORKFLOW_PACK_CONTRACT.md`

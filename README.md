@@ -105,6 +105,14 @@ autonomy evidence 기본 묶음:
 - `cargo test -p axonrunner_apps --test nightly_dogfood_contract`
 - `cargo test -p axonrunner_apps --test release_security_gate`
 
+representative verifier examples:
+
+- `examples/rust_service`
+- `examples/node_api`
+- `examples/nextjs_app`
+- `examples/python_fastapi`
+- 실행 방법: [examples/README.md](examples/README.md)
+
 ## 설정 표면
 
 정식 config surface:
@@ -155,12 +163,13 @@ env-only runtime knobs:
 ## 문서
 
 - 문서 입구: [docs/README.md](docs/README.md)
+- 구조 설명: [docs/PROJECT_STRUCTURE.md](docs/PROJECT_STRUCTURE.md)
 - capability matrix: [docs/CAPABILITY_MATRIX.md](docs/CAPABILITY_MATRIX.md)
 - substrate contract: [docs/CODEK_RUNTIME_CONTRACT.md](docs/CODEK_RUNTIME_CONTRACT.md)
+- workflow pack contract: [docs/WORKFLOW_PACK_CONTRACT.md](docs/WORKFLOW_PACK_CONTRACT.md)
 - runbook: [docs/RUNBOOK.md](docs/RUNBOOK.md)
 - versioning policy: [docs/VERSIONING.md](docs/VERSIONING.md)
 - 제품 charter: [docs/project-charter.md](docs/project-charter.md)
 - autonomous target bridge: [docs/AUTONOMOUS_AGENT_TARGET.md](docs/AUTONOMOUS_AGENT_TARGET.md)
 - autonomous run contract: [docs/AUTONOMOUS_AGENT_SPEC.md](docs/AUTONOMOUS_AGENT_SPEC.md)
 - docs alignment guide: [docs/DOCS_ALIGNMENT.md](docs/DOCS_ALIGNMENT.md)
-- transition index: [docs/transition/README.md](docs/transition/README.md)

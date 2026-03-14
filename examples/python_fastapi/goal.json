@@ -1,0 +1,19 @@
+{
+  "summary": "Python FastAPI representative verifier run",
+  "workspace_root": ".",
+  "constraints": [
+    { "label": "domain", "detail": "python-fastapi-basic representative path" }
+  ],
+  "done_conditions": [
+    { "label": "report", "evidence": "report artifact exists" },
+    { "label": "api", "evidence": "report artifact exists" }
+  ],
+  "verification_checks": [
+    { "label": "format", "detail": "python3 -m compileall app.py" },
+    { "label": "test", "detail": "python3 -m unittest -q" },
+    { "label": "import smoke", "detail": "python3 app.py" }
+  ],
+  "budget": { "max_steps": 9, "max_minutes": 10, "max_tokens": 8000 },
+  "approval_mode": "never",
+  "workflow_pack": "pack.json"
+}
