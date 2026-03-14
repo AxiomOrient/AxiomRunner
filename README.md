@@ -98,6 +98,13 @@ CLI 표면 확인:
   replay latest
 ```
 
+autonomy evidence 기본 묶음:
+
+- `cargo test -p axonrunner_apps --test autonomous_eval_corpus`
+- `cargo test -p axonrunner_apps --test fault_path_suite`
+- `cargo test -p axonrunner_apps --test nightly_dogfood_contract`
+- `cargo test -p axonrunner_apps --test release_security_gate`
+
 ## 설정 표면
 
 정식 config surface:
@@ -146,12 +153,13 @@ env-only runtime knobs:
 
 ## 문서
 
+- 문서 입구: [docs/README.md](docs/README.md)
 - capability matrix: [docs/CAPABILITY_MATRIX.md](docs/CAPABILITY_MATRIX.md)
 - substrate contract: [docs/CODEK_RUNTIME_CONTRACT.md](docs/CODEK_RUNTIME_CONTRACT.md)
 - runbook: [docs/RUNBOOK.md](docs/RUNBOOK.md)
 - versioning policy: [docs/VERSIONING.md](docs/VERSIONING.md)
 - 제품 charter: [docs/project-charter.md](docs/project-charter.md)
 - autonomous target bridge: [docs/AUTONOMOUS_AGENT_TARGET.md](docs/AUTONOMOUS_AGENT_TARGET.md)
-- autonomous run contract draft: [docs/AUTONOMOUS_AGENT_SPEC.md](docs/AUTONOMOUS_AGENT_SPEC.md)
+- autonomous run contract: [docs/AUTONOMOUS_AGENT_SPEC.md](docs/AUTONOMOUS_AGENT_SPEC.md)
 - docs alignment guide: [docs/DOCS_ALIGNMENT.md](docs/DOCS_ALIGNMENT.md)
 - transition index: [docs/transition/README.md](docs/transition/README.md)

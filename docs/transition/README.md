@@ -10,13 +10,16 @@
 이전 review bundle은 삭제됐다.
 그 review bundle은 current truth를 설명하지 못하므로 더 이상 기준으로 읽지 않는다.
 
+현재 제품 기준부터 읽으려면 먼저 `docs/README.md`를 본다.
+
 ## Reading Order
 
-1. `docs/AUTONOMOUS_AGENT_TARGET.md`
-2. `docs/AUTONOMOUS_AGENT_SPEC.md`
-3. `docs/DOCS_ALIGNMENT.md`
-4. `docs/transition/REMAINING_GAPS.md`
-5. `docs/transition/WORKFLOW_PACK_CONTRACT.md`
+1. `docs/README.md`
+2. `docs/AUTONOMOUS_AGENT_TARGET.md`
+3. `docs/AUTONOMOUS_AGENT_SPEC.md`
+4. `docs/DOCS_ALIGNMENT.md`
+5. `docs/transition/REMAINING_GAPS.md`
+6. `docs/transition/WORKFLOW_PACK_CONTRACT.md`
 
 ## Transition Sources
 

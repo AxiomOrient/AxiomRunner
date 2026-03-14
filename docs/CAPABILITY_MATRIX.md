@@ -177,8 +177,16 @@ axonrunner_apps halt
 release evidence 기본 묶음:
 
 - `cargo test -p axonrunner_apps --test autonomous_eval_corpus`
+- `cargo test -p axonrunner_apps --test fault_path_suite`
+- `cargo test -p axonrunner_apps --test nightly_dogfood_contract`
 - `cargo test -p axonrunner_apps --test release_security_gate`
 - `cargo test -p axonrunner_adapters`
+
+autonomy evidence가 만족해야 하는 추가 기준:
+
+- replay summary에 `false_success_intents`와 `false_done_intents`가 보여야 한다.
+- nightly dogfood driver가 대표 fixture 로그 번들을 남겨야 한다.
+- fault path suite가 provider/tool/workspace substrate 고장 경로를 통과해야 한다.
 
 ## 10. Transition References
 

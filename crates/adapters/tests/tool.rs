@@ -20,6 +20,7 @@ fn unique_path(label: &str) -> PathBuf {
 fn tool(root: &PathBuf) -> WorkspaceTool {
     WorkspaceTool::new(
         root,
+        root,
         ToolPolicy {
             max_file_write_bytes: 16 * 1024,
             max_file_read_bytes: 16 * 1024,
@@ -219,6 +220,56 @@ fn workspace_tool_writes_patch_artifact_with_before_and_after_digests() {
 }
 
 #[test]
+fn workspace_tool_can_write_artifacts_outside_execution_workspace() {
+    let root = unique_path("artifact-separation-workspace");
+    let artifact_root = unique_path("artifact-separation-artifacts");
+    fs::create_dir_all(&root).expect("workspace should be created");
+    fs::create_dir_all(&artifact_root).expect("artifact workspace should be created");
+    let canonical_artifact_root = fs::canonicalize(&artifact_root).unwrap_or(artifact_root.clone());
+    fs::write(root.join("notes.txt"), "before\n").expect("fixture should be written");
+
+    let tool = WorkspaceTool::new(
+        &root,
+        &artifact_root,
+        ToolPolicy {
+            max_file_write_bytes: 16 * 1024,
+            max_file_read_bytes: 16 * 1024,
+            max_search_results: 32,
+            max_command_output_bytes: 256,
+            command_timeout_ms: 50,
+            command_allowlist: vec![String::from("pwd")],
+        },
+    )
+    .expect("workspace tool should initialize");
+
+    let write = tool
+        .execute(ToolRequest::FileWrite {
+            path: String::from("notes.txt"),
+            contents: String::from("after\n"),
+            append: false,
+        })
+        .expect("overwrite should succeed");
+    let ToolResult::FileWrite(write) = write else {
+        panic!("expected file write result");
+    };
+
+    assert_eq!(
+        fs::read_to_string(root.join("notes.txt")).expect("target file should be readable"),
+        "after\n"
+    );
+    assert!(
+        write
+            .evidence
+            .artifact_path
+            .starts_with(&canonical_artifact_root)
+    );
+    assert!(!write.evidence.artifact_path.starts_with(&root));
+
+    let _ = fs::remove_dir_all(root);
+    let _ = fs::remove_dir_all(artifact_root);
+}
+
+#[test]
 fn workspace_tool_blocks_workspace_escape_and_denied_command() {
     let root = unique_path("guard");
     fs::create_dir_all(&root).expect("workspace should be created");
@@ -352,6 +403,7 @@ fn workspace_tool_truncates_command_output() {
 
     let tool = WorkspaceTool::new(
         &root,
+        &root,
         ToolPolicy {
             max_file_write_bytes: 16 * 1024,
             max_file_read_bytes: 16 * 1024,
@@ -408,6 +460,7 @@ fn workspace_tool_times_out_long_running_command() {
 
     let tool = WorkspaceTool::new(
         &root,
+        &root,
         ToolPolicy {
             max_file_write_bytes: 16 * 1024,
             max_file_read_bytes: 16 * 1024,
@@ -434,6 +487,7 @@ fn workspace_tool_times_out_even_when_stdout_is_flooded() {
     fs::create_dir_all(&root).expect("workspace should be created");
 
     let tool = WorkspaceTool::new(
+        &root,
         &root,
         ToolPolicy {
             max_file_write_bytes: 16 * 1024,
@@ -463,6 +517,7 @@ fn workspace_tool_rejects_shell_interpreters_even_if_allowlisted() {
     fs::create_dir_all(&root).expect("workspace should be created");
 
     let tool = WorkspaceTool::new(
+        &root,
         &root,
         ToolPolicy {
             max_file_write_bytes: 16 * 1024,
@@ -496,6 +551,7 @@ fn golden_stdout_flood_timeout_remains_bounded() {
     fs::create_dir_all(&root).expect("workspace should be created");
 
     let tool = WorkspaceTool::new(
+        &root,
         &root,
         ToolPolicy {
             max_file_write_bytes: 16 * 1024,
@@ -627,7 +683,7 @@ fn workspace_tool_search_reports_unreadable_files_as_skipped() {
     fs::create_dir_all(&root).expect("workspace should be created");
     fs::write(root.join("visible.txt"), "alpha visible\n").expect("visible file should exist");
     fs::write(root.join("hidden.txt"), "alpha hidden\n").expect("hidden file should exist");
-    fs::set_permissions(root.join("hidden.txt"), fs::Permissions::from_mode(0))
+    fs::set_permissions(root.join("hidden.txt"), fs::Permissions::from_mode(0o0))
         .expect("permissions should change");
 
     let tool = tool(&root);

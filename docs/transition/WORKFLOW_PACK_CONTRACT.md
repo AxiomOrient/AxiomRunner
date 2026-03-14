@@ -20,6 +20,7 @@ workflow pack manifest는 아래 필드를 가져야 한다.
 - `description`
 - `entry_goal`
 - `planner_hints[]`
+- `recommended_verifier_flow[]`
 - `allowed_tools[]`
 - `verifier_rules[]`
 - `risk_policy`
@@ -57,6 +58,16 @@ workflow pack manifest는 아래 필드를 가져야 한다.
 - `artifact_expectation`
 - `required`
 
+`recommended_verifier_flow[]`는 pack이 추천하는 검증 순서를 고정한다.
+
+- `build`
+- `test`
+- `lint`
+- `generic`
+
+이 배열은 실제 verifier rule을 대체하지 않는다.
+의미는 "보통 이 순서로 보는 것이 좋다"는 힌트다.
+
 ## Risk Policy
 
 workflow pack은 위험도 힌트를 줄 수 있지만, 최종 승인은 AxonRunner가 판단한다.
@@ -88,6 +99,10 @@ workflow pack이 하면 안 되는 것:
 pack_id: rust-service-basic
 version: 1
 entry_goal: implement one bounded Rust service task
+recommended_verifier_flow:
+  - build
+  - test
+  - lint
 allowed_tools:
   - run_command within workspace
   - read_file within workspace

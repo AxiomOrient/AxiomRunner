@@ -262,3 +262,34 @@ fn release_security_gate_transition_docs_lock_autonomous_target_contract() {
         );
     }
 }
+
+#[test]
+fn release_security_gate_autonomy_evidence_bundle_is_locked() {
+    let readme = include_str!("../../../README.md");
+    let capability_matrix = include_str!("../../../docs/CAPABILITY_MATRIX.md");
+    let runbook = include_str!("../../../docs/RUNBOOK.md");
+
+    for token in [
+        "autonomous_eval_corpus",
+        "fault_path_suite",
+        "nightly_dogfood_contract",
+        "release_security_gate",
+    ] {
+        assert!(
+            readme.contains(token) || capability_matrix.contains(token) || runbook.contains(token),
+            "autonomy evidence docs missing token: {token}"
+        );
+    }
+
+    for token in [
+        "false_success_intents",
+        "false_done_intents",
+        "nightly dogfood",
+        "fault path suite",
+    ] {
+        assert!(
+            capability_matrix.contains(token) || runbook.contains(token),
+            "autonomy evidence docs missing detail: {token}"
+        );
+    }
+}

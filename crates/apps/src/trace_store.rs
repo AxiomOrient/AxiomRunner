@@ -1,6 +1,7 @@
+use crate::display::outcome_name;
 use crate::runtime_compose::{
-    RuntimeComposeExecution, RuntimeComposePatchArtifact, RuntimeRunRecord, RuntimeRunStepRecord,
-    run_outcome_name, run_phase_name,
+    RuntimeComposeExecution, RuntimeComposePatchArtifact, RuntimeRunRecord,
+    RuntimeRunRollbackMetadata, RuntimeRunStepRecord, run_outcome_name, run_phase_name,
 };
 use axonrunner_core::{AgentState, DecisionOutcome};
 use serde::{Deserialize, Serialize};
@@ -11,6 +12,7 @@ use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 pub const TRACE_INTENT_SCHEMA_V1: &str = "axonrunner.trace.intent.v1";
+const MAX_ARTIFACT_INDEX_PATCH_PATHS: usize = 6;
 
 #[derive(Debug, Clone)]
 pub struct TraceStore {
@@ -74,6 +76,17 @@ pub struct TraceRunSummary {
     pub plan_summary: String,
     pub planned_steps: usize,
     pub repair: TraceRepairSummary,
+    #[serde(default)]
+    pub rollback: Option<TraceRollbackSummary>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TraceRollbackSummary {
+    pub metadata_path: String,
+    pub restore_path: String,
+    #[serde(default)]
+    pub cleanup_path: Option<String>,
+    pub reason: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -121,6 +134,8 @@ pub struct ReplaySummary {
     pub latest_revision: u64,
     pub latest_mode: String,
     pub failed_intents: usize,
+    pub false_success_intents: usize,
+    pub false_done_intents: usize,
     pub latest_intent_id: Option<String>,
     pub latest_failure: Option<TraceFailureBoundary>,
 }
@@ -140,6 +155,21 @@ pub struct TraceArtifactIndex {
     pub entries: Vec<TraceArtifactEntry>,
 }
 
+pub struct TraceEventInput<'a> {
+    pub actor_id: &'a str,
+    pub intent_id: &'a str,
+    pub kind: &'a str,
+    pub outcome: DecisionOutcome,
+    pub policy_code: &'a str,
+    pub effect_count: usize,
+    pub state: &'a AgentState,
+    pub execution: &'a RuntimeComposeExecution,
+    pub report_written: bool,
+    pub report_error: Option<&'a str>,
+    pub patch_artifacts: &'a [RuntimeComposePatchArtifact],
+    pub run: &'a RuntimeRunRecord,
+}
+
 impl TraceStore {
     pub fn from_workspace_root(workspace_root: Option<PathBuf>) -> Result<Self, String> {
         Ok(Self {
@@ -147,70 +177,57 @@ impl TraceStore {
         })
     }
 
-    pub fn append_intent_event(
-        &self,
-        actor_id: &str,
-        intent_id: &str,
-        kind: &str,
-        outcome: DecisionOutcome,
-        policy_code: &str,
-        effect_count: usize,
-        state: &AgentState,
-        execution: &RuntimeComposeExecution,
-        report_written: bool,
-        report_error: Option<&str>,
-        patch_artifacts: &[RuntimeComposePatchArtifact],
-        run: &RuntimeRunRecord,
-    ) -> Result<(), String> {
+    pub fn append_intent_event(&self, input: TraceEventInput<'_>) -> Result<(), String> {
         let event = json!({
             "schema": TRACE_INTENT_SCHEMA_V1,
             "timestamp_ms": now_millis(),
-            "actor_id": actor_id,
-            "intent_id": intent_id,
-            "kind": kind,
-            "outcome": outcome_name(outcome),
-            "policy_code": policy_code,
-            "effect_count": effect_count,
-            "revision": state.revision,
-            "mode": mode_name(state.mode),
-            "provider": step_name(&execution.provider),
-            "memory": step_name(&execution.memory),
-            "tool": step_name(&execution.tool),
-            "tool_outputs": execution.tool_outputs,
-            "first_failure": execution.first_failure().map(|(stage, message)| json!({
+            "actor_id": input.actor_id,
+            "intent_id": input.intent_id,
+            "kind": input.kind,
+            "outcome": outcome_name(input.outcome),
+            "policy_code": input.policy_code,
+            "effect_count": input.effect_count,
+            "revision": input.state.revision,
+            "mode": mode_name(input.state.mode),
+            "provider": step_name(&input.execution.provider),
+            "memory": step_name(&input.execution.memory),
+            "tool": step_name(&input.execution.tool),
+            "tool_outputs": input.execution.tool_outputs,
+            "first_failure": input.execution.first_failure().map(|(stage, message)| json!({
                 "stage": stage,
                 "message": message,
             })),
-            "verification": verification_summary(execution, run, report_error),
-            "patch_artifacts": patch_artifacts.iter().map(trace_patch_artifact).collect::<Vec<_>>(),
+            "verification": verification_summary(input.execution, input.run, input.report_error),
+            "patch_artifacts": input.patch_artifacts.iter().map(trace_patch_artifact).collect::<Vec<_>>(),
             "run": {
-                "run_id": run.plan.run_id,
-                "step_ids": run.plan.steps.iter().map(|step| step.id.clone()).collect::<Vec<_>>(),
-                "step_journal": run
+                "run_id": input.run.plan.run_id,
+                "step_ids": input.run.plan.steps.iter().map(|step| step.id.clone()).collect::<Vec<_>>(),
+                "step_journal": input.run
                     .step_journal
                     .iter()
                     .map(trace_run_step_summary)
                     .collect::<Vec<_>>(),
-                "provider_cwd": execution.provider_cwd,
-                "phase": run_phase_name(run.phase),
-                "outcome": run_outcome_name(run.outcome),
-                "reason": run.reason,
-                "plan_summary": run.plan.summary,
-                "planned_steps": run.plan.planned_steps,
+                "provider_cwd": input.execution.provider_cwd,
+                "phase": run_phase_name(input.run.phase),
+                "outcome": run_outcome_name(input.run.outcome),
+                "reason": input.run.reason,
+                "plan_summary": input.run.plan.summary,
+                "planned_steps": input.run.plan.planned_steps,
                 "repair": {
-                    "attempted": run.repair.attempted,
-                    "status": run.repair.status,
-                    "summary": run.repair.summary,
+                    "attempted": input.run.repair.attempted,
+                    "status": input.run.repair.status,
+                    "summary": input.run.repair.summary,
                 },
+                "rollback": input.run.rollback.as_ref().map(trace_rollback_summary),
             },
             "artifacts": {
-                "plan": format!(".axonrunner/artifacts/{intent_id}.plan.md"),
-                "apply": format!(".axonrunner/artifacts/{intent_id}.apply.md"),
-                "verify": format!(".axonrunner/artifacts/{intent_id}.verify.md"),
-                "report": format!(".axonrunner/artifacts/{intent_id}.report.md"),
+                "plan": format!(".axonrunner/artifacts/{}.plan.md", input.intent_id),
+                "apply": format!(".axonrunner/artifacts/{}.apply.md", input.intent_id),
+                "verify": format!(".axonrunner/artifacts/{}.verify.md", input.intent_id),
+                "report": format!(".axonrunner/artifacts/{}.report.md", input.intent_id),
             },
-            "report_written": report_written,
-            "report_error": report_error,
+            "report_written": input.report_written,
+            "report_error": input.report_error,
         });
 
         self.storage.append_event(&event)
@@ -262,16 +279,14 @@ impl TraceStore {
         Ok(self
             .load_events()?
             .into_iter()
-            .filter(|event| event.intent_id == intent_id)
-            .last())
+            .rfind(|event| event.intent_id == intent_id))
     }
 
     pub fn latest_event_for_run(&self, run_id: &str) -> Result<Option<TraceIntentEvent>, String> {
         Ok(self
             .load_events()?
             .into_iter()
-            .filter(|event| event_has_run_id(event, run_id))
-            .last())
+            .rfind(|event| event_has_run_id(event, run_id)))
     }
 
     pub fn events_path(&self) -> &PathBuf {
@@ -366,13 +381,6 @@ fn now_millis() -> u64 {
     u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX)
 }
 
-fn outcome_name(outcome: DecisionOutcome) -> &'static str {
-    match outcome {
-        DecisionOutcome::Accepted => "accepted",
-        DecisionOutcome::Rejected => "rejected",
-    }
-}
-
 fn step_name(step: &crate::runtime_compose::RuntimeComposeStep) -> &'static str {
     match step {
         crate::runtime_compose::RuntimeComposeStep::Skipped => "skipped",
@@ -397,12 +405,37 @@ fn summarize_events(events: Vec<TraceIntentEvent>) -> Result<ReplaySummary, Stri
         .iter()
         .filter(|event| event.first_failure.is_some())
         .count();
+    let false_success_intents = events
+        .iter()
+        .filter(|event| {
+            event.outcome == "accepted"
+                && event
+                    .run
+                    .as_ref()
+                    .map(|run| run.outcome.as_str() != "success")
+                    .unwrap_or(false)
+        })
+        .count();
+    let false_done_intents = events
+        .iter()
+        .filter(|event| {
+            event.outcome == "accepted"
+                && event
+                    .run
+                    .as_ref()
+                    .map(|run| run.outcome.as_str() != "success")
+                    .unwrap_or(false)
+                && event.verification.summary.starts_with("done_condition_")
+        })
+        .count();
 
     Ok(ReplaySummary {
         intent_count: events.len(),
         latest_revision: latest.revision,
         latest_mode: latest.mode.clone(),
         failed_intents,
+        false_success_intents,
+        false_done_intents,
         latest_intent_id: Some(latest.intent_id.clone()),
         latest_failure: latest.first_failure.clone(),
     })
@@ -423,18 +456,32 @@ fn build_artifact_index(events: Vec<TraceIntentEvent>) -> TraceArtifactIndex {
 }
 
 fn artifact_entry_from_event(event: TraceIntentEvent) -> TraceArtifactEntry {
+    let patch_artifacts = event
+        .patch_artifacts
+        .into_iter()
+        .map(|artifact| artifact.artifact_path)
+        .collect::<Vec<_>>();
     TraceArtifactEntry {
         intent_id: event.intent_id,
         plan: event.artifacts.plan,
         apply: event.artifacts.apply,
         verify: event.artifacts.verify,
         report: event.artifacts.report,
-        patch_artifacts: event
-            .patch_artifacts
-            .into_iter()
-            .map(|artifact| artifact.artifact_path)
-            .collect(),
+        patch_artifacts: compact_artifact_paths(patch_artifacts),
     }
+}
+
+fn compact_artifact_paths(paths: Vec<String>) -> Vec<String> {
+    if paths.len() <= MAX_ARTIFACT_INDEX_PATCH_PATHS {
+        return paths;
+    }
+    let omitted = paths.len() - MAX_ARTIFACT_INDEX_PATCH_PATHS;
+    let mut compacted = paths
+        .into_iter()
+        .take(MAX_ARTIFACT_INDEX_PATCH_PATHS)
+        .collect::<Vec<_>>();
+    compacted.push(format!("...+{omitted}_more"));
+    compacted
 }
 
 fn default_trace_verification() -> TraceVerificationSummary {
@@ -478,6 +525,15 @@ fn trace_patch_artifact(artifact: &RuntimeComposePatchArtifact) -> TracePatchArt
         after_excerpt: artifact.after_excerpt.clone(),
         unified_diff: artifact.unified_diff.clone(),
     }
+}
+
+fn trace_rollback_summary(rollback: &RuntimeRunRollbackMetadata) -> serde_json::Value {
+    json!({
+        "metadata_path": rollback.metadata_path,
+        "restore_path": rollback.restore_path,
+        "cleanup_path": rollback.cleanup_path,
+        "reason": rollback.reason,
+    })
 }
 
 fn trace_run_step_summary(step: &RuntimeRunStepRecord) -> TraceRunStepSummary {
@@ -600,6 +656,7 @@ mod tests {
                     status: String::from("skipped"),
                     summary: String::from("verification_passed"),
                 },
+                rollback: None,
             }),
             artifacts: TraceArtifacts {
                 plan: format!(".axonrunner/artifacts/{intent_id}.plan.md"),
@@ -651,6 +708,8 @@ mod tests {
                 latest_revision: 2,
                 latest_mode: String::from("active"),
                 failed_intents: 1,
+                false_success_intents: 1,
+                false_done_intents: 0,
                 latest_intent_id: Some(String::from("cli-2")),
                 latest_failure: Some(TraceFailureBoundary {
                     stage: String::from("provider"),
@@ -665,6 +724,8 @@ mod tests {
             .expect("intent summary should exist");
         assert_eq!(intent_summary.intent_count, 1);
         assert_eq!(intent_summary.failed_intents, 0);
+        assert_eq!(intent_summary.false_success_intents, 0);
+        assert_eq!(intent_summary.false_done_intents, 0);
 
         let artifact_index = store.artifact_index().expect("artifact index should build");
         assert_eq!(
@@ -729,5 +790,90 @@ mod tests {
         assert!(events[0].patch_artifacts.is_empty());
 
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn trace_store_artifact_index_compacts_long_patch_lists() {
+        let mut long_event = event("cli-long", 1, false);
+        long_event.patch_artifacts = (0..10)
+            .map(|index| TracePatchArtifact {
+                operation: String::from("overwrite"),
+                target_path: format!("file-{index}.txt"),
+                artifact_path: format!(".axonrunner/patches/file-{index}.json"),
+                before_digest: None,
+                after_digest: Some(String::from("abcd")),
+                before_excerpt: None,
+                after_excerpt: Some(String::from("after")),
+                unified_diff: None,
+            })
+            .collect();
+
+        let entry = super::artifact_entry_from_event(long_event);
+
+        assert_eq!(
+            entry.patch_artifacts.len(),
+            super::MAX_ARTIFACT_INDEX_PATCH_PATHS + 1
+        );
+        assert_eq!(
+            entry.patch_artifacts.last().map(|value| value.as_str()),
+            Some("...+4_more")
+        );
+    }
+
+    #[test]
+    fn trace_store_counts_false_done_runs_separately() {
+        let false_done = TraceIntentEvent {
+            schema: TRACE_INTENT_SCHEMA_V1.to_owned(),
+            timestamp_ms: 1,
+            actor_id: String::from("system"),
+            intent_id: String::from("cli-false-done"),
+            kind: String::from("goal"),
+            outcome: String::from("accepted"),
+            policy_code: String::from("allowed"),
+            effect_count: 0,
+            revision: 1,
+            mode: String::from("active"),
+            provider: String::from("skipped"),
+            memory: String::from("skipped"),
+            tool: String::from("applied"),
+            tool_outputs: vec![String::from("verifier=workspace")],
+            first_failure: None,
+            verification: TraceVerificationSummary {
+                status: String::from("failed"),
+                summary: String::from("done_condition_missing_report_artifact:report"),
+            },
+            patch_artifacts: Vec::new(),
+            run: Some(TraceRunSummary {
+                run_id: String::from("run-false-done"),
+                step_ids: vec![String::from("run-false-done/step-1-planning")],
+                step_journal: Vec::new(),
+                provider_cwd: String::from("/tmp/workspace"),
+                phase: String::from("failed"),
+                outcome: String::from("failed"),
+                reason: String::from("done_condition_missing_report_artifact:report"),
+                plan_summary: String::from("intent_id=cli-false-done goal"),
+                planned_steps: 4,
+                repair: TraceRepairSummary {
+                    attempted: false,
+                    status: String::from("skipped"),
+                    summary: String::from("verification_passed"),
+                },
+                rollback: None,
+            }),
+            artifacts: TraceArtifacts {
+                plan: String::from(".axonrunner/artifacts/cli-false-done.plan.md"),
+                apply: String::from(".axonrunner/artifacts/cli-false-done.apply.md"),
+                verify: String::from(".axonrunner/artifacts/cli-false-done.verify.md"),
+                report: String::from(".axonrunner/artifacts/cli-false-done.report.md"),
+            },
+            report_written: true,
+            report_error: None,
+        };
+
+        let summary = super::summarize_events(vec![false_done]).expect("summary should build");
+
+        assert_eq!(summary.failed_intents, 0);
+        assert_eq!(summary.false_success_intents, 1);
+        assert_eq!(summary.false_done_intents, 1);
     }
 }

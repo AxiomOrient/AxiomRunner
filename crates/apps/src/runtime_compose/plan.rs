@@ -1,9 +1,12 @@
 use crate::cli_command::{LegacyIntentTemplate, RunTemplate};
+use crate::display::outcome_name;
 use axonrunner_adapters::{
     RunCommandProfile, WorkflowPackAllowedTool, WorkflowPackContract, WorkflowPackRiskPolicy,
     WorkflowPackVerifierRule,
 };
 use axonrunner_core::DecisionOutcome;
+
+const MAX_GOAL_PLAN_STEPS: usize = 8;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeRunPlanStep {
@@ -58,6 +61,25 @@ pub(super) struct RuntimeComposePlan {
     pub(super) tool: Option<ToolPlan>,
 }
 
+struct LegacyMutationPlanSpec<'a> {
+    key: &'a str,
+    kind: &'a str,
+    goal: String,
+    done_when: String,
+    verify_label: &'a str,
+    verify_done_when: String,
+}
+
+struct LegacyControlPlanSpec<'a> {
+    kind: &'a str,
+    goal: &'a str,
+    done_when: &'a str,
+    execute_label: &'a str,
+    execute_done_when: &'a str,
+    verify_label: &'a str,
+    verify_done_when: &'a str,
+}
+
 pub fn build_runtime_run_plan(
     template: &RunTemplate,
     run_id: &str,
@@ -65,51 +87,115 @@ pub fn build_runtime_run_plan(
     outcome: DecisionOutcome,
 ) -> RuntimeRunPlan {
     match template {
-        RunTemplate::GoalFile(goal_file) => RuntimeRunPlan {
-            run_id: run_id.to_owned(),
-            goal: goal_file.goal.summary.clone(),
-            summary: format!(
-                "intent_id={intent_id} goal_file={} workspace_root={} workflow_pack={}",
-                goal_file.path,
-                goal_file.goal.workspace_root,
-                default_goal_workflow_pack(goal_file).pack_id
-            ),
-            done_when: goal_file
-                .goal
-                .done_conditions
-                .iter()
-                .map(|condition| format!("{}:{}", condition.label, condition.evidence))
-                .collect::<Vec<_>>()
-                .join(" | "),
-            planned_steps: 3,
-            steps: vec![
-                RuntimeRunPlanStep {
-                    id: format!("{run_id}/step-1-planning"),
-                    label: String::from("load goal file"),
-                    phase: "planning",
-                    done_when: format!("goal file `{}` is parsed into RunGoal", goal_file.path),
-                },
-                RuntimeRunPlanStep {
-                    id: format!("{run_id}/step-2-verifying"),
-                    label: String::from("validate goal contract"),
-                    phase: "verifying",
-                    done_when: String::from(
-                        "goal summary, workspace, done conditions, verification checks, and budget validate",
-                    ),
-                },
-                RuntimeRunPlanStep {
-                    id: format!("{run_id}/step-3-executing"),
-                    label: String::from("finalize goal run"),
-                    phase: "executing_step",
-                    done_when: String::from(
-                        "goal run records a terminal outcome with a replayable run id",
-                    ),
-                },
-            ],
-        },
+        RunTemplate::GoalFile(goal_file) => {
+            build_goal_runtime_run_plan(goal_file, run_id, intent_id)
+        }
         RunTemplate::LegacyIntent(template) => {
             build_legacy_runtime_run_plan(template, run_id, intent_id, outcome)
         }
+    }
+}
+
+fn build_goal_runtime_run_plan(
+    goal_file: &crate::cli_command::GoalFileTemplate,
+    run_id: &str,
+    intent_id: &str,
+) -> RuntimeRunPlan {
+    let mut queue = goal_file
+        .goal
+        .done_conditions
+        .iter()
+        .map(|condition| {
+            (
+                "executing_step",
+                format!("advance subgoal `{}`", condition.label),
+                format!(
+                    "done condition `{}` is advanced toward evidence `{}`",
+                    condition.label, condition.evidence
+                ),
+            )
+        })
+        .chain(goal_file.goal.verification_checks.iter().map(|check| {
+            (
+                "verifying",
+                format!("run verifier `{}`", check.label),
+                format!("verification detail is queued: {}", check.detail),
+            )
+        }))
+        .collect::<Vec<_>>();
+
+    let reserved_tail = 1usize;
+    let reserved_compaction = usize::from(queue.len() + 2 > MAX_GOAL_PLAN_STEPS);
+    let queue_budget = MAX_GOAL_PLAN_STEPS.saturating_sub(2 + reserved_tail + reserved_compaction);
+    let truncated = queue.len() > queue_budget;
+    queue.truncate(queue_budget);
+
+    let mut steps = vec![
+        RuntimeRunPlanStep {
+            id: format!("{run_id}/step-1-planning"),
+            label: String::from("load goal file"),
+            phase: "planning",
+            done_when: format!("goal file `{}` is parsed into RunGoal", goal_file.path),
+        },
+        RuntimeRunPlanStep {
+            id: format!("{run_id}/step-2-verifying"),
+            label: String::from("validate goal contract"),
+            phase: "verifying",
+            done_when: String::from(
+                "goal summary, workspace, done conditions, verification checks, and budget validate",
+            ),
+        },
+    ];
+
+    for (phase, label, done_when) in queue {
+        let index = steps.len() + 1;
+        steps.push(plan_step(run_id, index, phase, label, done_when));
+    }
+
+    if truncated {
+        let index = steps.len() + 1;
+        steps.push(plan_step(
+            run_id,
+            index,
+            "planning",
+            "compact remaining queue",
+            format!(
+                "remaining queued work is compacted to stay within {} planned steps",
+                MAX_GOAL_PLAN_STEPS
+            ),
+        ));
+    }
+
+    let final_index = steps.len() + 1;
+    steps.push(plan_step(
+        run_id,
+        final_index,
+        "executing_step",
+        "finalize goal run",
+        "goal run records a terminal outcome with a replayable run id",
+    ));
+
+    RuntimeRunPlan {
+        run_id: run_id.to_owned(),
+        goal: goal_file.goal.summary.clone(),
+        summary: format!(
+            "intent_id={intent_id} goal_file={} workspace_root={} workflow_pack={} verifier_flow={} queued_done_conditions={} queued_verifiers={}",
+            goal_file.path,
+            goal_file.goal.workspace_root,
+            default_goal_workflow_pack(goal_file).pack_id,
+            render_verifier_flow(&default_goal_workflow_pack(goal_file).recommended_verifier_flow),
+            goal_file.goal.done_conditions.len(),
+            goal_file.goal.verification_checks.len()
+        ),
+        done_when: goal_file
+            .goal
+            .done_conditions
+            .iter()
+            .map(|condition| format!("{}:{}", condition.label, condition.evidence))
+            .collect::<Vec<_>>()
+            .join(" | "),
+        planned_steps: steps.len(),
+        steps,
     }
 }
 
@@ -181,47 +267,61 @@ fn build_legacy_runtime_run_plan(
             run_id,
             intent_id,
             outcome,
-            key,
-            format!("Write fact `{key}` into bounded runtime state"),
-            format!("fact `{key}` persists with value `{value}` and mutation evidence is recorded"),
-            "write",
-            "verify persisted change",
-            format!("verification confirms write `{key}` completed without hidden failure"),
+            LegacyMutationPlanSpec {
+                key,
+                kind: "write",
+                goal: format!("Write fact `{key}` into bounded runtime state"),
+                done_when: format!(
+                    "fact `{key}` persists with value `{value}` and mutation evidence is recorded"
+                ),
+                verify_label: "verify persisted change",
+                verify_done_when: format!(
+                    "verification confirms write `{key}` completed without hidden failure"
+                ),
+            },
         ),
         LegacyIntentTemplate::Remove { key } => legacy_mutation_run_plan(
             run_id,
             intent_id,
             outcome,
-            key,
-            format!("Remove fact `{key}` from bounded runtime state"),
-            format!("fact `{key}` is removed and removal evidence is recorded"),
-            "remove",
-            "verify removed state",
-            format!("verification confirms remove `{key}` completed without hidden failure"),
+            LegacyMutationPlanSpec {
+                key,
+                kind: "remove",
+                goal: format!("Remove fact `{key}` from bounded runtime state"),
+                done_when: format!("fact `{key}` is removed and removal evidence is recorded"),
+                verify_label: "verify removed state",
+                verify_done_when: format!(
+                    "verification confirms remove `{key}` completed without hidden failure"
+                ),
+            },
         ),
         LegacyIntentTemplate::Freeze => legacy_control_run_plan(
             run_id,
             intent_id,
             outcome,
-            "freeze",
-            "Freeze future fact writes",
-            "runtime enters read_only mode with explicit policy evidence",
-            "apply mode transition",
-            "state mode becomes read_only when accepted",
-            "verify control state",
-            "verification records accepted or blocked control outcome",
+            LegacyControlPlanSpec {
+                kind: "freeze",
+                goal: "Freeze future fact writes",
+                done_when: "runtime enters read_only mode with explicit policy evidence",
+                execute_label: "apply mode transition",
+                execute_done_when: "state mode becomes read_only when accepted",
+                verify_label: "verify control state",
+                verify_done_when: "verification records accepted or blocked control outcome",
+            },
         ),
         LegacyIntentTemplate::Halt => legacy_control_run_plan(
             run_id,
             intent_id,
             outcome,
-            "halt",
-            "Halt future runtime mutations",
-            "runtime enters halted mode with explicit policy evidence",
-            "apply halt transition",
-            "state mode becomes halted when accepted",
-            "verify halted state",
-            "verification records accepted or blocked halt outcome",
+            LegacyControlPlanSpec {
+                kind: "halt",
+                goal: "Halt future runtime mutations",
+                done_when: "runtime enters halted mode with explicit policy evidence",
+                execute_label: "apply halt transition",
+                execute_done_when: "state mode becomes halted when accepted",
+                verify_label: "verify halted state",
+                verify_done_when: "verification records accepted or blocked halt outcome",
+            },
         ),
     }
 }
@@ -230,29 +330,26 @@ fn legacy_mutation_run_plan(
     run_id: &str,
     intent_id: &str,
     outcome: DecisionOutcome,
-    key: &str,
-    goal: String,
-    done_when: String,
-    kind: &str,
-    verify_label: &str,
-    verify_done_when: String,
+    spec: LegacyMutationPlanSpec<'_>,
 ) -> RuntimeRunPlan {
     RuntimeRunPlan {
         run_id: run_id.to_owned(),
-        goal,
+        goal: spec.goal,
         summary: format!(
-            "intent_id={intent_id} legacy_{kind} key={key} outcome={}",
+            "intent_id={intent_id} legacy_{} key={} outcome={}",
+            spec.kind,
+            spec.key,
             outcome_name(outcome)
         ),
-        done_when,
+        done_when: spec.done_when,
         planned_steps: 4,
         steps: vec![
             plan_step(
                 run_id,
                 1,
                 "planning",
-                format!("prepare bounded {kind}"),
-                format!("{kind} target and evidence path are fixed"),
+                format!("prepare bounded {}", spec.kind),
+                format!("{} target and evidence path are fixed", spec.kind),
             ),
             plan_step(
                 run_id,
@@ -266,9 +363,15 @@ fn legacy_mutation_run_plan(
                 3,
                 "executing_step",
                 "apply memory and tool mutation",
-                format!("memory/tool evidence exists for the accepted {kind}"),
+                format!("memory/tool evidence exists for the accepted {}", spec.kind),
             ),
-            plan_step(run_id, 4, "verifying", verify_label, verify_done_when),
+            plan_step(
+                run_id,
+                4,
+                "verifying",
+                spec.verify_label,
+                spec.verify_done_when,
+            ),
         ],
     }
 }
@@ -277,22 +380,17 @@ fn legacy_control_run_plan(
     run_id: &str,
     intent_id: &str,
     outcome: DecisionOutcome,
-    kind: &str,
-    goal: &str,
-    done_when: &str,
-    execute_label: &str,
-    execute_done_when: &str,
-    verify_label: &str,
-    verify_done_when: &str,
+    spec: LegacyControlPlanSpec<'_>,
 ) -> RuntimeRunPlan {
     RuntimeRunPlan {
         run_id: run_id.to_owned(),
-        goal: String::from(goal),
+        goal: String::from(spec.goal),
         summary: format!(
-            "intent_id={intent_id} legacy_{kind} outcome={}",
+            "intent_id={intent_id} legacy_{} outcome={}",
+            spec.kind,
             outcome_name(outcome)
         ),
-        done_when: String::from(done_when),
+        done_when: String::from(spec.done_when),
         planned_steps: 3,
         steps: vec![
             plan_step(
@@ -306,10 +404,16 @@ fn legacy_control_run_plan(
                 run_id,
                 2,
                 "executing_step",
-                execute_label,
-                execute_done_when,
+                spec.execute_label,
+                spec.execute_done_when,
             ),
-            plan_step(run_id, 3, "verifying", verify_label, verify_done_when),
+            plan_step(
+                run_id,
+                3,
+                "verifying",
+                spec.verify_label,
+                spec.verify_done_when,
+            ),
         ],
     }
 }
@@ -400,6 +504,7 @@ fn default_goal_workflow_pack(
             String::from("prefer workspace-bounded verification"),
             String::from("preserve replayable evidence for every goal run"),
         ],
+        recommended_verifier_flow: recommended_goal_verifier_flow(goal_file),
         allowed_tools: vec![
             WorkflowPackAllowedTool {
                 operation: String::from("read_file"),
@@ -439,6 +544,39 @@ fn default_goal_workflow_pack(
             max_mutating_steps: goal_file.goal.budget.max_steps,
         },
     }
+}
+
+fn recommended_goal_verifier_flow(
+    goal_file: &crate::cli_command::GoalFileTemplate,
+) -> Vec<RunCommandProfile> {
+    let mut flow = Vec::new();
+    for check in &goal_file.goal.verification_checks {
+        let detail = check.detail.to_ascii_lowercase();
+        let profile =
+            if detail.contains("clippy") || detail.contains("eslint") || detail.contains("lint") {
+                RunCommandProfile::Lint
+            } else if detail.contains("build") {
+                RunCommandProfile::Build
+            } else if detail.contains("test") {
+                RunCommandProfile::Test
+            } else {
+                RunCommandProfile::Generic
+            };
+        if !flow.contains(&profile) {
+            flow.push(profile);
+        }
+    }
+    if flow.is_empty() {
+        flow.push(RunCommandProfile::Generic);
+    }
+    flow
+}
+
+fn render_verifier_flow(flow: &[RunCommandProfile]) -> String {
+    flow.iter()
+        .map(|profile| profile.as_str())
+        .collect::<Vec<_>>()
+        .join(">")
 }
 
 fn approval_mode_name(mode: axonrunner_core::RunApprovalMode) -> &'static str {
@@ -485,19 +623,13 @@ fn plan_step(
     }
 }
 
-fn outcome_name(outcome: DecisionOutcome) -> &'static str {
-    match outcome {
-        DecisionOutcome::Accepted => "accepted",
-        DecisionOutcome::Rejected => "rejected",
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
         ToolPlan, build_runtime_compose_plan, build_runtime_run_plan, goal_verifier_tool_plan,
     };
     use crate::cli_command::{LegacyIntentTemplate, RunTemplate};
+    use axonrunner_adapters::RunCommandProfile;
     use axonrunner_core::DecisionOutcome;
 
     #[test]
@@ -572,8 +704,12 @@ mod tests {
         let pack = plan.workflow_pack.expect("workflow pack should exist");
         assert_eq!(pack.pack_id, "goal-default-v1");
         assert_eq!(pack.risk_policy.approval_mode, "on-risk");
+        assert_eq!(
+            pack.recommended_verifier_flow,
+            vec![RunCommandProfile::Test]
+        );
         assert_eq!(pack.allowed_tools[0].operation, "read_file");
-        assert_eq!(pack.verifier_rules[0].required, true);
+        assert!(pack.verifier_rules[0].required);
         assert_eq!(pack.verifier_rules[0].command_example, "pwd");
     }
 
@@ -614,5 +750,152 @@ mod tests {
         };
         assert_eq!(program, "pwd");
         assert!(args.is_empty());
+    }
+
+    #[test]
+    fn planner_infers_pack_specific_verifier_flow_from_goal_checks() {
+        let goal = axonrunner_core::RunGoal {
+            summary: String::from("Infer verifier flow"),
+            workspace_root: String::from("/workspace"),
+            constraints: Vec::new(),
+            done_conditions: vec![axonrunner_core::DoneCondition {
+                label: String::from("report"),
+                evidence: String::from("report artifact exists"),
+            }],
+            verification_checks: vec![
+                axonrunner_core::VerificationCheck {
+                    label: String::from("build"),
+                    detail: String::from("cargo build"),
+                },
+                axonrunner_core::VerificationCheck {
+                    label: String::from("test"),
+                    detail: String::from("cargo test"),
+                },
+                axonrunner_core::VerificationCheck {
+                    label: String::from("lint"),
+                    detail: String::from("cargo clippy"),
+                },
+                axonrunner_core::VerificationCheck {
+                    label: String::from("smoke"),
+                    detail: String::from("python scripts/smoke.py"),
+                },
+            ],
+            budget: axonrunner_core::RunBudget::bounded(8, 10, 8000),
+            approval_mode: axonrunner_core::RunApprovalMode::Never,
+        };
+        let template = RunTemplate::GoalFile(crate::cli_command::GoalFileTemplate {
+            path: String::from("GOAL.json"),
+            goal,
+        });
+
+        let plan = build_runtime_compose_plan(
+            &template,
+            "cli-1",
+            DecisionOutcome::Accepted,
+            "mock-local",
+            256,
+            "runtime.log",
+        );
+
+        let pack = plan.workflow_pack.expect("workflow pack should exist");
+        assert_eq!(
+            pack.recommended_verifier_flow,
+            vec![
+                RunCommandProfile::Build,
+                RunCommandProfile::Test,
+                RunCommandProfile::Lint,
+                RunCommandProfile::Generic,
+            ]
+        );
+    }
+
+    #[test]
+    fn planner_builds_multi_step_goal_queue() {
+        let goal = axonrunner_core::RunGoal {
+            summary: String::from("Ship one bounded goal package"),
+            workspace_root: String::from("/workspace"),
+            constraints: Vec::new(),
+            done_conditions: vec![
+                axonrunner_core::DoneCondition {
+                    label: String::from("report"),
+                    evidence: String::from("report artifact exists"),
+                },
+                axonrunner_core::DoneCondition {
+                    label: String::from("tests"),
+                    evidence: String::from("test suite passes"),
+                },
+            ],
+            verification_checks: vec![
+                axonrunner_core::VerificationCheck {
+                    label: String::from("release gate"),
+                    detail: String::from(
+                        "cargo test -p axonrunner_apps --test release_security_gate",
+                    ),
+                },
+                axonrunner_core::VerificationCheck {
+                    label: String::from("unit"),
+                    detail: String::from("cargo test -p axonrunner_apps"),
+                },
+            ],
+            budget: axonrunner_core::RunBudget::bounded(8, 10, 8000),
+            approval_mode: axonrunner_core::RunApprovalMode::Never,
+        };
+        let template = RunTemplate::GoalFile(crate::cli_command::GoalFileTemplate {
+            path: String::from("GOAL.json"),
+            goal,
+        });
+
+        let plan = build_runtime_run_plan(&template, "run-1", "cli-1", DecisionOutcome::Accepted);
+
+        assert_eq!(plan.planned_steps, 7);
+        assert_eq!(plan.steps[0].label, "load goal file");
+        assert_eq!(plan.steps[1].label, "validate goal contract");
+        assert_eq!(plan.steps[2].label, "advance subgoal `report`");
+        assert_eq!(plan.steps[3].label, "advance subgoal `tests`");
+        assert_eq!(plan.steps[4].label, "run verifier `release gate`");
+        assert_eq!(plan.steps[5].label, "run verifier `unit`");
+        assert_eq!(plan.steps[6].label, "finalize goal run");
+        assert!(plan.summary.contains("queued_done_conditions=2"));
+        assert!(plan.summary.contains("queued_verifiers=2"));
+    }
+
+    #[test]
+    fn planner_compacts_large_goal_queue_to_bounded_size() {
+        let goal = axonrunner_core::RunGoal {
+            summary: String::from("Compact a large goal queue"),
+            workspace_root: String::from("/workspace"),
+            constraints: Vec::new(),
+            done_conditions: (0..6)
+                .map(|index| axonrunner_core::DoneCondition {
+                    label: format!("done-{index}"),
+                    evidence: format!("evidence-{index}"),
+                })
+                .collect(),
+            verification_checks: (0..6)
+                .map(|index| axonrunner_core::VerificationCheck {
+                    label: format!("verify-{index}"),
+                    detail: format!("echo verify-{index}"),
+                })
+                .collect(),
+            budget: axonrunner_core::RunBudget::bounded(20, 10, 8000),
+            approval_mode: axonrunner_core::RunApprovalMode::Never,
+        };
+        let template = RunTemplate::GoalFile(crate::cli_command::GoalFileTemplate {
+            path: String::from("GOAL.json"),
+            goal,
+        });
+
+        let plan = build_runtime_run_plan(&template, "run-2", "cli-2", DecisionOutcome::Accepted);
+
+        assert_eq!(plan.planned_steps, super::MAX_GOAL_PLAN_STEPS);
+        assert!(
+            plan.steps
+                .iter()
+                .any(|step| step.label == "compact remaining queue")
+        );
+        assert_eq!(
+            plan.steps.last().map(|step| step.label.as_str()),
+            Some("finalize goal run")
+        );
     }
 }

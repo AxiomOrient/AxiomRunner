@@ -72,16 +72,14 @@ pub fn build_doctor_report(
     let state_path_display = state_path.display().to_string();
     let trace_path = trace_store.events_path().display().to_string();
 
-    let mut checks = Vec::new();
-    checks.push(directory_check("workspace_dir", &workspace));
-    checks.push(parent_directory_check("state_parent_dir", state_path));
-    checks.push(parent_directory_check(
-        "trace_parent_dir",
-        trace_store.events_path(),
-    ));
-    checks.push(file_presence_check("state_snapshot", state_path));
-    checks.push(trace_log_check(trace_store));
-    checks.push(provider_check(compose));
+    let checks = vec![
+        directory_check("workspace_dir", &workspace),
+        parent_directory_check("state_parent_dir", state_path),
+        parent_directory_check("trace_parent_dir", trace_store.events_path()),
+        file_presence_check("state_snapshot", state_path),
+        trace_log_check(trace_store),
+        provider_check(compose),
+    ];
 
     let ok = checks.iter().all(|check| check.state == "ok");
 
@@ -245,6 +243,39 @@ fn file_presence_check(name: &str, path: &Path) -> DoctorCheck {
     }
 }
 
+fn trace_log_check(trace_store: &TraceStore) -> DoctorCheck {
+    match trace_store.load_events() {
+        Ok(events) => DoctorCheck {
+            name: String::from("trace_log"),
+            state: String::from("ok"),
+            detail: format!(
+                "events={},path={}",
+                events.len(),
+                trace_store.events_path().display()
+            ),
+        },
+        Err(error) => DoctorCheck {
+            name: String::from("trace_log"),
+            state: String::from("fail"),
+            detail: error,
+        },
+    }
+}
+
+fn provider_check(compose: &RuntimeComposeHealth) -> DoctorCheck {
+    let state = match compose.provider.state {
+        "ready" => "ok",
+        "degraded" => "warn",
+        _ => "fail",
+    };
+
+    DoctorCheck {
+        name: String::from("provider_probe"),
+        state: state.to_owned(),
+        detail: compose.provider.detail.clone(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::format_async_host_detail;
@@ -280,38 +311,5 @@ mod tests {
             detail,
             "init_mode=failed,error=async runtime host init failed: boom"
         );
-    }
-}
-
-fn trace_log_check(trace_store: &TraceStore) -> DoctorCheck {
-    match trace_store.load_events() {
-        Ok(events) => DoctorCheck {
-            name: String::from("trace_log"),
-            state: String::from("ok"),
-            detail: format!(
-                "events={},path={}",
-                events.len(),
-                trace_store.events_path().display()
-            ),
-        },
-        Err(error) => DoctorCheck {
-            name: String::from("trace_log"),
-            state: String::from("fail"),
-            detail: error,
-        },
-    }
-}
-
-fn provider_check(compose: &RuntimeComposeHealth) -> DoctorCheck {
-    let state = match compose.provider.state {
-        "ready" => "ok",
-        "degraded" => "warn",
-        _ => "fail",
-    };
-
-    DoctorCheck {
-        name: String::from("provider_probe"),
-        state: state.to_owned(),
-        detail: compose.provider.detail.clone(),
     }
 }

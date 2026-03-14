@@ -24,10 +24,51 @@ fn fixture_goal_path(name: &str) -> PathBuf {
         .join(name)
 }
 
+fn assert_representative_goal_run(
+    fixture_name: &str,
+    expected_flow: &str,
+    expected_done_conditions: usize,
+    expected_verifiers: usize,
+) {
+    let workspace = unique_path(fixture_name, "dir");
+    let run = run_cli_with_env(
+        &[
+            "run",
+            fixture_goal_path(fixture_name).to_str().expect("utf8 path"),
+        ],
+        &[(
+            "AXONRUNNER_RUNTIME_TOOL_WORKSPACE",
+            workspace.to_str().expect("utf8 path"),
+        )],
+    );
+    let replay = run_cli_with_env(
+        &["replay", "run-1"],
+        &[(
+            "AXONRUNNER_RUNTIME_TOOL_WORKSPACE",
+            workspace.to_str().expect("utf8 path"),
+        )],
+    );
+
+    assert!(run.status.success(), "stderr:\n{}", stderr_of(&run));
+    assert!(replay.status.success(), "stderr:\n{}", stderr_of(&replay));
+    assert!(stdout_of(&run).contains("phase=completed outcome=success"));
+    assert!(stdout_of(&replay).contains("replay step id="));
+
+    let plan = fs::read_to_string(workspace.join(".axonrunner/artifacts/cli-1.plan.md"))
+        .expect("plan artifact should exist");
+    assert!(plan.contains(&format!("verifier_flow={expected_flow}")));
+    assert!(plan.contains(&format!(
+        "queued_done_conditions={expected_done_conditions}"
+    )));
+    assert!(plan.contains(&format!("queued_verifiers={expected_verifiers}")));
+
+    let _ = fs::remove_dir_all(workspace);
+}
+
 #[test]
 fn autonomous_eval_corpus_representative_runs_remain_green() {
     let mut passed = 0usize;
-    let total = 5usize;
+    let total = 9usize;
 
     {
         let workspace = unique_path("eval-intake-workspace", "dir");
@@ -206,6 +247,18 @@ fn autonomous_eval_corpus_representative_runs_remain_green() {
         passed += 1;
         let _ = fs::remove_dir_all(workspace);
     }
+
+    assert_representative_goal_run("rust_service.json", "build>test>lint", 2, 3);
+    passed += 1;
+
+    assert_representative_goal_run("node_api.json", "build>test>lint", 2, 3);
+    passed += 1;
+
+    assert_representative_goal_run("nextjs_app.json", "build>test>lint>generic", 2, 4);
+    passed += 1;
+
+    assert_representative_goal_run("python_fastapi.json", "test>generic", 2, 2);
+    passed += 1;
 
     assert_eq!(
         passed, total,

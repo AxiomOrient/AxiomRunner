@@ -1,0 +1,19 @@
+{
+  "summary": "Next.js app representative run",
+  "workspace_root": "/workspace",
+  "constraints": [
+    { "label": "domain", "detail": "nextjs-app-basic representative path" }
+  ],
+  "done_conditions": [
+    { "label": "report", "evidence": "report artifact exists" },
+    { "label": "ui", "evidence": "report artifact exists" }
+  ],
+  "verification_checks": [
+    { "label": "build", "detail": "npm run build" },
+    { "label": "test", "detail": "npm test" },
+    { "label": "lint", "detail": "npm run lint" },
+    { "label": "smoke", "detail": "node scripts/smoke.js" }
+  ],
+  "budget": { "max_steps": 9, "max_minutes": 10, "max_tokens": 8000 },
+  "approval_mode": "never"
+}

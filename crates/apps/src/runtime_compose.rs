@@ -1,6 +1,7 @@
 use crate::async_runtime_host::global_async_runtime_host;
 use crate::cli_command::{LegacyIntentTemplate, RunTemplate};
 use crate::config_loader::AppConfig;
+use crate::display::outcome_name;
 use crate::env_util::read_env_trimmed;
 use axonrunner_adapters::{
     FileMutationEvidence, FileWriteOutput, MemoryAdapter, MemoryTier, ProviderAdapter,
@@ -11,6 +12,7 @@ use axonrunner_adapters::{
 use axonrunner_core::DecisionOutcome;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::sync::Arc;
 
 mod plan;
@@ -24,6 +26,8 @@ use self::plan::{
 
 const ENV_RUNTIME_MEMORY_PATH: &str = "AXONRUNNER_RUNTIME_MEMORY_PATH";
 const ENV_RUNTIME_TOOL_WORKSPACE: &str = "AXONRUNNER_RUNTIME_TOOL_WORKSPACE";
+const ENV_RUNTIME_ARTIFACT_WORKSPACE: &str = "AXONRUNNER_RUNTIME_ARTIFACT_WORKSPACE";
+const ENV_RUNTIME_GIT_WORKTREE_ISOLATION: &str = "AXONRUNNER_RUNTIME_GIT_WORKTREE_ISOLATION";
 const ENV_RUNTIME_TOOL_LOG_PATH: &str = "AXONRUNNER_RUNTIME_TOOL_LOG_PATH";
 const ENV_RUNTIME_PROVIDER: &str = "AXONRUNNER_RUNTIME_PROVIDER";
 const ENV_RUNTIME_PROVIDER_MODEL: &str = "AXONRUNNER_RUNTIME_PROVIDER_MODEL";
@@ -38,11 +42,22 @@ const TOOL_MAX_SEARCH_RESULTS: usize = 64;
 const TOOL_MAX_COMMAND_OUTPUT_BYTES: usize = 32 * 1024;
 const TOOL_COMMAND_TIMEOUT_MS: u64 = 5_000;
 const HOT_CONTEXT_MAX_CHARS: usize = 512;
+const HOT_CONTEXT_MAX_PATHS: usize = 4;
+const HOT_CONTEXT_MAX_OUTPUTS: usize = 3;
+const REPO_DOC_MAX_CHARS: usize = 512;
+const REPO_DOC_FILENAMES: [(&str, &str); 4] = [
+    ("SPEC", "SPEC.md"),
+    ("PLAN", "PLAN.md"),
+    ("STATUS", "STATUS.md"),
+    ("AGENTS", "AGENTS.md"),
+];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeComposeConfig {
     pub memory_path: Option<PathBuf>,
     pub tool_workspace: Option<PathBuf>,
+    pub artifact_workspace: Option<PathBuf>,
+    pub git_worktree_isolation: bool,
     pub tool_log_path: String,
     pub provider_id: String,
     pub provider_model: String,
@@ -130,8 +145,17 @@ pub struct RuntimeRunRecord {
     pub step_journal: Vec<RuntimeRunStepRecord>,
     pub verification: RuntimeRunVerification,
     pub repair: RuntimeRunRepair,
+    pub rollback: Option<RuntimeRunRollbackMetadata>,
     pub phase: RuntimeRunPhase,
     pub outcome: RuntimeRunOutcome,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeRunRollbackMetadata {
+    pub metadata_path: String,
+    pub restore_path: String,
+    pub cleanup_path: Option<String>,
     pub reason: String,
 }
 
@@ -155,6 +179,13 @@ pub struct RuntimeComposePatchArtifact {
     pub before_excerpt: Option<String>,
     pub after_excerpt: Option<String>,
     pub unified_diff: Option<String>,
+}
+
+pub struct ReportWriteInput<'a> {
+    pub intent_id: &'a str,
+    pub outcome: DecisionOutcome,
+    pub policy_code: &'a str,
+    pub effect_count: usize,
 }
 
 impl RuntimeComposeExecution {
@@ -212,10 +243,14 @@ impl RuntimeComposeConfig {
         });
         let tool_workspace =
             env_path(ENV_RUNTIME_TOOL_WORKSPACE).or_else(|| config.workspace.clone());
+        let artifact_workspace =
+            env_path(ENV_RUNTIME_ARTIFACT_WORKSPACE).or_else(|| tool_workspace.clone());
+        let git_worktree_isolation = env_bool(ENV_RUNTIME_GIT_WORKTREE_ISOLATION);
 
         let tool_log_path = env_string(ENV_RUNTIME_TOOL_LOG_PATH).unwrap_or_else(|| {
-            tool_workspace
+            artifact_workspace
                 .as_ref()
+                .or(tool_workspace.as_ref())
                 .map(|workspace| workspace.join(DEFAULT_TOOL_LOG_PATH).display().to_string())
                 .unwrap_or_else(|| DEFAULT_TOOL_LOG_PATH.to_owned())
         });
@@ -229,6 +264,8 @@ impl RuntimeComposeConfig {
         Self {
             memory_path,
             tool_workspace,
+            artifact_workspace,
+            git_worktree_isolation,
             tool_log_path,
             provider_id,
             provider_model,
@@ -264,12 +301,27 @@ impl RuntimeComposeInitState {
 
 pub struct RuntimeComposeState {
     config: RuntimeComposeConfig,
+    base_tool_workspace: Option<PathBuf>,
     memory: Option<Box<dyn MemoryAdapter>>,
     memory_init: RuntimeComposeInitState,
     provider: Arc<dyn ProviderAdapter>,
     tool: Option<Arc<dyn ToolAdapter>>,
+    artifact_tool: Option<Arc<dyn ToolAdapter>>,
     tool_init: RuntimeComposeInitState,
     agents_path: Option<PathBuf>,
+    repo_docs: RepoDocStack,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RepoDocEntry {
+    label: &'static str,
+    path: PathBuf,
+    contents: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+struct RepoDocStack {
+    entries: Vec<RepoDocEntry>,
 }
 
 fn try_init_component<T>(
@@ -314,7 +366,15 @@ impl RuntimeComposeState {
         if let Some(workspace) = &config.tool_workspace {
             let _ = fs::create_dir_all(workspace);
         }
+        if let Some(workspace) = &config.artifact_workspace {
+            let _ = fs::create_dir_all(workspace);
+        }
         if let Some(workspace) = config.tool_workspace.as_mut()
+            && let Ok(canonical) = fs::canonicalize(&*workspace)
+        {
+            *workspace = canonical;
+        }
+        if let Some(workspace) = config.artifact_workspace.as_mut()
             && let Ok(canonical) = fs::canonicalize(&*workspace)
         {
             *workspace = canonical;
@@ -332,28 +392,71 @@ impl RuntimeComposeState {
             )
         }));
 
-        let (tool, tool_init) =
-            try_init_component(config.tool_workspace.as_ref().map(|workspace| {
-                (
-                    format!("workspace={}", workspace.display()),
-                    build_tool_adapter(workspace, config.command_allowlist.clone()),
-                )
-            }));
+        let (tool, artifact_tool, tool_init) = match (
+            config.tool_workspace.as_ref(),
+            config.artifact_workspace.as_ref(),
+        ) {
+            (Some(workspace), Some(artifact_workspace)) => {
+                let detail = if workspace == artifact_workspace {
+                    format!("workspace={}", workspace.display())
+                } else {
+                    format!(
+                        "workspace={},artifact_workspace={}",
+                        workspace.display(),
+                        artifact_workspace.display()
+                    )
+                };
+                match build_tool_adapter(
+                    workspace,
+                    artifact_workspace,
+                    config.command_allowlist.clone(),
+                ) {
+                    Ok(tool) => match build_tool_adapter(
+                        artifact_workspace,
+                        artifact_workspace,
+                        config.command_allowlist.clone(),
+                    ) {
+                        Ok(artifact_tool) => (
+                            Some(tool),
+                            Some(artifact_tool),
+                            RuntimeComposeInitState::Ready(detail),
+                        ),
+                        Err(error) => (
+                            None,
+                            None,
+                            RuntimeComposeInitState::Failed(format!("{detail} error={error}")),
+                        ),
+                    },
+                    Err(error) => (
+                        None,
+                        None,
+                        RuntimeComposeInitState::Failed(format!("{detail} error={error}")),
+                    ),
+                }
+            }
+            _ => (None, None, RuntimeComposeInitState::Disabled),
+        };
 
         let provider = Arc::from(
             build_contract_provider(provider_id)
                 .map_err(|error| format!("provider init failed for '{provider_id}': {error}"))?,
         );
         let agents_path = find_agents_md(config.tool_workspace.as_deref());
+        let repo_docs = ingest_repo_docs_stack(config.tool_workspace.as_deref());
+
+        let base_tool_workspace = config.tool_workspace.clone();
 
         Ok(Self {
             config,
+            base_tool_workspace,
             memory,
             memory_init,
             provider,
             tool: tool.map(|tool| Arc::new(tool) as Arc<dyn ToolAdapter>),
+            artifact_tool: artifact_tool.map(|tool| Arc::new(tool) as Arc<dyn ToolAdapter>),
             tool_init,
             agents_path,
+            repo_docs,
         })
     }
 
@@ -381,6 +484,32 @@ impl RuntimeComposeState {
         outcome: DecisionOutcome,
     ) -> RuntimeRunPlan {
         build_runtime_run_plan(template, run_id, intent_id, outcome)
+    }
+
+    pub fn prepare_execution_workspace(&mut self, run_id: &str) -> Result<(), String> {
+        let Some(base_workspace) = self.base_tool_workspace.clone() else {
+            return Ok(());
+        };
+        if !self.config.git_worktree_isolation {
+            return self.rebind_execution_workspace(base_workspace);
+        }
+
+        let Some(repo_root) = discover_git_toplevel(&base_workspace)? else {
+            return self.rebind_execution_workspace(base_workspace);
+        };
+        let relative_workspace = base_workspace
+            .strip_prefix(&repo_root)
+            .map(Path::to_path_buf)
+            .unwrap_or_default();
+        let worktree_root =
+            isolated_worktree_root(run_id, &repo_root, self.config.artifact_workspace.as_ref());
+        ensure_git_worktree(&repo_root, &worktree_root)?;
+        let execution_workspace = if relative_workspace.as_os_str().is_empty() {
+            worktree_root
+        } else {
+            worktree_root.join(relative_workspace)
+        };
+        self.rebind_execution_workspace(execution_workspace)
     }
 
     pub fn repair_template(
@@ -455,6 +584,7 @@ impl RuntimeComposeState {
     pub fn remember_run_summary(
         &mut self,
         run: &RuntimeRunRecord,
+        execution: &RuntimeComposeExecution,
         intent_id: &str,
     ) -> Result<(), String> {
         let Some(memory) = self.memory.as_mut() else {
@@ -462,29 +592,46 @@ impl RuntimeComposeState {
         };
 
         let key = tiered_memory_key(MemoryTier::Recall, &format!("last_run/{intent_id}"));
-        let value = Self::compact_hot_context(&[
-            format!("run_id={}", run.plan.run_id),
-            format!("phase={}", run_phase_name(run.phase)),
-            format!("outcome={}", run_outcome_name(run.outcome)),
-            format!("reason={}", run.reason),
-            format!("goal={}", run.plan.goal),
-            format!("summary={}", run.plan.summary),
-            format!(
-                "agents={}",
-                self.agents_path
-                    .as_ref()
-                    .map(|path| path.display().to_string())
-                    .unwrap_or_else(|| String::from("none"))
+        let value = Self::compact_hot_context(
+            &artifact_aware_hot_context_head(run, execution, intent_id),
+            &artifact_aware_hot_context_tail(
+                run,
+                self.agents_path.as_ref(),
+                self.repo_docs.summary(),
             ),
-        ]);
+        );
         memory
             .store(&key, &value)
             .map_err(|error| format!("store recall summary failed: {error}"))
     }
 
-    fn compact_hot_context(entries: &[String]) -> String {
-        let joined = entries.join(" | ");
-        if joined.chars().count() <= HOT_CONTEXT_MAX_CHARS {
+    fn compact_hot_context(head: &[String], tail: &[String]) -> String {
+        let mut segments = head.to_vec();
+        let mut remaining = HOT_CONTEXT_MAX_CHARS.saturating_sub(16);
+
+        for entry in &segments {
+            remaining = remaining.saturating_sub(entry.chars().count() + 3);
+        }
+
+        let mut omitted = 0usize;
+        for entry in tail {
+            let entry_len = entry.chars().count() + 3;
+            if entry_len <= remaining {
+                segments.push(entry.clone());
+                remaining = remaining.saturating_sub(entry_len);
+            } else {
+                omitted = omitted.saturating_add(1);
+            }
+        }
+
+        let mut joined = segments.join(" | ");
+        if omitted > 0 {
+            if !joined.is_empty() {
+                joined.push_str(" | ");
+            }
+            joined.push_str(&format!("...<compacted:{}>", omitted));
+        }
+        if joined.chars().count() <= HOT_CONTEXT_MAX_CHARS + 20 {
             return joined;
         }
 
@@ -519,24 +666,23 @@ impl RuntimeComposeState {
     }
 
     pub fn workspace_root(&self) -> Option<&PathBuf> {
-        self.config.tool_workspace.as_ref()
+        self.base_tool_workspace
+            .as_ref()
+            .or(self.config.tool_workspace.as_ref())
     }
 
     pub fn write_report(
         &self,
         template: &RunTemplate,
-        intent_id: &str,
-        outcome: DecisionOutcome,
-        policy_code: &str,
-        effect_count: usize,
+        input: &ReportWriteInput<'_>,
         execution: &RuntimeComposeExecution,
         run: &RuntimeRunRecord,
     ) -> Result<Vec<RuntimeComposePatchArtifact>, String> {
-        let Some(tool) = self.tool.as_ref() else {
+        let Some(tool) = self.artifact_tool.as_ref() else {
             return Ok(Vec::new());
         };
 
-        let base = format!(".axonrunner/artifacts/{intent_id}");
+        let base = format!(".axonrunner/artifacts/{}", input.intent_id);
         let verification_checks = render_string_list(&run.verification.checks);
         let step_journal = render_step_journal(&run.step_journal);
         let tool_outputs = render_string_list(&execution.tool_outputs);
@@ -546,10 +692,12 @@ impl RuntimeComposeState {
             (
                 format!("{base}.plan.md"),
                 format!(
-                    "# Plan\n\nphase={}\nintent_id={intent_id}\nkind={}\noutcome={}\npolicy={policy_code}\ngoal={}\nsummary={}\ndone_when={}\nplanned_steps={}\nsteps={}\n",
+                    "# Plan\n\nphase={}\nintent_id={}\nkind={}\noutcome={}\npolicy={}\ngoal={}\nsummary={}\ndone_when={}\nplanned_steps={}\nsteps={}\n",
                     run_phase_name(RuntimeRunPhase::Planning),
+                    input.intent_id,
                     template_kind(template),
-                    outcome_name(outcome),
+                    outcome_name(input.outcome),
+                    input.policy_code,
                     run.plan.goal,
                     run.plan.summary,
                     run.plan.done_when,
@@ -565,11 +713,12 @@ impl RuntimeComposeState {
             (
                 format!("{base}.apply.md"),
                 format!(
-                    "# Apply\n\nphase={}\nprovider={}\nmemory={}\ntool={}\neffects={effect_count}\nprovider_cwd={}\nprovider_output={}\n",
+                    "# Apply\n\nphase={}\nprovider={}\nmemory={}\ntool={}\neffects={}\nprovider_cwd={}\nprovider_output={}\n",
                     run_phase_name(RuntimeRunPhase::ExecutingStep),
                     step_name(&execution.provider),
                     step_name(&execution.memory),
                     step_name(&execution.tool),
+                    input.effect_count,
                     execution.provider_cwd,
                     execution.provider_output.as_deref().unwrap_or("<none>"),
                 ),
@@ -596,9 +745,11 @@ impl RuntimeComposeState {
             (
                 format!("{base}.report.md"),
                 format!(
-                    "# Report\n\nintent_id={intent_id}\nkind={}\noutcome={}\npolicy={policy_code}\nrun_phase={}\nrun_outcome={}\nrun_reason={}\nprovider={}\nprovider_cwd={}\nmemory={}\ntool={}\noutputs={}\nchanged_paths={}\nevidence={}\n",
+                    "# Report\n\nintent_id={}\nkind={}\noutcome={}\npolicy={}\nrun_phase={}\nrun_outcome={}\nrun_reason={}\nprovider={}\nprovider_cwd={}\nmemory={}\ntool={}\noutputs={}\nchanged_paths={}\nevidence={}\n",
+                    input.intent_id,
                     template_kind(template),
-                    outcome_name(outcome),
+                    outcome_name(input.outcome),
+                    input.policy_code,
                     run_phase_name(run.phase),
                     run_outcome_name(run.outcome),
                     run.reason,
@@ -631,6 +782,79 @@ impl RuntimeComposeState {
         }
 
         Ok(patch_artifacts)
+    }
+
+    pub fn write_rollback_metadata(
+        &self,
+        intent_id: &str,
+        execution: &RuntimeComposeExecution,
+        run: &RuntimeRunRecord,
+    ) -> Result<Option<RuntimeRunRollbackMetadata>, String> {
+        if !matches!(
+            run.outcome,
+            RuntimeRunOutcome::Failed | RuntimeRunOutcome::Blocked
+        ) {
+            return Ok(None);
+        }
+
+        let Some(base_workspace) = self.base_tool_workspace.as_ref() else {
+            return Ok(None);
+        };
+        let Some(execution_workspace) = self.config.tool_workspace.as_ref() else {
+            return Ok(None);
+        };
+        if base_workspace == execution_workspace {
+            return Ok(None);
+        }
+        let Some(tool) = self.artifact_tool.as_ref() else {
+            return Ok(None);
+        };
+
+        let path = format!(".axonrunner/artifacts/{intent_id}.rollback.json");
+        let contents = format!(
+            concat!(
+                "{{\n",
+                "  \"schema\": \"axonrunner.rollback.v1\",\n",
+                "  \"run_id\": \"{}\",\n",
+                "  \"intent_id\": \"{}\",\n",
+                "  \"reason\": \"{}\",\n",
+                "  \"restore_path\": \"{}\",\n",
+                "  \"cleanup_path\": {},\n",
+                "  \"execution_workspace\": \"{}\",\n",
+                "  \"provider_cwd\": \"{}\"\n",
+                "}}\n"
+            ),
+            escape_json_string(&run.plan.run_id),
+            escape_json_string(intent_id),
+            escape_json_string(&run.reason),
+            escape_json_string(&base_workspace.display().to_string()),
+            execution_workspace
+                .to_str()
+                .map(escape_json_string)
+                .map(|value| format!("\"{value}\""))
+                .unwrap_or_else(|| String::from("null")),
+            escape_json_string(&execution_workspace.display().to_string()),
+            escape_json_string(&execution.provider_cwd),
+        );
+        let result = tool
+            .execute(ToolRequest::FileWrite {
+                path,
+                contents,
+                append: false,
+            })
+            .map_err(|error| format!("runtime_compose.rollback: {error}"))?;
+        let ToolResult::FileWrite(FileWriteOutput { path, .. }) = result else {
+            return Err(String::from(
+                "runtime_compose.rollback: unexpected non-file-write result",
+            ));
+        };
+
+        Ok(Some(RuntimeRunRollbackMetadata {
+            metadata_path: path.display().to_string(),
+            restore_path: base_workspace.display().to_string(),
+            cleanup_path: Some(execution_workspace.display().to_string()),
+            reason: run.reason.clone(),
+        }))
     }
 
     fn apply_plan(&mut self, plan: RuntimeComposePlan) -> RuntimeComposeExecution {
@@ -680,12 +904,9 @@ impl RuntimeComposeState {
         };
 
         let provider = Arc::clone(&self.provider);
-        let request = ProviderRequest::new(
-            plan.model,
-            plan.prompt,
-            plan.max_tokens,
-            self.provider_cwd(),
-        );
+        let prompt = self.repo_docs.enrich_prompt(plan.prompt);
+        let request =
+            ProviderRequest::new(plan.model, prompt, plan.max_tokens, self.provider_cwd());
         match complete_provider_request(provider, request) {
             Ok(content) => (Some(content), RuntimeComposeStep::Applied),
             Err(error) => (None, RuntimeComposeStep::Failed(error)),
@@ -722,12 +943,11 @@ impl RuntimeComposeState {
         let Some(plan) = plan else {
             return (RuntimeComposeStep::Skipped, Vec::new(), Vec::new());
         };
-        let Some(tool) = self.tool.as_ref() else {
-            return (RuntimeComposeStep::Skipped, Vec::new(), Vec::new());
-        };
-
         match plan {
             ToolPlan::WriteLog { path, line_prefix } => {
+                let Some(tool) = self.artifact_tool.as_ref() else {
+                    return (RuntimeComposeStep::Skipped, Vec::new(), Vec::new());
+                };
                 let line = format!(
                     "{line_prefix} provider={}\n",
                     provider_output.unwrap_or("<none>")
@@ -756,53 +976,58 @@ impl RuntimeComposeState {
                 label,
                 program,
                 args,
-            } => match tool.execute(ToolRequest::RunCommand { program, args }) {
-                Ok(ToolResult::RunCommand(RunCommandOutput {
-                    profile,
-                    exit_code,
-                    artifact_path,
-                    ..
-                })) if exit_code == 0 => (
-                    RuntimeComposeStep::Applied,
-                    vec![format!(
-                        "verifier={} profile={} exit_code={} artifact={}",
-                        label,
-                        profile.as_str(),
+            } => {
+                let Some(tool) = self.tool.as_ref() else {
+                    return (RuntimeComposeStep::Skipped, Vec::new(), Vec::new());
+                };
+                match tool.execute(ToolRequest::RunCommand { program, args }) {
+                    Ok(ToolResult::RunCommand(RunCommandOutput {
+                        profile,
                         exit_code,
-                        artifact_path.display()
-                    )],
-                    Vec::new(),
-                ),
-                Ok(ToolResult::RunCommand(RunCommandOutput {
-                    profile,
-                    exit_code,
-                    artifact_path,
-                    ..
-                })) => (
-                    RuntimeComposeStep::Failed(format!(
-                        "runtime_compose.tool.verifier_failed: label={} exit_code={} artifact={}",
-                        label,
+                        artifact_path,
+                        ..
+                    })) if exit_code == 0 => (
+                        RuntimeComposeStep::Applied,
+                        vec![format!(
+                            "verifier={} profile={} exit_code={} artifact={}",
+                            label,
+                            profile.as_str(),
+                            exit_code,
+                            artifact_path.display()
+                        )],
+                        Vec::new(),
+                    ),
+                    Ok(ToolResult::RunCommand(RunCommandOutput {
+                        profile,
                         exit_code,
-                        artifact_path.display()
-                    )),
-                    vec![format!(
-                        "verifier={} profile={} exit_code={} artifact={}",
-                        label,
-                        profile.as_str(),
-                        exit_code,
-                        artifact_path.display()
-                    )],
-                    Vec::new(),
-                ),
-                Ok(_) => (RuntimeComposeStep::Applied, Vec::new(), Vec::new()),
-                Err(error) => (
-                    RuntimeComposeStep::Failed(format!(
-                        "runtime_compose.tool.run_command: {error}"
-                    )),
-                    Vec::new(),
-                    Vec::new(),
-                ),
-            },
+                        artifact_path,
+                        ..
+                    })) => (
+                        RuntimeComposeStep::Failed(format!(
+                            "runtime_compose.tool.verifier_failed: label={} exit_code={} artifact={}",
+                            label,
+                            exit_code,
+                            artifact_path.display()
+                        )),
+                        vec![format!(
+                            "verifier={} profile={} exit_code={} artifact={}",
+                            label,
+                            profile.as_str(),
+                            exit_code,
+                            artifact_path.display()
+                        )],
+                        Vec::new(),
+                    ),
+                    Ok(_) => (RuntimeComposeStep::Applied, Vec::new(), Vec::new()),
+                    Err(error) => (
+                        RuntimeComposeStep::Failed(format!(
+                            "runtime_compose.tool.run_command: {error}"
+                        )),
+                        Vec::new(),
+                        Vec::new(),
+                    ),
+                }
+            }
         }
     }
 
@@ -817,17 +1042,44 @@ impl RuntimeComposeState {
             .and_then(|path| path.to_str().map(str::to_owned))
             .unwrap_or_default()
     }
+
+    fn rebind_execution_workspace(&mut self, workspace: PathBuf) -> Result<(), String> {
+        if self.config.tool_workspace.as_ref() == Some(&workspace) {
+            return Ok(());
+        }
+        let artifact_workspace = self
+            .config
+            .artifact_workspace
+            .clone()
+            .unwrap_or_else(|| workspace.clone());
+        let tool = build_tool_adapter(
+            &workspace,
+            &artifact_workspace,
+            self.config.command_allowlist.clone(),
+        )?;
+        self.config.tool_workspace = Some(workspace);
+        self.tool = Some(Arc::new(tool) as Arc<dyn ToolAdapter>);
+        Ok(())
+    }
 }
 
 fn build_tool_adapter(
     workspace: &Path,
+    artifact_workspace: &Path,
     command_allowlist: Option<Vec<String>>,
 ) -> Result<WorkspaceTool, String> {
     fs::create_dir_all(workspace)
         .map_err(|error| format!("create workspace '{}' failed: {error}", workspace.display()))?;
+    fs::create_dir_all(artifact_workspace).map_err(|error| {
+        format!(
+            "create artifact workspace '{}' failed: {error}",
+            artifact_workspace.display()
+        )
+    })?;
 
     WorkspaceTool::new(
         workspace,
+        artifact_workspace,
         ToolPolicy {
             max_file_write_bytes: TOOL_WRITE_LIMIT_BYTES,
             max_file_read_bytes: TOOL_READ_LIMIT_BYTES,
@@ -840,16 +1092,266 @@ fn build_tool_adapter(
     .map_err(|error| format!("tool adapter init failed: {error}"))
 }
 
+fn discover_git_toplevel(workspace: &Path) -> Result<Option<PathBuf>, String> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(workspace)
+        .args(["rev-parse", "--show-toplevel"])
+        .output()
+        .map_err(|error| {
+            format!(
+                "probe git workspace '{}' failed: {error}",
+                workspace.display()
+            )
+        })?;
+    if !output.status.success() {
+        return Ok(None);
+    }
+    let stdout = String::from_utf8(output.stdout)
+        .map_err(|error| format!("git top-level output was not utf8: {error}"))?;
+    let path = stdout.trim();
+    if path.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(PathBuf::from(path)))
+    }
+}
+
+fn isolated_worktree_root(
+    run_id: &str,
+    repo_root: &Path,
+    artifact_workspace: Option<&PathBuf>,
+) -> PathBuf {
+    let parent = artifact_workspace
+        .filter(|path| !path.starts_with(repo_root))
+        .map(|path| path.join(".axonrunner").join("worktrees"))
+        .unwrap_or_else(|| std::env::temp_dir().join("axonrunner-worktrees"));
+    parent.join(sanitize_worktree_segment(run_id))
+}
+
+fn sanitize_worktree_segment(value: &str) -> String {
+    value
+        .chars()
+        .map(|ch| match ch {
+            'a'..='z' | 'A'..='Z' | '0'..='9' | '.' | '_' | '-' => ch,
+            _ => '_',
+        })
+        .collect()
+}
+
+fn ensure_git_worktree(repo_root: &Path, worktree_root: &Path) -> Result<(), String> {
+    if worktree_root.join(".git").exists() {
+        return Ok(());
+    }
+    if worktree_root.exists() {
+        fs::remove_dir_all(worktree_root).map_err(|error| {
+            format!(
+                "remove stale worktree '{}' failed: {error}",
+                worktree_root.display()
+            )
+        })?;
+    }
+    if let Some(parent) = worktree_root.parent() {
+        fs::create_dir_all(parent).map_err(|error| {
+            format!(
+                "create worktree parent '{}' failed: {error}",
+                parent.display()
+            )
+        })?;
+    }
+
+    let worktree_arg = worktree_root.to_string_lossy().into_owned();
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(repo_root)
+        .args(["worktree", "add", "--detach", "--force"])
+        .arg(&worktree_arg)
+        .arg("HEAD")
+        .output()
+        .map_err(|error| {
+            format!(
+                "create git worktree '{}' failed: {error}",
+                worktree_root.display()
+            )
+        })?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(format!(
+            "git worktree add failed repo={} worktree={} stderr={}",
+            repo_root.display(),
+            worktree_root.display(),
+            String::from_utf8_lossy(&output.stderr).trim()
+        ))
+    }
+}
+
 fn find_agents_md(start: Option<&Path>) -> Option<PathBuf> {
+    find_repo_doc(start, "AGENTS.md")
+}
+
+fn find_repo_doc(start: Option<&Path>, name: &str) -> Option<PathBuf> {
     let mut current = start?.to_path_buf();
     loop {
-        let candidate = current.join("AGENTS.md");
+        let candidate = current.join(name);
         if candidate.is_file() {
             return Some(candidate);
         }
         if !current.pop() {
             return None;
         }
+    }
+}
+
+fn ingest_repo_docs_stack(start: Option<&Path>) -> RepoDocStack {
+    let entries = REPO_DOC_FILENAMES
+        .iter()
+        .filter_map(|(label, filename)| {
+            let path = find_repo_doc(start, filename)?;
+            let contents = fs::read_to_string(&path).ok()?;
+            let contents = compact_repo_doc(&contents);
+            if contents.is_empty() {
+                None
+            } else {
+                Some(RepoDocEntry {
+                    label,
+                    path,
+                    contents,
+                })
+            }
+        })
+        .collect::<Vec<_>>();
+    RepoDocStack { entries }
+}
+
+fn compact_repo_doc(contents: &str) -> String {
+    let trimmed = contents.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    if trimmed.chars().count() <= REPO_DOC_MAX_CHARS {
+        return trimmed.to_owned();
+    }
+
+    let mut compact = trimmed
+        .chars()
+        .take(REPO_DOC_MAX_CHARS.saturating_sub(16))
+        .collect::<String>();
+    compact.push_str("...<compacted>");
+    compact
+}
+
+fn escape_json_string(value: &str) -> String {
+    value.chars().flat_map(|ch| ch.escape_default()).collect()
+}
+
+fn artifact_aware_hot_context_head(
+    run: &RuntimeRunRecord,
+    execution: &RuntimeComposeExecution,
+    intent_id: &str,
+) -> Vec<String> {
+    let mut head = vec![
+        format!("run_id={}", run.plan.run_id),
+        format!("phase={}", run_phase_name(run.phase)),
+        format!("outcome={}", run_outcome_name(run.outcome)),
+        format!("reason={}", run.reason),
+        format!(
+            "artifacts=plan=.axonrunner/artifacts/{intent_id}.plan.md,verify=.axonrunner/artifacts/{intent_id}.verify.md,report=.axonrunner/artifacts/{intent_id}.report.md"
+        ),
+        format!(
+            "changed_paths={}",
+            compact_string_list(
+                &execution
+                    .patch_artifacts
+                    .iter()
+                    .map(|artifact| artifact.target_path.clone())
+                    .collect::<Vec<_>>(),
+                HOT_CONTEXT_MAX_PATHS,
+            )
+        ),
+    ];
+
+    if !execution.tool_outputs.is_empty() {
+        head.push(format!(
+            "tool_outputs={}",
+            compact_string_list(&execution.tool_outputs, HOT_CONTEXT_MAX_OUTPUTS)
+        ));
+    }
+    if let Some((stage, message)) = execution.first_failure() {
+        head.push(format!("first_failure={stage}:{message}"));
+    }
+    if let Some(rollback) = &run.rollback {
+        head.push(format!(
+            "rollback=restore:{},metadata:{}",
+            rollback.restore_path, rollback.metadata_path
+        ));
+    }
+
+    head
+}
+
+fn artifact_aware_hot_context_tail(
+    run: &RuntimeRunRecord,
+    agents_path: Option<&PathBuf>,
+    repo_docs_summary: String,
+) -> Vec<String> {
+    vec![
+        format!("goal={}", run.plan.goal),
+        format!("summary={}", run.plan.summary),
+        format!(
+            "agents={}",
+            agents_path
+                .map(|path| path.display().to_string())
+                .unwrap_or_else(|| String::from("none"))
+        ),
+        format!("repo_docs={repo_docs_summary}"),
+    ]
+}
+
+fn compact_string_list(items: &[String], max_items: usize) -> String {
+    if items.is_empty() {
+        return String::from("none");
+    }
+    let mut parts = items.iter().take(max_items).cloned().collect::<Vec<_>>();
+    if items.len() > max_items {
+        parts.push(format!("+{}more", items.len() - max_items));
+    }
+    parts.join(",")
+}
+
+impl RepoDocStack {
+    fn summary(&self) -> String {
+        if self.entries.is_empty() {
+            return String::from("none");
+        }
+
+        self.entries
+            .iter()
+            .map(|entry| format!("{}={}", entry.label, entry.path.display()))
+            .collect::<Vec<_>>()
+            .join(" | ")
+    }
+
+    fn enrich_prompt(&self, prompt: String) -> String {
+        if self.entries.is_empty() {
+            return prompt;
+        }
+
+        let guidance = self
+            .entries
+            .iter()
+            .map(|entry| {
+                format!(
+                    "[{} path={}]\n{}",
+                    entry.label,
+                    entry.path.display(),
+                    entry.contents
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n\n");
+
+        format!("repo_docs:\n{guidance}\n\nrequest:\n{prompt}")
     }
 }
 
@@ -1040,15 +1542,15 @@ fn step_name(step: &RuntimeComposeStep) -> &'static str {
     }
 }
 
-fn outcome_name(outcome: DecisionOutcome) -> &'static str {
-    match outcome {
-        DecisionOutcome::Accepted => "accepted",
-        DecisionOutcome::Rejected => "rejected",
-    }
-}
-
 fn env_path(key: &str) -> Option<PathBuf> {
     env_string(key).map(PathBuf::from)
+}
+
+fn env_bool(key: &str) -> bool {
+    matches!(
+        env_string(key).as_deref(),
+        Some("1" | "true" | "TRUE" | "yes" | "YES" | "on" | "ON")
+    )
 }
 
 fn env_string(key: &str) -> Option<String> {
@@ -1102,7 +1604,7 @@ mod tests {
         let workspace = unique_dir("allowlist");
         fs::create_dir_all(&workspace).expect("workspace should exist");
 
-        let tool = build_tool_adapter(&workspace, Some(vec![String::from("pwd")]))
+        let tool = build_tool_adapter(&workspace, &workspace, Some(vec![String::from("pwd")]))
             .expect("tool adapter should build");
         let pwd = tool.execute(ToolRequest::RunCommand {
             program: String::from("pwd"),
@@ -1126,6 +1628,8 @@ mod tests {
         let state = RuntimeComposeState::new(RuntimeComposeConfig {
             memory_path: None,
             tool_workspace: Some(workspace.clone()),
+            artifact_workspace: Some(workspace.clone()),
+            git_worktree_isolation: false,
             tool_log_path: workspace.join("runtime.log").display().to_string(),
             provider_id: String::from("mock-local"),
             provider_model: String::from("mock-local"),
@@ -1170,6 +1674,8 @@ mod tests {
         let mut state = RuntimeComposeState::new(RuntimeComposeConfig {
             memory_path: None,
             tool_workspace: Some(workspace.clone()),
+            artifact_workspace: Some(workspace.clone()),
+            git_worktree_isolation: false,
             tool_log_path: workspace.join("runtime.log").display().to_string(),
             provider_id: String::from("mock-local"),
             provider_model: String::from("mock-local"),
@@ -1221,13 +1727,40 @@ mod tests {
 
     #[test]
     fn compact_hot_context_keeps_long_summaries_bounded() {
-        let entries = (0..64)
+        let head = vec![
+            String::from("run_id=run-1"),
+            String::from("artifacts=report"),
+        ];
+        let tail = (0..64)
             .map(|index| format!("entry-{index}-{}", "x".repeat(32)))
             .collect::<Vec<_>>();
-        let compact = RuntimeComposeState::compact_hot_context(&entries);
+        let compact = RuntimeComposeState::compact_hot_context(&head, &tail);
 
         assert!(compact.len() <= super::HOT_CONTEXT_MAX_CHARS + 16);
-        assert!(compact.ends_with("...<compacted>"));
+        assert!(compact.contains("run_id=run-1"));
+        assert!(compact.contains("artifacts=report"));
+        assert!(compact.contains("...<compacted"));
+    }
+
+    #[test]
+    fn compact_hot_context_keeps_artifact_pointers_before_tail_context() {
+        let compact = RuntimeComposeState::compact_hot_context(
+            &[
+                String::from("run_id=run-1"),
+                String::from(
+                    "artifacts=plan=.axonrunner/artifacts/cli-1.plan.md,verify=.axonrunner/artifacts/cli-1.verify.md,report=.axonrunner/artifacts/cli-1.report.md",
+                ),
+                String::from("changed_paths=src/lib.rs,src/main.rs,+4more"),
+            ],
+            &[
+                format!("summary={}", "x".repeat(512)),
+                String::from("repo_docs=SPEC.md"),
+            ],
+        );
+
+        assert!(compact.contains(".report.md"));
+        assert!(compact.contains("changed_paths=src/lib.rs"));
+        assert!(compact.contains("...<compacted"));
     }
 
     #[test]
@@ -1240,6 +1773,81 @@ mod tests {
         let found = super::find_agents_md(Some(&nested)).expect("agents path should be found");
 
         assert_eq!(found, root.join("AGENTS.md"));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn runtime_compose_ingests_repo_docs_in_priority_order() {
+        let root = unique_dir("repo-doc-stack");
+        let nested = root.join("workspace").join("inner");
+        fs::create_dir_all(&nested).expect("nested workspace should exist");
+        fs::write(root.join("AGENTS.md"), "agent guidance").expect("agents doc should exist");
+        fs::write(root.join("STATUS.md"), "status guidance").expect("status doc should exist");
+        fs::write(root.join("PLAN.md"), "plan guidance").expect("plan doc should exist");
+        fs::write(root.join("SPEC.md"), "spec guidance").expect("spec doc should exist");
+
+        let mut state = RuntimeComposeState::new(RuntimeComposeConfig {
+            memory_path: None,
+            tool_workspace: Some(nested.clone()),
+            artifact_workspace: Some(nested.clone()),
+            git_worktree_isolation: false,
+            tool_log_path: nested.join("runtime.log").display().to_string(),
+            provider_id: String::from("mock-local"),
+            provider_model: String::from("mock-local"),
+            max_tokens: 256,
+            command_allowlist: None,
+        })
+        .expect("runtime compose state should init");
+
+        let execution = state.apply_template(
+            &RunTemplate::LegacyIntent(LegacyIntentTemplate::Write {
+                key: String::from("alpha"),
+                value: String::from("42"),
+            }),
+            "cli-docs",
+            DecisionOutcome::Accepted,
+        );
+
+        let prompt = execution
+            .provider_output
+            .expect("mock provider should echo the prompt");
+        let spec_idx = prompt
+            .find("[SPEC path=")
+            .expect("spec guidance should be included");
+        let plan_idx = prompt
+            .find("[PLAN path=")
+            .expect("plan guidance should be included");
+        let status_idx = prompt
+            .find("[STATUS path=")
+            .expect("status guidance should be included");
+        let agents_idx = prompt
+            .find("[AGENTS path=")
+            .expect("agents guidance should be included");
+
+        assert!(spec_idx < plan_idx);
+        assert!(plan_idx < status_idx);
+        assert!(status_idx < agents_idx);
+        assert!(prompt.contains("request:\nintent=cli-docs kind=write key=alpha value=42"));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn runtime_compose_repo_doc_ingest_uses_parent_workspace_files() {
+        let root = unique_dir("repo-doc-parent");
+        let nested = root.join("workspace").join("inner");
+        fs::create_dir_all(&nested).expect("nested workspace should exist");
+        fs::write(root.join("SPEC.md"), "shared spec").expect("spec doc should exist");
+        fs::write(root.join("AGENTS.md"), "shared agents").expect("agents doc should exist");
+
+        let stack = super::ingest_repo_docs_stack(Some(&nested));
+
+        assert_eq!(stack.entries.len(), 2);
+        assert_eq!(stack.entries[0].label, "SPEC");
+        assert_eq!(stack.entries[0].path, root.join("SPEC.md"));
+        assert_eq!(stack.entries[1].label, "AGENTS");
+        assert_eq!(stack.entries[1].path, root.join("AGENTS.md"));
 
         let _ = fs::remove_dir_all(root);
     }

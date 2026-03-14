@@ -172,6 +172,7 @@ fn workflow_pack_contract_docs_lock_manifest_and_ownership_rules() {
         "version",
         "entry_goal",
         "planner_hints",
+        "recommended_verifier_flow",
         "allowed_tools",
         "verifier_rules",
         "risk_policy",
@@ -195,6 +196,7 @@ fn workflow_pack_contract_shape_stays_explicit() {
         description: String::from("bounded Rust service workflow"),
         entry_goal: String::from("implement one bounded Rust service task"),
         planner_hints: vec![String::from("prefer cargo-first verification")],
+        recommended_verifier_flow: vec![RunCommandProfile::Build, RunCommandProfile::Test],
         allowed_tools: vec![
             WorkflowPackAllowedTool {
                 operation: String::from("read_file"),
@@ -219,6 +221,10 @@ fn workflow_pack_contract_shape_stays_explicit() {
     };
 
     assert_eq!(contract.validate(), Ok(()));
+    assert_eq!(
+        contract.recommended_verifier_flow[0],
+        RunCommandProfile::Build
+    );
     assert_eq!(contract.allowed_tools[0].operation, "read_file");
     assert_eq!(contract.verifier_rules[0].profile, RunCommandProfile::Test);
     assert_eq!(contract.risk_policy.approval_mode, "on-risk");

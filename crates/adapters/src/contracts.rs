@@ -278,6 +278,7 @@ pub struct WorkflowPackContract {
     pub description: String,
     pub entry_goal: String,
     pub planner_hints: Vec<String>,
+    pub recommended_verifier_flow: Vec<RunCommandProfile>,
     pub allowed_tools: Vec<WorkflowPackAllowedTool>,
     pub verifier_rules: Vec<WorkflowPackVerifierRule>,
     pub risk_policy: WorkflowPackRiskPolicy,
@@ -293,6 +294,9 @@ impl WorkflowPackContract {
         }
         if self.entry_goal.trim().is_empty() {
             return Err("entry_goal");
+        }
+        if self.recommended_verifier_flow.is_empty() {
+            return Err("recommended_verifier_flow");
         }
         if self.allowed_tools.is_empty() {
             return Err("allowed_tools");

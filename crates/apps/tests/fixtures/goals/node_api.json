@@ -1,0 +1,18 @@
+{
+  "summary": "Node API representative run",
+  "workspace_root": "/workspace",
+  "constraints": [
+    { "label": "domain", "detail": "node-api-basic representative path" }
+  ],
+  "done_conditions": [
+    { "label": "report", "evidence": "report artifact exists" },
+    { "label": "bundle", "evidence": "report artifact exists" }
+  ],
+  "verification_checks": [
+    { "label": "build", "detail": "npm run build" },
+    { "label": "test", "detail": "npm test" },
+    { "label": "lint", "detail": "npm run lint" }
+  ],
+  "budget": { "max_steps": 8, "max_minutes": 10, "max_tokens": 8000 },
+  "approval_mode": "never"
+}

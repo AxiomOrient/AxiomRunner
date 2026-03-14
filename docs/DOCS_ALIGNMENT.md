@@ -6,7 +6,8 @@
 
 핵심 원칙:
 
-- `docs/*.md`: current truth
+- `docs/*.md`: 기본은 current truth
+- `docs/` 루트의 bridge 문서만 예외로 transition bridge 역할을 가진다
 - `docs/transition/*.md`: closure context와 future extension 경계
 - historical 표현인 `run <intent-spec>` 와 future draft 표현인 `run <goal>` 은 현재 shipped truth가 아니다
 
@@ -15,6 +16,7 @@
 | Path | Role | Status |
 |---|---|---|
 | `docs/project-charter.md` | 현재 제품 정체성 정의 | current truth |
+| `docs/README.md` | 문서 읽기 시작점 | current truth |
 | `docs/CAPABILITY_MATRIX.md` | 현재 capability / release blocker 정의 | current truth |
 | `docs/CODEK_RUNTIME_CONTRACT.md` | `codek` substrate 계약 | current truth |
 | `docs/RUNBOOK.md` | 현재 운영 절차 | current truth |
@@ -49,10 +51,11 @@ future target drafts once used `run <goal>`.
 
 현재 제품을 이해하려면:
 
-1. `docs/project-charter.md`
-2. `docs/CAPABILITY_MATRIX.md`
-3. `docs/CODEK_RUNTIME_CONTRACT.md`
-4. `docs/RUNBOOK.md`
+1. `docs/README.md`
+2. `docs/project-charter.md`
+3. `docs/CAPABILITY_MATRIX.md`
+4. `docs/CODEK_RUNTIME_CONTRACT.md`
+5. `docs/RUNBOOK.md`
 
 closure context와 future extension까지 보려면:
 

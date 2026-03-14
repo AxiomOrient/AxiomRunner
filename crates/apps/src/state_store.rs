@@ -11,23 +11,12 @@ pub const ENV_RUNTIME_STATE_PATH: &str = "AXONRUNNER_RUNTIME_STATE_PATH";
 const FORMAT_VERSION: &str = "axonrunner-state-v1";
 const NONE_SENTINEL: &str = "-";
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct RuntimeStateSnapshot {
     pub state: AgentState,
     pub next_intent_seq: u64,
     pub next_run_seq: u64,
     pub pending_run: Option<PendingRunSnapshot>,
-}
-
-impl Default for RuntimeStateSnapshot {
-    fn default() -> Self {
-        Self {
-            state: AgentState::default(),
-            next_intent_seq: 0,
-            next_run_seq: 0,
-            pending_run: None,
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

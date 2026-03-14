@@ -10,6 +10,8 @@ const SANITIZED_ENV_KEYS: &[&str] = &[
     "AXONRUNNER_RUNTIME_MAX_TOKENS",
     "AXONRUNNER_RUNTIME_MEMORY_PATH",
     "AXONRUNNER_RUNTIME_TOOL_WORKSPACE",
+    "AXONRUNNER_RUNTIME_ARTIFACT_WORKSPACE",
+    "AXONRUNNER_RUNTIME_GIT_WORKTREE_ISOLATION",
     "AXONRUNNER_RUNTIME_TOOL_LOG_PATH",
     "OPENAI_API_KEY",
 ];
@@ -33,6 +35,13 @@ fn isolated_cli_home(label: &str) -> std::path::PathBuf {
 fn run_with_isolated_env(args: &[&str], env: &[(&str, &str)], label: &str) -> Output {
     let home = isolated_cli_home(label);
     let tool_workspace = home.join(".axonrunner").join("workspace");
+    let artifact_workspace = env
+        .iter()
+        .find_map(|(key, value)| {
+            (*key == "AXONRUNNER_RUNTIME_ARTIFACT_WORKSPACE")
+                .then(|| std::path::PathBuf::from(*value))
+        })
+        .unwrap_or_else(|| tool_workspace.clone());
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_axonrunner_apps"));
     cmd.env("HOME", &home).args(args);
     for key in SANITIZED_ENV_KEYS {
@@ -50,7 +59,7 @@ fn run_with_isolated_env(args: &[&str], env: &[(&str, &str)], label: &str) -> Ou
     {
         cmd.env(
             "AXONRUNNER_RUNTIME_TOOL_LOG_PATH",
-            tool_workspace.join("runtime.log"),
+            artifact_workspace.join("runtime.log"),
         );
     }
     for (key, value) in env {

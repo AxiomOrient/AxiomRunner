@@ -1,0 +1,17 @@
+{
+  "summary": "Python FastAPI representative run",
+  "workspace_root": "/workspace",
+  "constraints": [
+    { "label": "domain", "detail": "python-fastapi-basic representative path" }
+  ],
+  "done_conditions": [
+    { "label": "report", "evidence": "report artifact exists" },
+    { "label": "api", "evidence": "report artifact exists" }
+  ],
+  "verification_checks": [
+    { "label": "test", "detail": "pytest" },
+    { "label": "smoke", "detail": "python scripts/smoke.py" }
+  ],
+  "budget": { "max_steps": 8, "max_minutes": 10, "max_tokens": 8000 },
+  "approval_mode": "never"
+}

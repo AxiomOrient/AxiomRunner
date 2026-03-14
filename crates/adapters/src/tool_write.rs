@@ -138,36 +138,39 @@ pub(crate) fn digest_path(path: &Path) -> Result<String, io::Error> {
     Ok(format!("{:x}", hasher.finalize()))
 }
 
-pub(crate) fn write_patch_artifact(
-    workspace_root: &Path,
-    target_path: &Path,
-    operation: &str,
-    before_digest: Option<&str>,
-    after_digest: Option<&str>,
-    bytes_written: Option<usize>,
-    before_excerpt: Option<&str>,
-    after_excerpt: Option<&str>,
-    unified_diff: Option<&str>,
-) -> Result<PathBuf, io::Error> {
-    let patch_dir = workspace_root.join(".axonrunner").join("patches");
+pub(crate) struct PatchArtifact<'a> {
+    pub workspace_root: &'a Path,
+    pub target_path: &'a Path,
+    pub operation: &'a str,
+    pub before_digest: Option<&'a str>,
+    pub after_digest: Option<&'a str>,
+    pub bytes_written: Option<usize>,
+    pub before_excerpt: Option<&'a str>,
+    pub after_excerpt: Option<&'a str>,
+    pub unified_diff: Option<&'a str>,
+}
+
+pub(crate) fn write_patch_artifact(artifact: PatchArtifact<'_>) -> Result<PathBuf, io::Error> {
+    let patch_dir = artifact.workspace_root.join(".axonrunner").join("patches");
     fs::create_dir_all(&patch_dir)?;
-    let artifact_path = patch_dir.join(unique_patch_filename(target_path));
-    let relative_target = target_path
-        .strip_prefix(workspace_root)
-        .unwrap_or(target_path)
+    let artifact_path = patch_dir.join(unique_patch_filename(artifact.target_path));
+    let relative_target = artifact
+        .target_path
+        .strip_prefix(artifact.workspace_root)
+        .unwrap_or(artifact.target_path)
         .display()
         .to_string();
     let payload = json!({
         "schema": "axonrunner.patch.v2",
         "timestamp_ms": now_millis(),
-        "operation": operation,
+        "operation": artifact.operation,
         "target_path": relative_target,
-        "before_digest": before_digest,
-        "after_digest": after_digest,
-        "bytes_written": bytes_written,
-        "before_excerpt": before_excerpt,
-        "after_excerpt": after_excerpt,
-        "unified_diff": unified_diff,
+        "before_digest": artifact.before_digest,
+        "after_digest": artifact.after_digest,
+        "bytes_written": artifact.bytes_written,
+        "before_excerpt": artifact.before_excerpt,
+        "after_excerpt": artifact.after_excerpt,
+        "unified_diff": artifact.unified_diff,
     });
     let rendered =
         serde_json::to_vec_pretty(&payload).map_err(|error| io::Error::other(error.to_string()))?;
@@ -175,36 +178,38 @@ pub(crate) fn write_patch_artifact(
     Ok(artifact_path)
 }
 
-pub(crate) fn write_command_artifact(
-    workspace_root: &Path,
-    program: &str,
-    args: &[String],
-    profile: &str,
-    exit_code: i32,
-    stdout: &str,
-    stderr: &str,
-    stdout_truncated: bool,
-    stderr_truncated: bool,
-) -> Result<PathBuf, io::Error> {
-    let command_dir = workspace_root.join(".axonrunner").join("commands");
+pub(crate) struct CommandArtifact<'a> {
+    pub workspace_root: &'a Path,
+    pub program: &'a str,
+    pub args: &'a [String],
+    pub profile: &'a str,
+    pub exit_code: i32,
+    pub stdout: &'a str,
+    pub stderr: &'a str,
+    pub stdout_truncated: bool,
+    pub stderr_truncated: bool,
+}
+
+pub(crate) fn write_command_artifact(artifact: CommandArtifact<'_>) -> Result<PathBuf, io::Error> {
+    let command_dir = artifact.workspace_root.join(".axonrunner").join("commands");
     fs::create_dir_all(&command_dir)?;
     let artifact_path = command_dir.join(format!(
         "{}-{}-{}.json",
-        program.replace('/', "_"),
+        artifact.program.replace('/', "_"),
         std::process::id(),
         now_millis()
     ));
     let payload = json!({
         "schema": "axonrunner.command.v1",
         "timestamp_ms": now_millis(),
-        "program": program,
-        "args": args,
-        "profile": profile,
-        "exit_code": exit_code,
-        "stdout": bounded_excerpt(stdout, 240),
-        "stderr": bounded_excerpt(stderr, 240),
-        "stdout_truncated": stdout_truncated,
-        "stderr_truncated": stderr_truncated,
+        "program": artifact.program,
+        "args": artifact.args,
+        "profile": artifact.profile,
+        "exit_code": artifact.exit_code,
+        "stdout": bounded_excerpt(artifact.stdout, 240),
+        "stderr": bounded_excerpt(artifact.stderr, 240),
+        "stdout_truncated": artifact.stdout_truncated,
+        "stderr_truncated": artifact.stderr_truncated,
     });
     let rendered =
         serde_json::to_vec_pretty(&payload).map_err(|error| io::Error::other(error.to_string()))?;

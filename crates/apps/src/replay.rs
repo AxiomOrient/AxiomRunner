@@ -1,8 +1,14 @@
 use crate::config_loader::AppConfig;
+use crate::runtime_compose::RuntimeComposeConfig;
 use crate::trace_store::TraceStore;
 
 pub fn execute_replay(config: &AppConfig, target: &str) -> Result<(), String> {
-    let store = TraceStore::from_workspace_root(config.workspace.clone())?;
+    let compose_config = RuntimeComposeConfig::from_app_config(config);
+    let store = TraceStore::from_workspace_root(
+        compose_config
+            .artifact_workspace
+            .or(compose_config.tool_workspace),
+    )?;
 
     let (summary, latest, artifact_index) = if target == "latest" {
         let summary = store.replay_summary()?;
@@ -11,38 +17,36 @@ pub fn execute_replay(config: &AppConfig, target: &str) -> Result<(), String> {
             .ok_or_else(|| String::from("replay target not found: latest"))?;
         let artifact_index = store.artifact_index()?;
         (summary, latest, artifact_index)
+    } else if let Some(summary) = store.replay_summary_for_intent(target)? {
+        let latest = store
+            .latest_event_for_intent(target)?
+            .ok_or_else(|| format!("replay target not found: {target}"))?;
+        let latest_entry = store
+            .artifact_index_for_intent(target)?
+            .ok_or_else(|| format!("replay target not found: {target}"))?;
+        (
+            summary,
+            latest,
+            crate::trace_store::TraceArtifactIndex {
+                entries: vec![latest_entry],
+            },
+        )
+    } else if let Some(summary) = store.replay_summary_for_run(target)? {
+        let latest = store
+            .latest_event_for_run(target)?
+            .ok_or_else(|| format!("replay target not found: {target}"))?;
+        let latest_entry = store
+            .artifact_index_for_run(target)?
+            .ok_or_else(|| format!("replay target not found: {target}"))?;
+        (
+            summary,
+            latest,
+            crate::trace_store::TraceArtifactIndex {
+                entries: vec![latest_entry],
+            },
+        )
     } else {
-        if let Some(summary) = store.replay_summary_for_intent(target)? {
-            let latest = store
-                .latest_event_for_intent(target)?
-                .ok_or_else(|| format!("replay target not found: {target}"))?;
-            let latest_entry = store
-                .artifact_index_for_intent(target)?
-                .ok_or_else(|| format!("replay target not found: {target}"))?;
-            (
-                summary,
-                latest,
-                crate::trace_store::TraceArtifactIndex {
-                    entries: vec![latest_entry],
-                },
-            )
-        } else if let Some(summary) = store.replay_summary_for_run(target)? {
-            let latest = store
-                .latest_event_for_run(target)?
-                .ok_or_else(|| format!("replay target not found: {target}"))?;
-            let latest_entry = store
-                .artifact_index_for_run(target)?
-                .ok_or_else(|| format!("replay target not found: {target}"))?;
-            (
-                summary,
-                latest,
-                crate::trace_store::TraceArtifactIndex {
-                    entries: vec![latest_entry],
-                },
-            )
-        } else {
-            return Err(format!("replay target not found: {target}"));
-        }
+        return Err(format!("replay target not found: {target}"));
     };
 
     println!(
@@ -79,6 +83,15 @@ pub fn execute_replay(config: &AppConfig, target: &str) -> Result<(), String> {
                 run.step_ids.join(",")
             }
         );
+        if let Some(rollback) = &run.rollback {
+            println!(
+                "replay rollback metadata={} restore_path={} cleanup_path={} reason={}",
+                rollback.metadata_path,
+                rollback.restore_path,
+                rollback.cleanup_path.as_deref().unwrap_or("none"),
+                rollback.reason
+            );
+        }
         for step in &run.step_journal {
             println!(
                 "replay step id={} phase={} status={} label={} evidence={} failure={}",
@@ -144,7 +157,10 @@ pub fn execute_replay(config: &AppConfig, target: &str) -> Result<(), String> {
             failure.stage, failure.message
         );
     }
-    println!("replay summary failed_intents={}", summary.failed_intents);
+    println!(
+        "replay summary failed_intents={} false_success_intents={} false_done_intents={}",
+        summary.failed_intents, summary.false_success_intents, summary.false_done_intents
+    );
 
     Ok(())
 }

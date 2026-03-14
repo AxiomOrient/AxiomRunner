@@ -1,17 +1,17 @@
 use crate::cli_command::{CliCommand, LegacyIntentTemplate, RunTemplate, USAGE};
 use crate::config_loader::AppConfig;
-use crate::display::mode_name;
+use crate::display::{mode_name, outcome_name};
 use crate::doctor::{build_doctor_report, render_doctor_lines};
 use crate::runtime_compose::{
-    RuntimeComposeConfig, RuntimeComposeExecution, RuntimeComposeState, RuntimeRunOutcome,
-    RuntimeRunPhase, RuntimeRunRecord, RuntimeRunRepair, RuntimeRunStepRecord,
+    ReportWriteInput, RuntimeComposeConfig, RuntimeComposeExecution, RuntimeComposeState,
+    RuntimeRunOutcome, RuntimeRunPhase, RuntimeRunRecord, RuntimeRunRepair, RuntimeRunStepRecord,
     RuntimeRunVerification, run_outcome_name, run_phase_name,
 };
 use crate::state_store::{PendingRunSnapshot, RuntimeStateSnapshot, StateStore};
 use crate::status::{
     RuntimeStatusInput, StateStatusInput, StatusInput, StatusSnapshot, render_status_lines,
 };
-use crate::trace_store::TraceStore;
+use crate::trace_store::{TraceEventInput, TraceStore};
 use crate::workspace_lock::WorkspaceLock;
 use axonrunner_core::{
     AgentState, DecisionOutcome, DomainEvent, ExecutionMode, Intent, IntentKind, PolicyCode,
@@ -31,6 +31,46 @@ struct AppliedIntent {
 struct FinalizedRun {
     execution: RuntimeComposeExecution,
     record: RuntimeRunRecord,
+}
+
+struct FinalizeRunInput<'a> {
+    template: &'a RunTemplate,
+    plan: crate::runtime_compose::RuntimeRunPlan,
+    applied: AppliedIntent,
+    execution: RuntimeComposeExecution,
+    verification: RuntimeRunVerification,
+    repair: RuntimeRunRepair,
+    goal_approval_granted: bool,
+}
+
+struct StepJournalInput<'a> {
+    template: &'a RunTemplate,
+    plan: &'a crate::runtime_compose::RuntimeRunPlan,
+    applied: &'a AppliedIntent,
+    execution: &'a RuntimeComposeExecution,
+    verification: &'a RuntimeRunVerification,
+    repair: &'a RuntimeRunRepair,
+    final_phase: RuntimeRunPhase,
+    final_reason: &'a str,
+}
+
+fn report_write_input(applied: &AppliedIntent) -> ReportWriteInput<'_> {
+    ReportWriteInput {
+        intent_id: &applied.intent_id,
+        outcome: applied.outcome,
+        policy_code: applied.policy_code.as_str(),
+        effect_count: applied.effect_count,
+    }
+}
+
+fn accepted_goal_applied(intent_id: &str) -> AppliedIntent {
+    AppliedIntent {
+        intent_id: intent_id.to_owned(),
+        kind: "goal",
+        outcome: DecisionOutcome::Accepted,
+        policy_code: PolicyCode::Allowed,
+        effect_count: 0,
+    }
 }
 
 pub struct CliRuntime {
@@ -61,7 +101,12 @@ impl CliRuntime {
     ) -> Result<Self, String> {
         let state_store = StateStore::from_app_config(app_config)?;
         let snapshot = state_store.load_snapshot()?;
-        let trace_store = TraceStore::from_workspace_root(compose_config.tool_workspace.clone())?;
+        let trace_store = TraceStore::from_workspace_root(
+            compose_config
+                .artifact_workspace
+                .clone()
+                .or_else(|| compose_config.tool_workspace.clone()),
+        )?;
         Ok(Self {
             state: snapshot.state,
             actor_id,
@@ -266,63 +311,47 @@ fn execute_intent(runtime: &mut CliRuntime, intent: &RunTemplate) -> Result<(), 
     let previous = runtime.runtime_snapshot();
     let run_id = runtime.next_run_id();
     let applied = runtime.apply_template(intent)?;
+    runtime.compose_state.prepare_execution_workspace(&run_id)?;
     let plan =
         runtime
             .compose_state
             .plan_template(intent, &run_id, &applied.intent_id, applied.outcome);
     let execution = runtime.persist_template_result(intent, &applied);
-    let mut verification = verify_run(intent, &applied, &execution, &runtime.state);
-    let repair = if verification.status == "failed" {
-        runtime.compose_state.repair_template(
-            intent,
-            &applied.intent_id,
-            applied.outcome,
-            &execution,
-        )
-    } else {
-        RuntimeRunRepair::skipped("verification_passed")
-    };
-    let execution = execution.with_repair(&repair);
-    if repair.attempted {
-        verification = verify_run(intent, &applied, &execution, &runtime.state);
-    }
+    let verification = verify_run(intent, &applied, &execution, &runtime.state);
+    let (execution, verification, repair) =
+        run_repair_loop(runtime, intent, &plan, &applied, execution, verification);
     let mut finalized = finalize_run(
         runtime,
-        intent,
-        &plan,
-        plan.clone(),
-        applied.clone(),
-        execution,
-        verification,
-        repair,
-        false,
+        FinalizeRunInput {
+            template: intent,
+            plan: plan.clone(),
+            applied: applied.clone(),
+            execution,
+            verification,
+            repair,
+            goal_approval_granted: false,
+        },
     );
     let mut report_result = runtime.compose_state.write_report(
         intent,
-        &applied.intent_id,
-        applied.outcome,
-        applied.policy_code.as_str(),
-        applied.effect_count,
+        &report_write_input(&applied),
         &finalized.execution,
         &finalized.record,
     );
-    if let (Some(goal_file), Ok(report_patch_artifacts)) = (intent.goal_file(), &report_result) {
-        if apply_goal_done_conditions(
+    if let (Some(goal_file), Ok(report_patch_artifacts)) = (intent.goal_file(), &report_result)
+        && apply_goal_done_conditions(
             goal_file,
             &finalized.execution,
             report_patch_artifacts,
             &mut finalized.record,
-        ) {
-            report_result = runtime.compose_state.write_report(
-                intent,
-                &applied.intent_id,
-                applied.outcome,
-                applied.policy_code.as_str(),
-                applied.effect_count,
-                &finalized.execution,
-                &finalized.record,
-            );
-        }
+        )
+    {
+        report_result = runtime.compose_state.write_report(
+            intent,
+            &report_write_input(&applied),
+            &finalized.execution,
+            &finalized.record,
+        );
     }
     let report_error = report_result.as_ref().err().cloned();
     if let Some(error) = report_error.as_deref() {
@@ -330,25 +359,30 @@ fn execute_intent(runtime: &mut CliRuntime, intent: &RunTemplate) -> Result<(), 
         finalized.record.outcome = RuntimeRunOutcome::Failed;
         finalized.record.reason = format!("report_write_failed:{error}");
     }
+    finalized.record.rollback = runtime.compose_state.write_rollback_metadata(
+        &applied.intent_id,
+        &finalized.execution,
+        &finalized.record,
+    )?;
 
     let mut patch_artifacts = finalized.execution.patch_artifacts.clone();
     if let Ok(report_patch_artifacts) = &report_result {
         patch_artifacts.extend(report_patch_artifacts.clone());
     }
-    if let Err(error) = runtime.trace_store.append_intent_event(
-        &runtime.actor_id,
-        &applied.intent_id,
-        applied.kind,
-        applied.outcome,
-        applied.policy_code.as_str(),
-        applied.effect_count,
-        &runtime.state,
-        &finalized.execution,
-        report_error.is_none(),
-        report_error.as_deref(),
-        &patch_artifacts,
-        &finalized.record,
-    ) {
+    if let Err(error) = runtime.trace_store.append_intent_event(TraceEventInput {
+        actor_id: &runtime.actor_id,
+        intent_id: &applied.intent_id,
+        kind: applied.kind,
+        outcome: applied.outcome,
+        policy_code: applied.policy_code.as_str(),
+        effect_count: applied.effect_count,
+        state: &runtime.state,
+        execution: &finalized.execution,
+        report_written: report_error.is_none(),
+        report_error: report_error.as_deref(),
+        patch_artifacts: &patch_artifacts,
+        run: &finalized.record,
+    }) {
         runtime.restore_snapshot(previous);
         return Err(format!("runtime trace error: {error}"));
     }
@@ -356,14 +390,17 @@ fn execute_intent(runtime: &mut CliRuntime, intent: &RunTemplate) -> Result<(), 
         runtime.restore_snapshot(previous);
         return Err(error);
     }
-    if let Err(error) = runtime
-        .compose_state
-        .remember_run_summary(&finalized.record, &applied.intent_id)
-    {
+    if let Err(error) = runtime.compose_state.remember_run_summary(
+        &finalized.record,
+        &finalized.execution,
+        &applied.intent_id,
+    ) {
         runtime.restore_snapshot(previous);
         return Err(format!("runtime memory recall error: {error}"));
     }
-    if let Some((stage, message)) = finalized.execution.first_failure() {
+    if let Some((stage, message)) = finalized.execution.first_failure()
+        && finalized.record.outcome != RuntimeRunOutcome::BudgetExhausted
+    {
         runtime.restore_snapshot(previous);
         return Err(format!(
             "runtime execution failed intent_id={} stage={} error={}",
@@ -396,6 +433,9 @@ fn execute_intent(runtime: &mut CliRuntime, intent: &RunTemplate) -> Result<(), 
 
 fn execute_resume(runtime: &mut CliRuntime, target: &str) -> Result<(), String> {
     let pending = pending_run_for_target(runtime, target)?.clone();
+    runtime
+        .compose_state
+        .prepare_execution_workspace(&pending.run_id)?;
     let goal = crate::goal_file::parse_goal_file(&pending.goal_file_path)?;
     let template = RunTemplate::GoalFile(crate::cli_command::GoalFileTemplate {
         path: pending.goal_file_path.clone(),
@@ -412,42 +452,31 @@ fn execute_resume(runtime: &mut CliRuntime, target: &str) -> Result<(), String> 
         &pending.intent_id,
         DecisionOutcome::Accepted,
     );
-    let verification = verify_run(
-        &template,
-        &AppliedIntent {
-            intent_id: pending.intent_id.clone(),
-            kind: "goal",
-            outcome: DecisionOutcome::Accepted,
-            policy_code: PolicyCode::Allowed,
-            effect_count: 0,
-        },
-        &execution,
-        &runtime.state,
-    );
-    let repair = RuntimeRunRepair::skipped("verification_passed");
-    let mut finalized = finalize_run(
+    let resume_applied = accepted_goal_applied(&pending.intent_id);
+    let verification = verify_run(&template, &resume_applied, &execution, &runtime.state);
+    let (execution, verification, repair) = run_repair_loop(
         runtime,
         &template,
         &plan,
-        plan.clone(),
-        AppliedIntent {
-            intent_id: pending.intent_id.clone(),
-            kind: "goal",
-            outcome: DecisionOutcome::Accepted,
-            policy_code: PolicyCode::Allowed,
-            effect_count: 0,
-        },
+        &resume_applied,
         execution,
         verification,
-        repair,
-        true,
+    );
+    let mut finalized = finalize_run(
+        runtime,
+        FinalizeRunInput {
+            template: &template,
+            plan: plan.clone(),
+            applied: resume_applied.clone(),
+            execution,
+            verification,
+            repair,
+            goal_approval_granted: true,
+        },
     );
     let mut patch_artifacts = runtime.compose_state.write_report(
         &template,
-        &pending.intent_id,
-        DecisionOutcome::Accepted,
-        PolicyCode::Allowed.as_str(),
-        0,
+        &report_write_input(&resume_applied),
         &finalized.execution,
         &finalized.record,
     )?;
@@ -459,28 +488,30 @@ fn execute_resume(runtime: &mut CliRuntime, target: &str) -> Result<(), String> 
     ) {
         patch_artifacts = runtime.compose_state.write_report(
             &template,
-            &pending.intent_id,
-            DecisionOutcome::Accepted,
-            PolicyCode::Allowed.as_str(),
-            0,
+            &report_write_input(&resume_applied),
             &finalized.execution,
             &finalized.record,
         )?;
     }
-    runtime.trace_store.append_intent_event(
-        &runtime.actor_id,
+    finalized.record.rollback = runtime.compose_state.write_rollback_metadata(
         &pending.intent_id,
-        "goal",
-        DecisionOutcome::Accepted,
-        PolicyCode::Allowed.as_str(),
-        0,
-        &runtime.state,
         &finalized.execution,
-        true,
-        None,
-        &patch_artifacts,
         &finalized.record,
     )?;
+    runtime.trace_store.append_intent_event(TraceEventInput {
+        actor_id: &runtime.actor_id,
+        intent_id: &pending.intent_id,
+        kind: "goal",
+        outcome: DecisionOutcome::Accepted,
+        policy_code: PolicyCode::Allowed.as_str(),
+        effect_count: 0,
+        state: &runtime.state,
+        execution: &finalized.execution,
+        report_written: true,
+        report_error: None,
+        patch_artifacts: &patch_artifacts,
+        run: &finalized.record,
+    })?;
     runtime.pending_run = None;
     runtime.persist_snapshot()?;
     println!(
@@ -529,33 +560,32 @@ fn execute_abort(runtime: &mut CliRuntime, target: &str) -> Result<(), String> {
         }],
         verification,
         repair,
+        rollback: None,
         phase: RuntimeRunPhase::Aborted,
         outcome: RuntimeRunOutcome::Aborted,
         reason: String::from("operator_abort"),
     };
+    let abort_applied = accepted_goal_applied(&pending.intent_id);
     let patch_artifacts = runtime.compose_state.write_report(
         &template,
-        &pending.intent_id,
-        DecisionOutcome::Accepted,
-        PolicyCode::Allowed.as_str(),
-        0,
+        &report_write_input(&abort_applied),
         &execution,
         &record,
     )?;
-    runtime.trace_store.append_intent_event(
-        &runtime.actor_id,
-        &pending.intent_id,
-        "goal",
-        DecisionOutcome::Accepted,
-        PolicyCode::Allowed.as_str(),
-        0,
-        &runtime.state,
-        &execution,
-        true,
-        None,
-        &patch_artifacts,
-        &record,
-    )?;
+    runtime.trace_store.append_intent_event(TraceEventInput {
+        actor_id: &runtime.actor_id,
+        intent_id: &pending.intent_id,
+        kind: "goal",
+        outcome: DecisionOutcome::Accepted,
+        policy_code: PolicyCode::Allowed.as_str(),
+        effect_count: 0,
+        state: &runtime.state,
+        execution: &execution,
+        report_written: true,
+        report_error: None,
+        patch_artifacts: &patch_artifacts,
+        run: &record,
+    })?;
     runtime.pending_run = None;
     runtime.persist_snapshot()?;
     println!(
@@ -566,6 +596,141 @@ fn execute_abort(runtime: &mut CliRuntime, target: &str) -> Result<(), String> {
         record.reason
     );
     Ok(())
+}
+
+fn run_repair_loop(
+    runtime: &CliRuntime,
+    intent: &RunTemplate,
+    plan: &crate::runtime_compose::RuntimeRunPlan,
+    applied: &AppliedIntent,
+    initial_execution: RuntimeComposeExecution,
+    initial_verification: RuntimeRunVerification,
+) -> (
+    RuntimeComposeExecution,
+    RuntimeRunVerification,
+    RuntimeRunRepair,
+) {
+    if initial_verification.status != "failed" {
+        return (
+            initial_execution,
+            initial_verification,
+            RuntimeRunRepair::skipped("verification_passed"),
+        );
+    }
+    if !matches!(
+        initial_execution.tool,
+        crate::runtime_compose::RuntimeComposeStep::Failed(_)
+    ) {
+        return (
+            initial_execution,
+            initial_verification,
+            RuntimeRunRepair::skipped("repair_not_applicable"),
+        );
+    }
+
+    let repair_budget = repair_budget(intent, plan);
+    if repair_budget == 0 {
+        return (
+            initial_execution,
+            RuntimeRunVerification {
+                status: "failed",
+                summary: String::from("repair_budget_exhausted:attempts=0/0"),
+                checks: initial_verification.checks.clone(),
+            },
+            RuntimeRunRepair {
+                attempted: false,
+                status: "budget_exhausted",
+                summary: String::from("repair_budget_exhausted:attempts=0/0"),
+                tool: crate::runtime_compose::RuntimeComposeStep::Skipped,
+                tool_outputs: Vec::new(),
+                patch_artifacts: Vec::new(),
+            },
+        );
+    }
+
+    let mut execution = initial_execution;
+    let mut verification = initial_verification;
+    let mut last_repair = RuntimeRunRepair::skipped("repair_not_attempted");
+
+    for attempt in 1..=repair_budget {
+        let repair = runtime.compose_state.repair_template(
+            intent,
+            &applied.intent_id,
+            applied.outcome,
+            &execution,
+        );
+        let next_execution = execution.with_repair(&repair);
+        let next_verification = verify_run(intent, applied, &next_execution, &runtime.state);
+
+        if next_verification.status == "passed" {
+            let status = if repair.attempted {
+                "repaired"
+            } else {
+                repair.status
+            };
+            let summary = if repair.attempted {
+                format!("repair_completed:attempts={attempt}/{repair_budget}")
+            } else {
+                format!("repair_not_needed_after_retry:attempts={attempt}/{repair_budget}")
+            };
+            return (
+                next_execution,
+                next_verification,
+                RuntimeRunRepair {
+                    attempted: repair.attempted,
+                    status,
+                    summary,
+                    tool: repair.tool,
+                    tool_outputs: repair.tool_outputs,
+                    patch_artifacts: repair.patch_artifacts,
+                },
+            );
+        }
+
+        execution = next_execution;
+        verification = next_verification;
+        last_repair = RuntimeRunRepair {
+            attempted: repair.attempted,
+            status: if attempt == repair_budget {
+                "budget_exhausted"
+            } else {
+                repair.status
+            },
+            summary: if attempt == repair_budget {
+                format!("repair_budget_exhausted:attempts={attempt}/{repair_budget}")
+            } else {
+                format!(
+                    "repair_retry_failed:attempts={attempt}/{repair_budget}:{}",
+                    repair.summary
+                )
+            },
+            tool: repair.tool,
+            tool_outputs: repair.tool_outputs,
+            patch_artifacts: repair.patch_artifacts,
+        };
+    }
+
+    let final_summary = last_repair.summary.clone();
+    (
+        execution,
+        RuntimeRunVerification {
+            status: "failed",
+            summary: final_summary,
+            checks: verification.checks,
+        },
+        last_repair,
+    )
+}
+
+fn repair_budget(intent: &RunTemplate, plan: &crate::runtime_compose::RuntimeRunPlan) -> usize {
+    match intent.goal_file() {
+        Some(goal_file) => goal_file
+            .goal
+            .budget
+            .max_steps
+            .saturating_sub(plan.planned_steps as u64) as usize,
+        None => 1,
+    }
 }
 
 fn pending_run_for_target<'a>(
@@ -738,13 +903,6 @@ fn intent_kind_name(kind: &IntentKind) -> &'static str {
     }
 }
 
-fn outcome_name(outcome: DecisionOutcome) -> &'static str {
-    match outcome {
-        DecisionOutcome::Accepted => "accepted",
-        DecisionOutcome::Rejected => "rejected",
-    }
-}
-
 fn verify_run(
     intent: &RunTemplate,
     applied: &AppliedIntent,
@@ -837,14 +995,13 @@ fn verify_legacy_run(
         intent,
         RunTemplate::LegacyIntent(LegacyIntentTemplate::Write { .. })
             | RunTemplate::LegacyIntent(LegacyIntentTemplate::Remove { .. })
-    ) {
-        if let Some(failure) = verify_mutation_contract(intent, execution, state, checks) {
-            return RuntimeRunVerification {
-                status: "failed",
-                summary: failure,
-                checks: checks.clone(),
-            };
-        }
+    ) && let Some(failure) = verify_mutation_contract(intent, execution, state, checks)
+    {
+        return RuntimeRunVerification {
+            status: "failed",
+            summary: failure,
+            checks: checks.clone(),
+        };
     }
 
     if let Some(failure) = verify_control_contract(intent, state, checks) {
@@ -884,7 +1041,7 @@ fn apply_goal_done_conditions(
         return false;
     }
 
-    let mut checks = record.verification.checks.clone();
+    let mut checks = std::mem::take(&mut record.verification.checks);
     let failure =
         goal_done_condition_failure(goal_file, execution, report_patch_artifacts, &mut checks);
     record.verification.checks = checks;
@@ -1000,23 +1157,22 @@ fn verify_control_contract(
     }
 }
 
-fn finalize_run(
-    runtime: &CliRuntime,
-    template: &RunTemplate,
-    plan_ref: &crate::runtime_compose::RuntimeRunPlan,
-    plan: crate::runtime_compose::RuntimeRunPlan,
-    applied: AppliedIntent,
-    execution: RuntimeComposeExecution,
-    verification: RuntimeRunVerification,
-    repair: RuntimeRunRepair,
-    goal_approval_granted: bool,
-) -> FinalizedRun {
+fn finalize_run(runtime: &CliRuntime, input: FinalizeRunInput<'_>) -> FinalizedRun {
+    let FinalizeRunInput {
+        template,
+        plan,
+        applied,
+        execution,
+        verification,
+        repair,
+        goal_approval_granted,
+    } = input;
     let compose = runtime.compose_state.health();
 
     let (phase, outcome, reason) = if let Some(goal_file) = template.goal_file() {
         finalize_goal_run(
             goal_file,
-            plan_ref,
+            &plan,
             &applied,
             &execution,
             &verification,
@@ -1027,16 +1183,16 @@ fn finalize_run(
         finalize_legacy_run(&applied, &execution, &verification, &compose)
     };
 
-    let step_journal = build_step_journal(
+    let step_journal = build_step_journal(StepJournalInput {
         template,
-        plan_ref,
-        &applied,
-        &execution,
-        &verification,
-        &repair,
-        phase,
-        &reason,
-    );
+        plan: &plan,
+        applied: &applied,
+        execution: &execution,
+        verification: &verification,
+        repair: &repair,
+        final_phase: phase,
+        final_reason: &reason,
+    });
 
     FinalizedRun {
         execution,
@@ -1045,6 +1201,7 @@ fn finalize_run(
             step_journal,
             verification,
             repair,
+            rollback: None,
             phase,
             outcome,
             reason,
@@ -1081,6 +1238,12 @@ fn finalize_goal_run(
                 String::from("verification_passed"),
             )
         }
+    } else if verification.summary.starts_with("repair_budget_exhausted") {
+        (
+            RuntimeRunPhase::Blocked,
+            RuntimeRunOutcome::BudgetExhausted,
+            verification.summary.clone(),
+        )
     } else if applied.outcome == DecisionOutcome::Rejected {
         blocked_policy_outcome(applied)
     } else if matches!(execution.first_failure(), Some(("provider", _)))
@@ -1108,6 +1271,12 @@ fn finalize_legacy_run(
 ) -> (RuntimeRunPhase, RuntimeRunOutcome, String) {
     if applied.outcome == DecisionOutcome::Rejected {
         blocked_policy_outcome(applied)
+    } else if verification.summary.starts_with("repair_budget_exhausted") {
+        (
+            RuntimeRunPhase::Blocked,
+            RuntimeRunOutcome::BudgetExhausted,
+            verification.summary.clone(),
+        )
     } else if verification.status == "passed" {
         (
             RuntimeRunPhase::Completed,
@@ -1154,20 +1323,21 @@ fn goal_requires_pre_execution_approval(goal: &axonrunner_core::RunGoal) -> bool
     )
 }
 
-fn build_step_journal(
-    template: &RunTemplate,
-    plan: &crate::runtime_compose::RuntimeRunPlan,
-    applied: &AppliedIntent,
-    execution: &RuntimeComposeExecution,
-    verification: &RuntimeRunVerification,
-    repair: &RuntimeRunRepair,
-    final_phase: RuntimeRunPhase,
-    final_reason: &str,
-) -> Vec<RuntimeRunStepRecord> {
+fn build_step_journal(input: StepJournalInput<'_>) -> Vec<RuntimeRunStepRecord> {
+    let StepJournalInput {
+        template,
+        plan,
+        applied,
+        execution,
+        verification,
+        repair,
+        final_phase,
+        final_reason,
+    } = input;
     let goal_file = match template {
         RunTemplate::GoalFile(goal_file) => goal_file,
         RunTemplate::LegacyIntent(_) => {
-            return build_legacy_step_journal(
+            return build_legacy_step_journal(StepJournalInput {
                 template,
                 plan,
                 applied,
@@ -1176,7 +1346,7 @@ fn build_step_journal(
                 repair,
                 final_phase,
                 final_reason,
-            );
+            });
         }
     };
 
@@ -1226,16 +1396,17 @@ fn goal_terminal_step_status(final_phase: RuntimeRunPhase) -> &'static str {
     }
 }
 
-fn build_legacy_step_journal(
-    template: &RunTemplate,
-    plan: &crate::runtime_compose::RuntimeRunPlan,
-    applied: &AppliedIntent,
-    execution: &RuntimeComposeExecution,
-    verification: &RuntimeRunVerification,
-    repair: &RuntimeRunRepair,
-    final_phase: RuntimeRunPhase,
-    final_reason: &str,
-) -> Vec<RuntimeRunStepRecord> {
+fn build_legacy_step_journal(input: StepJournalInput<'_>) -> Vec<RuntimeRunStepRecord> {
+    let StepJournalInput {
+        template,
+        plan,
+        applied,
+        execution,
+        verification,
+        repair,
+        final_phase,
+        final_reason,
+    } = input;
     let mut steps = Vec::new();
 
     steps.push(RuntimeRunStepRecord {

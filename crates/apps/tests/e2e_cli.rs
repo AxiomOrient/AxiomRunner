@@ -54,6 +54,8 @@ const SANITIZED_ENV_KEYS: &[&str] = &[
     "AXONRUNNER_RUNTIME_MEMORY_PATH",
     "AXONRUNNER_RUNTIME_STATE_PATH",
     "AXONRUNNER_RUNTIME_TOOL_WORKSPACE",
+    "AXONRUNNER_RUNTIME_ARTIFACT_WORKSPACE",
+    "AXONRUNNER_RUNTIME_GIT_WORKTREE_ISOLATION",
     "AXONRUNNER_RUNTIME_TOOL_LOG_PATH",
     "AXONRUNNER_EXPERIMENTAL_OPENAI",
     "OPENAI_API_KEY",
@@ -83,9 +85,15 @@ fn run_cli_internal(
     let explicit_tool_workspace = env.iter().find_map(|(key, value)| {
         (*key == "AXONRUNNER_RUNTIME_TOOL_WORKSPACE").then(|| PathBuf::from(*value))
     });
+    let explicit_artifact_workspace = env.iter().find_map(|(key, value)| {
+        (*key == "AXONRUNNER_RUNTIME_ARTIFACT_WORKSPACE").then(|| PathBuf::from(*value))
+    });
     let tool_workspace = explicit_tool_workspace
         .clone()
         .unwrap_or_else(|| canonical_home.join(".axonrunner").join("workspace"));
+    let artifact_workspace = explicit_artifact_workspace
+        .clone()
+        .unwrap_or_else(|| tool_workspace.clone());
 
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_axonrunner_apps"));
     cmd.env("HOME", &canonical_home).args(args);
@@ -102,7 +110,7 @@ fn run_cli_internal(
     {
         cmd.env(
             "AXONRUNNER_RUNTIME_TOOL_LOG_PATH",
-            tool_workspace.join("runtime.log"),
+            artifact_workspace.join("runtime.log"),
         );
     }
     for (key, value) in env {
@@ -159,6 +167,32 @@ fn fake_cli_script(label: &str, stdout: &str) -> PathBuf {
     path
 }
 
+fn run_checked_command(program: &str, args: &[&str], cwd: &Path) {
+    let output = Command::new(program)
+        .args(args)
+        .current_dir(cwd)
+        .output()
+        .expect("command should run");
+    assert!(
+        output.status.success(),
+        "command failed: {} {:?}\nstdout:\n{}\nstderr:\n{}",
+        program,
+        args,
+        stdout_of(&output),
+        stderr_of(&output)
+    );
+}
+
+fn init_git_repo(path: &Path) {
+    fs::create_dir_all(path).expect("repo directory should exist");
+    run_checked_command("git", &["init"], path);
+    run_checked_command("git", &["config", "user.email", "test@example.com"], path);
+    run_checked_command("git", &["config", "user.name", "AxonRunner Test"], path);
+    fs::write(path.join("README.md"), "fixture\n").expect("fixture file should exist");
+    run_checked_command("git", &["add", "README.md"], path);
+    run_checked_command("git", &["commit", "-m", "init"], path);
+}
+
 #[test]
 fn e2e_cli_batch_pipeline_flow() {
     let output = run_cli(&[
@@ -179,6 +213,184 @@ fn e2e_cli_batch_pipeline_flow() {
     assert!(stdout.contains("run intent_id=cli-1 phase=completed outcome=success"));
     assert!(stdout.contains("query intent_id=cli-2 key=alpha value=42"));
     assert!(stdout.contains("batch completed count=6"));
+}
+
+#[test]
+fn e2e_cli_can_separate_execution_and_artifact_workspaces() {
+    let workspace = unique_path("artifact-separation-workspace", "dir");
+    let artifact_workspace = unique_path("artifact-separation-artifacts", "dir");
+    let output = run_cli_with_env(
+        &["run", "write:alpha=42"],
+        &[
+            ("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace)),
+            (
+                "AXONRUNNER_RUNTIME_ARTIFACT_WORKSPACE",
+                path_str(&artifact_workspace),
+            ),
+        ],
+        "artifact-separation",
+    );
+    let stderr = stderr_of(&output);
+    let replay = run_cli_with_env(
+        &["replay", "latest"],
+        &[
+            ("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace)),
+            (
+                "AXONRUNNER_RUNTIME_ARTIFACT_WORKSPACE",
+                path_str(&artifact_workspace),
+            ),
+        ],
+        "artifact-separation-replay",
+    );
+
+    assert!(output.status.success(), "stderr:\n{stderr}");
+    assert!(replay.status.success(), "stderr:\n{}", stderr_of(&replay));
+    assert!(artifact_workspace.join("runtime.log").exists());
+    assert!(
+        artifact_workspace
+            .join(".axonrunner/trace/events.jsonl")
+            .exists()
+    );
+    assert!(
+        artifact_workspace
+            .join(".axonrunner/artifacts/cli-1.report.md")
+            .exists()
+    );
+    assert!(!workspace.join("runtime.log").exists());
+    assert!(!workspace.join(".axonrunner/trace/events.jsonl").exists());
+    assert!(
+        !workspace
+            .join(".axonrunner/artifacts/cli-1.report.md")
+            .exists()
+    );
+    assert!(stdout_of(&replay).contains("replay artifact_index count=1"));
+
+    let _ = fs::remove_dir_all(workspace);
+    let _ = fs::remove_dir_all(artifact_workspace);
+}
+
+#[test]
+fn e2e_cli_goal_run_can_use_isolated_git_worktree() {
+    let repo_root = unique_path("git-worktree-repo", "dir");
+    let artifact_workspace = unique_path("git-worktree-artifacts", "dir");
+    let goal_file = unique_path("git-worktree-goal", "json");
+    init_git_repo(&repo_root);
+    fs::write(
+        &goal_file,
+        r#"{
+  "summary": "Verify isolated workspace binding",
+  "workspace_root": "/workspace",
+  "constraints": [],
+  "done_conditions": [
+    { "label": "report", "evidence": "report artifact exists" }
+  ],
+  "verification_checks": [
+    { "label": "pwd", "detail": "pwd" }
+  ],
+  "budget": { "max_steps": 5, "max_minutes": 10, "max_tokens": 8000 },
+  "approval_mode": "never"
+}"#,
+    )
+    .expect("goal file should be written");
+
+    let run = run_cli_with_env(
+        &["run", path_str(&goal_file)],
+        &[
+            ("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&repo_root)),
+            (
+                "AXONRUNNER_RUNTIME_ARTIFACT_WORKSPACE",
+                path_str(&artifact_workspace),
+            ),
+            ("AXONRUNNER_RUNTIME_GIT_WORKTREE_ISOLATION", "1"),
+        ],
+        "git-worktree-run",
+    );
+    let stderr = stderr_of(&run);
+
+    assert!(run.status.success(), "stderr:\n{stderr}");
+    let commands_dir = artifact_workspace.join(".axonrunner/commands");
+    let command_artifact_path = fs::read_dir(&commands_dir)
+        .expect("command artifacts should exist")
+        .map(|entry| entry.expect("entry should exist").path())
+        .find(|path| path.extension().and_then(|ext| ext.to_str()) == Some("json"))
+        .expect("command artifact json should exist");
+    let command_artifact =
+        fs::read_to_string(&command_artifact_path).expect("command artifact should be readable");
+    let command_json: serde_json::Value =
+        serde_json::from_str(&command_artifact).expect("artifact should be valid json");
+    let pwd_stdout = command_json["stdout"]
+        .as_str()
+        .expect("stdout should be present")
+        .trim();
+
+    assert_ne!(pwd_stdout, repo_root.display().to_string());
+    assert!(pwd_stdout.contains("run-1"));
+    assert!(stdout_of(&run).contains("phase=completed outcome=success"));
+
+    let _ = fs::remove_dir_all(repo_root);
+    let _ = fs::remove_dir_all(artifact_workspace);
+    let _ = fs::remove_file(goal_file);
+}
+
+#[test]
+fn e2e_cli_failed_isolated_run_writes_rollback_metadata() {
+    let repo_root = unique_path("rollback-repo", "dir");
+    let artifact_workspace = unique_path("rollback-artifacts", "dir");
+    init_git_repo(&repo_root);
+    let canonical_repo_root = fs::canonicalize(&repo_root).unwrap_or(repo_root.clone());
+
+    let run = run_cli_with_env(
+        &["run", "write:alpha=42"],
+        &[
+            ("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&repo_root)),
+            (
+                "AXONRUNNER_RUNTIME_ARTIFACT_WORKSPACE",
+                path_str(&artifact_workspace),
+            ),
+            ("AXONRUNNER_RUNTIME_GIT_WORKTREE_ISOLATION", "1"),
+            ("AXONRUNNER_RUNTIME_PROVIDER", "codek"),
+            ("AXONRUNNER_CODEX_BIN", "/definitely-missing-codex-binary"),
+        ],
+        "rollback-run",
+    );
+    let replay = run_cli_with_env(
+        &["replay", "latest"],
+        &[
+            ("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&repo_root)),
+            (
+                "AXONRUNNER_RUNTIME_ARTIFACT_WORKSPACE",
+                path_str(&artifact_workspace),
+            ),
+            ("AXONRUNNER_RUNTIME_GIT_WORKTREE_ISOLATION", "1"),
+        ],
+        "rollback-replay",
+    );
+
+    assert_eq!(run.status.code(), Some(6));
+    assert!(replay.status.success(), "stderr:\n{}", stderr_of(&replay));
+    let rollback_path = artifact_workspace.join(".axonrunner/artifacts/cli-1.rollback.json");
+    assert!(rollback_path.exists(), "rollback metadata should exist");
+    let rollback_json: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(&rollback_path).expect("rollback metadata should be readable"),
+    )
+    .expect("rollback metadata should be valid json");
+    assert_eq!(rollback_json["schema"], "axonrunner.rollback.v1");
+    assert_eq!(
+        rollback_json["restore_path"],
+        canonical_repo_root.display().to_string()
+    );
+    assert!(
+        rollback_json["cleanup_path"]
+            .as_str()
+            .expect("cleanup path should exist")
+            .contains("run-1")
+    );
+    let replay_stdout = stdout_of(&replay);
+    assert!(replay_stdout.contains("replay rollback metadata="));
+    assert!(replay_stdout.contains(canonical_repo_root.display().to_string().as_str()));
+
+    let _ = fs::remove_dir_all(repo_root);
+    let _ = fs::remove_dir_all(artifact_workspace);
 }
 
 #[test]
@@ -239,6 +451,12 @@ fn e2e_cli_run_composes_provider_memory_and_tool() {
     assert_eq!(record.value, "42");
     assert!(recall.value.contains("run_id=run-1"));
     assert!(recall.value.contains("outcome=success"));
+    assert!(
+        recall
+            .value
+            .contains(".axonrunner/artifacts/cli-1.report.md")
+    );
+    assert!(recall.value.contains("changed_paths="));
 
     let log_path = workspace.join("runtime.log");
     let log = fs::read_to_string(&log_path).expect("tool log should exist");
@@ -323,7 +541,11 @@ fn e2e_cli_replay_latest_summarizes_recent_trace() {
     assert!(stdout.contains("before="));
     assert!(stdout.contains("after="));
     assert!(stdout.contains("replay patch after_excerpt="));
-    assert!(stdout.contains("replay summary failed_intents=0"));
+    assert!(
+        stdout.contains(
+            "replay summary failed_intents=0 false_success_intents=0 false_done_intents=0"
+        )
+    );
 
     let _ = fs::remove_dir_all(workspace);
 }
@@ -696,6 +918,57 @@ fn e2e_cli_goal_file_blocks_when_step_budget_is_already_exhausted() {
         stdout_of(&replay)
             .contains("replay run run_id=run-1 phase=blocked outcome=budget_exhausted")
     );
+
+    let _ = fs::remove_dir_all(workspace);
+    let _ = fs::remove_file(goal_file);
+}
+
+#[test]
+fn e2e_cli_goal_file_uses_bounded_repair_budget() {
+    let workspace = unique_path("goal-file-repair-budget-workspace", "dir");
+    let goal_file = unique_path("goal-file-repair-budget", "json");
+    fs::write(
+        &goal_file,
+        r#"{
+  "summary": "Repair budget exhaustion after verifier failure",
+  "workspace_root": "/workspace",
+  "constraints": [],
+  "done_conditions": [
+    { "label": "report", "evidence": "report artifact exists" }
+  ],
+  "verification_checks": [
+    { "label": "release gate", "detail": "cargo test -p axonrunner_apps --test release_security_gate" }
+  ],
+  "budget": { "max_steps": 6, "max_minutes": 10, "max_tokens": 8000 },
+  "approval_mode": "never"
+}"#,
+    )
+    .expect("goal file should be written");
+
+    let run = run_cli_with_env(
+        &["run", path_str(&goal_file)],
+        &[
+            ("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace)),
+            ("AXONRUNNER_RUNTIME_COMMAND_ALLOWLIST", "git"),
+        ],
+        "goal-file-repair-budget-run",
+    );
+    let replay = run_cli_with_env(
+        &["replay", "run-1"],
+        &[("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
+        "goal-file-repair-budget-replay",
+    );
+
+    assert!(run.status.success());
+    assert!(stdout_of(&run).contains("phase=blocked outcome=budget_exhausted"));
+    assert!(stdout_of(&run).contains("repair_budget_exhausted:attempts=1/1"));
+    assert!(replay.status.success());
+    assert!(
+        stdout_of(&replay)
+            .contains("replay run run_id=run-1 phase=blocked outcome=budget_exhausted")
+    );
+    assert!(stdout_of(&replay).contains("replay repair attempted=true status=budget_exhausted"));
+    assert!(stdout_of(&replay).contains("repair_budget_exhausted:attempts=1/1"));
 
     let _ = fs::remove_dir_all(workspace);
     let _ = fs::remove_file(goal_file);
@@ -1199,7 +1472,11 @@ fn e2e_cli_replay_specific_intent_reports_failure_boundary() {
     assert!(stdout.contains("replay patch target="));
     assert!(stdout.contains("before="));
     assert!(stdout.contains("after="));
-    assert!(stdout.contains("replay summary failed_intents=1"));
+    assert!(
+        stdout.contains(
+            "replay summary failed_intents=1 false_success_intents=1 false_done_intents=0"
+        )
+    );
 
     let _ = fs::remove_dir_all(workspace);
 }
@@ -1425,8 +1702,88 @@ fn golden_replay_legacy_text_contract_is_stable() {
             String::from(
                 "replay artifact_index count=1 latest_report=.axonrunner/artifacts/cli-legacy.report.md",
             ),
-            String::from("replay summary failed_intents=0"),
+            String::from(
+                "replay summary failed_intents=0 false_success_intents=0 false_done_intents=0"
+            ),
         ]
+    );
+
+    let _ = fs::remove_dir_all(workspace);
+}
+
+#[test]
+fn e2e_cli_replay_counts_false_done_runs() {
+    let workspace = unique_path("replay-false-done-workspace", "dir");
+    fs::create_dir_all(workspace.join(".axonrunner/trace")).expect("trace dir should exist");
+    let trace = serde_json::json!({
+        "schema": "axonrunner.trace.intent.v1",
+        "timestamp_ms": 1_u64,
+        "actor_id": "system",
+        "intent_id": "cli-false-done",
+        "kind": "goal",
+        "outcome": "accepted",
+        "policy_code": "allowed",
+        "effect_count": 0,
+        "revision": 1,
+        "mode": "active",
+        "provider": "skipped",
+        "memory": "skipped",
+        "tool": "applied",
+        "tool_outputs": ["verifier=workspace"],
+        "first_failure": serde_json::Value::Null,
+        "verification": {
+            "status": "failed",
+            "summary": "done_condition_missing_report_artifact:report"
+        },
+        "patch_artifacts": [],
+        "run": {
+            "run_id": "run-false-done",
+            "step_ids": ["run-false-done/step-1-planning"],
+            "provider_cwd": "/tmp/workspace",
+            "phase": "failed",
+            "outcome": "failed",
+            "reason": "done_condition_missing_report_artifact:report",
+            "plan_summary": "intent_id=cli-false-done goal",
+            "planned_steps": 4,
+            "repair": {
+                "attempted": false,
+                "status": "skipped",
+                "summary": "verification_passed"
+            }
+        },
+        "artifacts": {
+            "plan": ".axonrunner/artifacts/cli-false-done.plan.md",
+            "apply": ".axonrunner/artifacts/cli-false-done.apply.md",
+            "verify": ".axonrunner/artifacts/cli-false-done.verify.md",
+            "report": ".axonrunner/artifacts/cli-false-done.report.md"
+        },
+        "report_written": true,
+        "report_error": serde_json::Value::Null
+    });
+    fs::write(
+        workspace.join(".axonrunner/trace/events.jsonl"),
+        format!(
+            "{}\n",
+            serde_json::to_string(&trace).expect("trace should serialize")
+        ),
+    )
+    .expect("trace log should be written");
+
+    let replay = run_cli_with_env(
+        &["replay", "latest"],
+        &[("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
+        "replay-false-done-read",
+    );
+    let stdout = stdout_of(&replay);
+
+    assert!(replay.status.success(), "stderr:\n{}", stderr_of(&replay));
+    assert!(stdout.contains(
+        "replay verification status=failed summary=done_condition_missing_report_artifact:report"
+    ));
+    assert!(
+        stdout.contains(
+            "replay summary failed_intents=0 false_success_intents=1 false_done_intents=1"
+        )
     );
 
     let _ = fs::remove_dir_all(workspace);
