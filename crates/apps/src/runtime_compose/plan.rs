@@ -71,8 +71,7 @@ pub fn build_runtime_run_plan(
     run_id: &str,
     intent_id: &str,
 ) -> RuntimeRunPlan {
-    let RunTemplate::GoalFile(goal_file) = template;
-    build_goal_runtime_run_plan(goal_file, run_id, intent_id)
+    build_goal_runtime_run_plan(template, run_id, intent_id)
 }
 
 fn build_goal_runtime_run_plan(
@@ -192,9 +191,8 @@ pub(super) fn build_runtime_compose_plan(
         };
     }
 
-    let RunTemplate::GoalFile(goal_file) = template;
     RuntimeComposePlan {
-        workflow_pack: Some(goal_workflow_pack(goal_file)),
+        workflow_pack: Some(goal_workflow_pack(template)),
         provider: None,
         memory: MemoryPlan::None,
         tool: None,
@@ -489,7 +487,7 @@ fn plan_step(
 #[cfg(test)]
 mod tests {
     use super::{ToolPlan, build_runtime_compose_plan, build_runtime_run_plan, goal_verifier_tool_plan};
-    use crate::cli_command::RunTemplate;
+    use crate::cli_command::GoalFileTemplate;
     use axonrunner_adapters::{RunCommandProfile, WorkflowPackVerifierStrength};
     use axonrunner_core::DecisionOutcome;
 
@@ -510,11 +508,11 @@ mod tests {
             budget: axonrunner_core::RunBudget::bounded(5, 10, 8000),
             approval_mode: axonrunner_core::RunApprovalMode::OnRisk,
         };
-        let template = RunTemplate::GoalFile(crate::cli_command::GoalFileTemplate {
+        let template = GoalFileTemplate {
             path: String::from("GOAL.json"),
             goal,
             workflow_pack: None,
-        });
+        };
 
         let plan = build_runtime_compose_plan(
             &template,
@@ -557,11 +555,11 @@ mod tests {
             budget: axonrunner_core::RunBudget::bounded(5, 10, 8000),
             approval_mode: axonrunner_core::RunApprovalMode::Never,
         };
-        let template = RunTemplate::GoalFile(crate::cli_command::GoalFileTemplate {
+        let template = GoalFileTemplate {
             path: String::from("GOAL.json"),
             goal,
             workflow_pack: None,
-        });
+        };
 
         let plan = build_runtime_compose_plan(
             &template,
@@ -602,11 +600,11 @@ mod tests {
             budget: axonrunner_core::RunBudget::bounded(5, 10, 8000),
             approval_mode: axonrunner_core::RunApprovalMode::Never,
         };
-        let template = RunTemplate::GoalFile(crate::cli_command::GoalFileTemplate {
+        let template = GoalFileTemplate {
             path: String::from("GOAL.json"),
             goal,
             workflow_pack: None,
-        });
+        };
 
         let plan = build_runtime_compose_plan(
             &template,
@@ -657,11 +655,11 @@ mod tests {
             budget: axonrunner_core::RunBudget::bounded(8, 10, 8000),
             approval_mode: axonrunner_core::RunApprovalMode::Never,
         };
-        let template = RunTemplate::GoalFile(crate::cli_command::GoalFileTemplate {
+        let template = GoalFileTemplate {
             path: String::from("GOAL.json"),
             goal,
             workflow_pack: None,
-        });
+        };
 
         let plan = build_runtime_compose_plan(&template, DecisionOutcome::Accepted);
 
@@ -708,11 +706,11 @@ mod tests {
             budget: axonrunner_core::RunBudget::bounded(8, 10, 8000),
             approval_mode: axonrunner_core::RunApprovalMode::Never,
         };
-        let template = RunTemplate::GoalFile(crate::cli_command::GoalFileTemplate {
+        let template = GoalFileTemplate {
             path: String::from("GOAL.json"),
             goal,
             workflow_pack: None,
-        });
+        };
 
         let plan = build_runtime_run_plan(&template, "run-1", "cli-1");
 
@@ -749,11 +747,11 @@ mod tests {
             budget: axonrunner_core::RunBudget::bounded(20, 10, 8000),
             approval_mode: axonrunner_core::RunApprovalMode::Never,
         };
-        let template = RunTemplate::GoalFile(crate::cli_command::GoalFileTemplate {
+        let template = GoalFileTemplate {
             path: String::from("GOAL.json"),
             goal,
             workflow_pack: None,
-        });
+        };
 
         let plan = build_runtime_run_plan(&template, "run-2", "cli-2");
 

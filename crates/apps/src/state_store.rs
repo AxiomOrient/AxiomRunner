@@ -1,14 +1,14 @@
 use crate::config_loader::AppConfig;
+use crate::display::mode_name;
 use crate::env_util::read_env_trimmed;
 use axonrunner_core::{AgentState, DecisionOutcome, ExecutionMode, PolicyCode};
-use std::collections::BTreeMap;
 use std::fs;
 use std::io::ErrorKind;
 use std::path::PathBuf;
 
 pub const ENV_RUNTIME_STATE_PATH: &str = "AXONRUNNER_RUNTIME_STATE_PATH";
 
-const FORMAT_VERSION: &str = "axonrunner-state-v1";
+const FORMAT_VERSION: &str = "axonrunner-state-v2";
 const NONE_SENTINEL: &str = "-";
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -159,14 +159,12 @@ fn serialize_snapshot(snapshot: &RuntimeStateSnapshot) -> String {
         ),
         format!(
             "last_decision={}",
-            decision_name(snapshot.state.last_decision)
+            snapshot.state.last_decision.map(|d| d.as_str()).unwrap_or(NONE_SENTINEL)
         ),
         format!(
             "last_policy_code={}",
-            policy_code_name(snapshot.state.last_policy_code)
+            snapshot.state.last_policy_code.map(|c| c.as_str()).unwrap_or(NONE_SENTINEL)
         ),
-        format!("denied_count={}", snapshot.state.denied_count),
-        format!("audit_count={}", snapshot.state.audit_count),
     ];
 
     if let Some(pending_run) = &snapshot.pending_run {
@@ -200,14 +198,6 @@ fn serialize_snapshot(snapshot: &RuntimeStateSnapshot) -> String {
         ));
     }
 
-    for (key, value) in &snapshot.state.facts {
-        lines.push(format!(
-            "fact.{}={}",
-            hex_encode(key.as_bytes()),
-            hex_encode(value.as_bytes())
-        ));
-    }
-
     lines.push(String::new());
     lines.join("\n")
 }
@@ -215,7 +205,6 @@ fn serialize_snapshot(snapshot: &RuntimeStateSnapshot) -> String {
 fn parse_snapshot(raw: &str) -> Result<RuntimeStateSnapshot, String> {
     let mut snapshot = RuntimeStateSnapshot::default();
     let mut saw_version = false;
-    let mut facts = BTreeMap::new();
     let mut pending_run = PendingRunSnapshot {
         run_id: String::new(),
         intent_id: String::new(),
@@ -236,15 +225,6 @@ fn parse_snapshot(raw: &str) -> Result<RuntimeStateSnapshot, String> {
         let (key, value) = line
             .split_once('=')
             .ok_or_else(|| format!("invalid state snapshot line {}: '{}'", index + 1, raw_line))?;
-
-        if let Some(encoded_key) = key.strip_prefix("fact.") {
-            let key = decode_hex_utf8(encoded_key)
-                .ok_or_else(|| format!("invalid fact key encoding on line {}", index + 1))?;
-            let value = decode_hex_utf8(value)
-                .ok_or_else(|| format!("invalid fact value encoding on line {}", index + 1))?;
-            facts.insert(key, value);
-            continue;
-        }
 
         if let Some(pending_key) = key.strip_prefix("pending_run.") {
             let decoded = decode_hex_utf8(value).ok_or_else(|| {
@@ -294,8 +274,6 @@ fn parse_snapshot(raw: &str) -> Result<RuntimeStateSnapshot, String> {
             "last_policy_code" => {
                 snapshot.state.last_policy_code = parse_policy_code(value, index + 1)?
             }
-            "denied_count" => snapshot.state.denied_count = parse_u64(value, key, index + 1)?,
-            "audit_count" => snapshot.state.audit_count = parse_u64(value, key, index + 1)?,
             _ => {
                 return Err(format!(
                     "unknown state snapshot key '{}' on line {}",
@@ -310,12 +288,21 @@ fn parse_snapshot(raw: &str) -> Result<RuntimeStateSnapshot, String> {
         return Err(String::from("state snapshot is missing version header"));
     }
 
-    snapshot.state.facts = facts;
     if saw_pending_run {
-        if pending_run.approval_state.is_empty() || pending_run.verifier_state.is_empty() {
-            return Err(String::from(
-                "pending run snapshot is missing approval_state or verifier_state",
-            ));
+        for (field, empty) in [
+            ("run_id", pending_run.run_id.is_empty()),
+            ("intent_id", pending_run.intent_id.is_empty()),
+            ("goal_file_path", pending_run.goal_file_path.is_empty()),
+            ("phase", pending_run.phase.is_empty()),
+            ("reason", pending_run.reason.is_empty()),
+            ("approval_state", pending_run.approval_state.is_empty()),
+            ("verifier_state", pending_run.verifier_state.is_empty()),
+        ] {
+            if empty {
+                return Err(format!(
+                    "pending run snapshot missing required field '{field}' on load"
+                ));
+            }
         }
         snapshot.pending_run = Some(pending_run);
     }
@@ -330,8 +317,6 @@ fn parse_u64(raw: &str, field: &str, line: usize) -> Result<u64, String> {
 fn parse_mode(raw: &str, line: usize) -> Result<ExecutionMode, String> {
     match raw {
         "active" => Ok(ExecutionMode::Active),
-        "read_only" => Ok(ExecutionMode::ReadOnly),
-        "halted" => Ok(ExecutionMode::Halted),
         _ => Err(format!("invalid mode '{raw}' on line {line}")),
     }
 }
@@ -350,36 +335,10 @@ fn parse_policy_code(raw: &str, line: usize) -> Result<Option<PolicyCode>, Strin
         NONE_SENTINEL => return Ok(None),
         "allowed" => PolicyCode::Allowed,
         "actor_missing" => PolicyCode::ActorMissing,
-        "runtime_halted" => PolicyCode::RuntimeHalted,
-        "readonly_mutation" => PolicyCode::ReadOnlyMutation,
-        "unauthorized_control" => PolicyCode::UnauthorizedControl,
         "payload_too_large" => PolicyCode::PayloadTooLarge,
         _ => return Err(format!("invalid policy code '{raw}' on line {line}")),
     };
     Ok(Some(code))
-}
-
-fn mode_name(mode: ExecutionMode) -> &'static str {
-    match mode {
-        ExecutionMode::Active => "active",
-        ExecutionMode::ReadOnly => "read_only",
-        ExecutionMode::Halted => "halted",
-    }
-}
-
-fn decision_name(decision: Option<DecisionOutcome>) -> &'static str {
-    match decision {
-        Some(DecisionOutcome::Accepted) => "accepted",
-        Some(DecisionOutcome::Rejected) => "rejected",
-        None => NONE_SENTINEL,
-    }
-}
-
-fn policy_code_name(code: Option<PolicyCode>) -> &'static str {
-    match code {
-        Some(code) => code.as_str(),
-        None => NONE_SENTINEL,
-    }
 }
 
 fn encode_optional(value: Option<&str>) -> String {
@@ -404,7 +363,12 @@ fn decode_hex_utf8(raw: &str) -> Option<String> {
 }
 
 fn hex_encode(bytes: &[u8]) -> String {
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+    use std::fmt::Write;
+    let mut s = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        write!(s, "{byte:02x}").expect("writing to String is infallible");
+    }
+    s
 }
 
 fn hex_decode(hex: &str) -> Option<Vec<u8>> {
@@ -430,16 +394,11 @@ mod tests {
         let snapshot = RuntimeStateSnapshot {
             state: AgentState {
                 revision: 12,
-                mode: ExecutionMode::ReadOnly,
-                facts: [("alpha".to_owned(), "42".to_owned())]
-                    .into_iter()
-                    .collect(),
+                mode: ExecutionMode::Active,
                 last_intent_id: Some(String::from("cli-3")),
                 last_actor_id: Some(String::from("system")),
                 last_decision: Some(DecisionOutcome::Accepted),
                 last_policy_code: Some(PolicyCode::Allowed),
-                denied_count: 1,
-                audit_count: 4,
             },
             next_intent_seq: 3,
             next_run_seq: 3,
@@ -458,7 +417,7 @@ mod tests {
         let decoded = parse_snapshot(&encoded).expect("snapshot should parse");
 
         assert_eq!(decoded, snapshot);
-        assert!(encoded.contains("mode=read_only"));
+        assert!(encoded.contains("mode=active"));
     }
 
     fn unique_snapshot_path(label: &str) -> PathBuf {

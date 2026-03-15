@@ -152,8 +152,7 @@ pub(super) fn run_repair_loop(
 }
 
 fn repair_budget(intent: &RunTemplate, plan: &crate::runtime_compose::RuntimeRunPlan) -> usize {
-    let RunTemplate::GoalFile(goal_file) = intent;
-    goal_file
+    intent
         .goal
         .budget
         .max_steps
@@ -164,7 +163,7 @@ pub(super) fn verify_run(
     intent: &RunTemplate,
     execution: &RuntimeComposeExecution,
 ) -> RuntimeRunVerification {
-    verify_goal_run(intent.goal_file().expect("goal template"), execution)
+    verify_goal_run(intent, execution)
 }
 
 fn verify_goal_run(
@@ -241,7 +240,7 @@ fn verify_goal_run(
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
 struct GoalVerifierEvidence {
     label: String,
     strength: String,
@@ -254,17 +253,7 @@ struct GoalVerifierEvidence {
 fn parse_goal_verifier_evidence(tool_outputs: &[String]) -> Vec<GoalVerifierEvidence> {
     tool_outputs
         .iter()
-        .filter_map(|output| {
-            let value: serde_json::Value = serde_json::from_str(output).ok()?;
-            Some(GoalVerifierEvidence {
-                label: value.get("label")?.as_str()?.to_owned(),
-                strength: value.get("strength")?.as_str()?.to_owned(),
-                exit_code: value.get("exit_code")?.as_i64()?,
-                command: value.get("command")?.as_str()?.to_owned(),
-                artifact_path: value.get("artifact_path")?.as_str()?.to_owned(),
-                expectation: value.get("expectation")?.as_str()?.to_owned(),
-            })
-        })
+        .filter_map(|output| serde_json::from_str(output).ok())
         .collect()
 }
 
@@ -276,14 +265,15 @@ fn classify_goal_verifier_strength(
         ("unresolved", "verification_unresolved"),
         ("weak", "verification_weak"),
     ] {
-        let labels = evidence
+        let mut matching = evidence
             .iter()
             .filter(|entry| entry.strength == strength)
-            .map(|entry| entry.label.clone())
-            .collect::<Vec<_>>();
-        if !labels.is_empty() {
-            return Some((status, format!("{status}:{}", labels.join(","))));
+            .peekable();
+        if matching.peek().is_none() {
+            continue;
         }
+        let labels = matching.map(|entry| entry.label.as_str()).collect::<Vec<_>>();
+        return Some((status, format!("{status}:{}", labels.join(","))));
     }
     None
 }
@@ -388,7 +378,7 @@ pub(super) fn finalize_run(
     } = input;
 
     let (phase, outcome, reason) = finalize_goal_run(
-        template.goal_file().expect("goal template"),
+        template,
         &plan,
         &applied,
         &execution,
@@ -486,19 +476,11 @@ fn finalize_goal_run(
 }
 
 fn blocked_policy_outcome(applied: &AppliedIntent) -> (RuntimeRunPhase, RuntimeRunOutcome, String) {
-    if applied.policy_code == PolicyCode::UnauthorizedControl {
-        (
-            RuntimeRunPhase::WaitingApproval,
-            RuntimeRunOutcome::ApprovalRequired,
-            format!("policy={}", applied.policy_code.as_str()),
-        )
-    } else {
-        (
-            RuntimeRunPhase::Blocked,
-            RuntimeRunOutcome::Blocked,
-            format!("policy={}", applied.policy_code.as_str()),
-        )
-    }
+    (
+        RuntimeRunPhase::Blocked,
+        RuntimeRunOutcome::Blocked,
+        format!("policy={}", applied.policy_code.as_str()),
+    )
 }
 
 fn goal_requires_pre_execution_approval(goal: &axonrunner_core::RunGoal) -> bool {
@@ -543,8 +525,7 @@ pub(super) fn apply_goal_elapsed_budget(
     template: &RunTemplate,
     record: RuntimeRunRecord,
 ) -> RuntimeRunRecord {
-    let goal_file = template.goal_file().expect("goal template");
-    let limit_ms = goal_file.goal.budget.max_minutes.saturating_mul(60_000);
+    let limit_ms = template.goal.budget.max_minutes.saturating_mul(60_000);
     if record.elapsed_ms > limit_ms
         && !matches!(
             record.outcome,
@@ -577,7 +558,11 @@ fn build_step_journal(input: StepJournalInput<'_>) -> Vec<RuntimeRunStepRecord> 
         final_phase,
         final_reason,
     } = input;
-    let goal_file = template.goal_file().expect("goal template");
+    debug_assert!(
+        plan.steps.len() >= 3,
+        "goal plan must have ≥3 steps, got {}",
+        plan.steps.len()
+    );
 
     vec![
         RuntimeRunStepRecord {
@@ -585,7 +570,7 @@ fn build_step_journal(input: StepJournalInput<'_>) -> Vec<RuntimeRunStepRecord> 
             label: plan.steps[0].label.clone(),
             phase: plan.steps[0].phase.to_owned(),
             status: String::from("completed"),
-            evidence: format!("goal_file={}", goal_file.path),
+            evidence: format!("goal_file={}", template.path),
             failure: None,
         },
         RuntimeRunStepRecord {

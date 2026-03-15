@@ -98,12 +98,17 @@ impl CliRuntime {
     }
 
     fn apply_template(&mut self, template: &RunTemplate) -> Result<AppliedIntent, String> {
-        let RunTemplate::GoalFile(goal_file) = template;
-        goal_file
+        template
             .goal
             .validate()
             .map_err(|error| format!("goal file validation failed: {error:?}"))?;
         let intent_id = self.next_intent_id();
+        self.state = self.state.record_intent(
+            intent_id.clone(),
+            self.actor_id.clone(),
+            DecisionOutcome::Accepted,
+            PolicyCode::Allowed,
+        );
         Ok(AppliedIntent {
             intent_id,
             kind: "goal",
@@ -149,6 +154,11 @@ impl CliRuntime {
     }
 
     fn persist_snapshot(&self) -> Result<(), String> {
+        debug_assert!(
+            self.state.invariants_hold(),
+            "AgentState invariant violated: revision={}",
+            self.state.revision
+        );
         self.state_store
             .save_snapshot(&self.runtime_snapshot())
             .map_err(|error| format!("runtime state persistence failed: {error}"))
@@ -218,29 +228,28 @@ fn execute_intent(runtime: &mut CliRuntime, intent: &RunTemplate) -> Result<(), 
         runtime
             .compose_state
             .plan_template(intent, &run_id, &applied.intent_id);
-    let pre_execution_guard = intent.goal_file().and_then(|goal_file| {
-        lifecycle::goal_pre_execution_guard(goal_file, &plan, runtime.compose_state.max_tokens()).map(
+    let pre_execution_guard =
+        lifecycle::goal_pre_execution_guard(intent, &plan, runtime.compose_state.max_tokens()).map(
             |summary| {
-            (
-                runtime.compose_state.idle_execution(),
-                RuntimeRunVerification {
-                    status: "skipped",
-                    summary,
-                    checks: vec![
-                        format!("goal_file={}", goal_file.path),
-                        format!("workspace_root={}", goal_file.goal.workspace_root),
-                        format!("done_conditions={}", goal_file.goal.done_conditions.len()),
-                        format!(
-                            "verification_checks={}",
-                            goal_file.goal.verification_checks.len()
-                        ),
-                    ],
-                },
-                RuntimeRunRepair::skipped("pre_execution_guard"),
-            )
-        },
-        )
-    });
+                (
+                    runtime.compose_state.idle_execution(),
+                    RuntimeRunVerification {
+                        status: "skipped",
+                        summary,
+                        checks: vec![
+                            format!("goal_file={}", intent.path),
+                            format!("workspace_root={}", intent.goal.workspace_root),
+                            format!("done_conditions={}", intent.goal.done_conditions.len()),
+                            format!(
+                                "verification_checks={}",
+                                intent.goal.verification_checks.len()
+                            ),
+                        ],
+                    },
+                    RuntimeRunRepair::skipped("pre_execution_guard"),
+                )
+            },
+        );
     let (execution, verification, repair, checkpoint) = if let Some(guard) = pre_execution_guard {
         (guard.0, guard.1, guard.2, None)
     } else {
@@ -276,9 +285,9 @@ fn execute_intent(runtime: &mut CliRuntime, intent: &RunTemplate) -> Result<(), 
         &finalized.execution,
         &finalized.record,
     );
-    if let (Some(goal_file), Ok(report_patch_artifacts)) = (intent.goal_file(), &report_result) {
+    if let Ok(report_patch_artifacts) = &report_result {
         let (updated_record, conditions_applied) = lifecycle::apply_goal_done_conditions(
-            goal_file,
+            intent,
             &finalized.execution,
             report_patch_artifacts,
             finalized.record,
@@ -323,7 +332,7 @@ fn execute_intent(runtime: &mut CliRuntime, intent: &RunTemplate) -> Result<(), 
         kind: applied.kind,
         outcome: applied.outcome,
         policy_code: applied.policy_code.as_str(),
-        effect_count: applied.effect_count,
+        effect_count: patch_artifacts.len(),
         state: &runtime.state,
         execution: &finalized.execution,
         report_written: report_error.is_none(),
@@ -424,7 +433,7 @@ fn execute_resume(runtime: &mut CliRuntime, target: &str) -> Result<(), String> 
         &finalized.record,
     )?;
     let (updated_record, conditions_applied) = lifecycle::apply_goal_done_conditions(
-        template.goal_file().expect("resume template is goal"),
+        &template,
         &finalized.execution,
         &patch_artifacts,
         finalized.record,
@@ -457,7 +466,7 @@ fn execute_resume(runtime: &mut CliRuntime, target: &str) -> Result<(), String> 
         kind: "goal",
         outcome: DecisionOutcome::Accepted,
         policy_code: PolicyCode::Allowed.as_str(),
-        effect_count: 0,
+        effect_count: patch_artifacts.len(),
         state: &runtime.state,
         execution: &finalized.execution,
         report_written: true,
@@ -525,7 +534,7 @@ fn execute_abort(runtime: &mut CliRuntime, target: &str) -> Result<(), String> {
         kind: "goal",
         outcome: DecisionOutcome::Accepted,
         policy_code: PolicyCode::Allowed.as_str(),
-        effect_count: 0,
+        effect_count: patch_artifacts.len(),
         state: &runtime.state,
         execution: &execution,
         report_written: true,
@@ -584,11 +593,10 @@ fn pending_run_snapshot(
     if !matches!(record.outcome, RuntimeRunOutcome::ApprovalRequired) {
         return None;
     }
-    let goal_file = intent.goal_file()?;
     Some(PendingRunSnapshot {
         run_id: record.plan.run_id.clone(),
         intent_id: applied.intent_id.clone(),
-        goal_file_path: goal_file.path.clone(),
+        goal_file_path: intent.path.clone(),
         phase: run_phase_name(record.phase).to_owned(),
         reason: record.reason.clone(),
         approval_state: String::from("required"),
@@ -597,9 +605,7 @@ fn pending_run_snapshot(
 }
 
 fn load_pending_goal_template(goal_file_path: &str) -> Result<RunTemplate, String> {
-    Ok(RunTemplate::GoalFile(
-        crate::goal_file::parse_goal_file_template(goal_file_path)?,
-    ))
+    crate::goal_file::parse_goal_file_template(goal_file_path)
 }
 
 fn rewrite_report_for_rollback(
@@ -657,9 +663,12 @@ fn print_status(runtime: &CliRuntime, target: Option<&str>) {
         state: StateStatusInput {
             revision: runtime.state.revision,
             mode: runtime.state.mode,
-            facts: runtime.state.facts.len(),
-            denied: runtime.state.denied_count,
-            audit: runtime.state.audit_count,
+            last_intent_id: runtime.state.last_intent_id.clone(),
+            last_decision: runtime.state.last_decision.map(|value| value.as_str().to_owned()),
+            last_policy_code: runtime
+                .state
+                .last_policy_code
+                .map(|value| value.as_str().to_owned()),
         },
         runtime: RuntimeStatusInput {
             provider_id: compose.provider_id,
@@ -732,7 +741,7 @@ mod tests {
     use axonrunner_core::{DoneCondition, RunApprovalMode, RunBudget, RunGoal, VerificationCheck};
 
     fn sample_goal_template(minutes: u64) -> RunTemplate {
-        RunTemplate::GoalFile(crate::cli_command::GoalFileTemplate {
+        crate::cli_command::GoalFileTemplate {
             path: String::from("/tmp/goal.json"),
             goal: RunGoal {
                 summary: String::from("goal"),
@@ -750,7 +759,7 @@ mod tests {
                 approval_mode: RunApprovalMode::Never,
             },
             workflow_pack: None,
-        })
+        }
     }
 
     #[test]

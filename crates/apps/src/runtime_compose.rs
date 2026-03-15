@@ -1246,8 +1246,7 @@ fn probe_provider_health(provider: Arc<dyn ProviderAdapter>) -> RuntimeComposeCo
     }
 }
 
-fn template_kind(template: &RunTemplate) -> &'static str {
-    let RunTemplate::GoalFile(_) = template;
+fn template_kind(_template: &RunTemplate) -> &'static str {
     "goal"
 }
 
@@ -1355,7 +1354,7 @@ mod tests {
         RuntimeComposeConfig, RuntimeComposeExecution, RuntimeComposeState, RuntimeComposeStep,
         build_tool_adapter, run_outcome_name, run_phase_name,
     };
-    use crate::cli_command::{GoalFileTemplate, RunTemplate};
+    use crate::cli_command::GoalFileTemplate;
     use crate::config_loader::AppConfig;
     use axonrunner_adapters::{ToolAdapter, ToolRequest};
     use axonrunner_core::{DecisionOutcome, DoneCondition, RunApprovalMode, RunBudget, RunGoal, VerificationCheck};
@@ -1373,8 +1372,8 @@ mod tests {
         ))
     }
 
-    fn sample_goal_template() -> RunTemplate {
-        RunTemplate::GoalFile(GoalFileTemplate {
+    fn sample_goal_template() -> GoalFileTemplate {
+        GoalFileTemplate {
             path: String::from("GOAL.json"),
             goal: RunGoal {
                 summary: String::from("goal"),
@@ -1392,7 +1391,7 @@ mod tests {
                 approval_mode: RunApprovalMode::Never,
             },
             workflow_pack: None,
-        })
+        }
     }
 
     #[test]

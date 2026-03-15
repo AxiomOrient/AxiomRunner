@@ -49,24 +49,13 @@ pub enum CliCommand {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum RunTemplate {
-    GoalFile(GoalFileTemplate),
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GoalFileTemplate {
     pub path: String,
     pub goal: RunGoal,
     pub workflow_pack: Option<axonrunner_adapters::WorkflowPackContract>,
 }
 
-impl RunTemplate {
-    pub fn goal_file(&self) -> Option<&GoalFileTemplate> {
-        Some(match self {
-            Self::GoalFile(template) => template,
-        })
-    }
-}
+pub type RunTemplate = GoalFileTemplate;
 
 pub fn parse_command(tokens: &[String]) -> Result<CliCommand, String> {
     let command = tokens
@@ -114,9 +103,7 @@ fn parse_replay_command(args: &[String]) -> Result<CliCommand, String> {
 fn parse_run_command(args: &[String]) -> Result<CliCommand, String> {
     let goal_file = exactly_one_arg("run", args)?;
     if Path::new(&goal_file).is_file() {
-        return Ok(CliCommand::Run(RunTemplate::GoalFile(
-            parse_goal_file_template(&goal_file)?,
-        )));
+        return Ok(CliCommand::Run(parse_goal_file_template(&goal_file)?));
     }
     Err(format!("goal file not found: {goal_file}"))
 }
