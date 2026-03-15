@@ -84,6 +84,24 @@ pub fn lock_path(workspace_root: &Path) -> PathBuf {
     workspace_root.join(".axiomrunner").join("runtime.lock")
 }
 
+pub fn inspect_lock_state(workspace_root: &Path) -> String {
+    let path = lock_path(workspace_root);
+    if !path.exists() {
+        return String::from("absent");
+    }
+    match fs::read_to_string(&path) {
+        Ok(raw) if raw.trim().is_empty() => String::from("active"),
+        Ok(raw) => {
+            if lock_holder_is_stale(raw.trim()) {
+                String::from("stale")
+            } else {
+                String::from("active")
+            }
+        }
+        Err(_) => String::from("active"),
+    }
+}
+
 fn lock_holder_is_stale(holder: &str) -> bool {
     let pid = holder
         .split_whitespace()
@@ -114,7 +132,7 @@ fn process_is_alive(_pid: u32) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{WorkspaceLock, lock_holder_is_stale, lock_path};
+    use super::{WorkspaceLock, inspect_lock_state, lock_holder_is_stale, lock_path};
     use std::fs;
 
     fn unique_workspace(label: &str) -> std::path::PathBuf {
@@ -151,6 +169,30 @@ mod tests {
         assert!(lock_path(&workspace).exists());
         drop(lock);
         assert!(!lock_path(&workspace).exists());
+
+        let _ = fs::remove_dir_all(workspace);
+    }
+
+    #[test]
+    fn inspect_lock_state_reports_absent_active_and_stale() {
+        let workspace = unique_workspace("inspect");
+        fs::create_dir_all(workspace.join(".axiomrunner")).expect("lock dir should exist");
+
+        assert_eq!(inspect_lock_state(&workspace), "absent");
+
+        fs::write(
+            workspace.join(".axiomrunner/runtime.lock"),
+            format!("pid={} command=run\n", std::process::id()),
+        )
+        .expect("active lock should exist");
+        assert_eq!(inspect_lock_state(&workspace), "active");
+
+        fs::write(
+            workspace.join(".axiomrunner/runtime.lock"),
+            "pid=999999 command=run\n",
+        )
+        .expect("stale lock should exist");
+        assert_eq!(inspect_lock_state(&workspace), "stale");
 
         let _ = fs::remove_dir_all(workspace);
     }

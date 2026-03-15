@@ -362,6 +362,10 @@ fn parse_policy_code(raw: &str, line: usize) -> Result<Option<PolicyCode>, Strin
         "allowed" => PolicyCode::Allowed,
         "actor_missing" => PolicyCode::ActorMissing,
         "payload_too_large" => PolicyCode::PayloadTooLarge,
+        "constraint_path_scope" => PolicyCode::ConstraintPathScope,
+        "constraint_destructive_commands" => PolicyCode::ConstraintDestructiveCommands,
+        "constraint_external_commands" => PolicyCode::ConstraintExternalCommands,
+        "constraint_approval_escalation" => PolicyCode::ConstraintApprovalEscalation,
         _ => return Err(format!("invalid policy code '{raw}' on line {line}")),
     };
     Ok(Some(code))

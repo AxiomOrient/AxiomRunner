@@ -1,19 +1,141 @@
 # Workflow Pack Contract
 
-## Purpose
+이 문서는 goal file 계약, workflow pack 경계, verification/done 규칙을 하나로 고정한다.
 
-이 문서는 workflow pack과 adapter가 AxiomRunner 안에 들어올 때 지켜야 할
-현재 계약을 고정한다.
+AxiomRunner가 `goal`, `run`, `resume`, `abort`, `trace`, `report`, `done`의 의미를 소유한다.
+workflow pack과 adapter는 도메인별 실행 수단만 제공하며, 이 의미를 재정의할 수 없다.
 
-핵심 원칙:
+---
 
-- AxiomRunner가 `goal`, `run`, `resume`, `abort`, `trace`, `report`, `done`의 뜻을 소유한다.
-- workflow pack은 planner 힌트, 허용 도구, verifier 규칙만 제공한다.
-- workflow pack은 새 run phase, terminal outcome, replay schema를 마음대로 만들 수 없다.
+## 1. Goal Schema
 
-## Pack Shape
+goal-oriented run이 반드시 답해야 하는 항목:
 
-workflow pack manifest는 아래 필드를 가져야 한다.
+| 필드 | 의미 |
+|---|---|
+| `RunGoal.summary` | 완료해야 할 목표 (objective) |
+| `RunGoal.workspace_root` | run이 접근할 수 있는 로컬 workspace 경계 |
+| `RunGoal.constraints[]` | 비목표, 호환 규칙, 안전 제한 |
+| `RunGoal.done_conditions[]` | 외부에서 확인 가능한 완료 기준 |
+| `RunGoal.verification_checks[]` | 완료를 증명하는 concrete 검증 단계 |
+| `RunGoal.budget` | step/minute/token budget |
+| `RunGoal.approval_mode` | `never` / `on-risk` / `always` |
+
+계약 유효 조건: 모든 required 필드가 존재하고 비어 있지 않아야 하며, done condition이 1개 이상, verification check가 1개 이상, 모든 budget dimension이 0 초과여야 한다.
+
+goal file은 선택적으로 `workflow_pack` 경로를 포함할 수 있다.
+pack manifest가 주어지면 AxiomRunner는 먼저 manifest를 읽고 검증한다. manifest가 깨졌으면 fail-closed로 멈춘다.
+
+## 2. Constraint Labels
+
+`constraints[]`는 자유 형식이지만, 아래 4개만 현재 runtime이 강제 적용한다.
+
+| label | detail format | 강제 방식 |
+|---|---|---|
+| `path_scope` | 쉼표로 구분된 workspace-relative 경로. `workspace` 또는 `.`는 전체 workspace | 범위 밖 경로 접근 시 fail-closed |
+| `destructive_commands` | `deny` | `rm`, `mv` 등 destructive class command 차단 |
+| `external_commands` | `deny` | allowlist 밖 external command 차단 |
+| `approval_escalation` | `required` | risk 판단 시 pre-execution approval 요구 |
+
+그 외 constraint label은 advisory-only다. operator에게 보이지만 실행을 막지 않는다.
+
+`approval_mode=always` 또는 `approval_mode=on-risk` goal은 default pack 경로에서 실행 전 approval을 요구한다.
+
+## 3. Done Condition Schema
+
+run이 완료되려면 선언된 모든 done condition에 evidence가 있어야 한다.
+done condition은 외부에서 확인 가능해야 하며, 아래 중 하나 이상을 써야 한다.
+
+- file existence 또는 file content assertion
+- build, test, lint command
+- changed-path summary
+- replayable patch evidence
+- operator-readable report summary
+
+## 4. Verification / Done Relation
+
+`success`는 아래 두 조건이 모두 참일 때만 허용된다.
+
+1. `verification.status == "passed"`
+2. 선언된 모든 done condition에 evidence 존재
+
+runtime은 default goal run에서 이 기준을 낮추면 안 된다.
+
+| verification.status | 결과 |
+|---|---|
+| `passed` | done condition까지 충족하면 `success` |
+| `verification_weak` | `blocked` — success로 숨기면 안 됨 |
+| `verification_unresolved` | `blocked` — success로 숨기면 안 됨 |
+| `pack_required` | `blocked` — success로 숨기면 안 됨 |
+
+`verifier_strength` 필드는 `verification.status`에서 순수 함수로 도출된다. 두 필드는 같은 어휘를 쓴다.
+
+## 5. Budget Schema
+
+모든 자율 실행은 explicit budget이 필요하다.
+
+- step budget: planned_steps + repair_attempts 기준
+- wall-clock/minute budget: run 전체 elapsed_ms 기준
+- token budget: provider request ceiling 미만이면 pre-execution guard로 즉시 차단
+
+budget 소진은 silent stop이 아니라 `budget_exhausted` terminal outcome으로 노출된다.
+
+## 6. Approval Policy
+
+| approval_mode | 의미 |
+|---|---|
+| `never` | 승인 불필요 |
+| `on-risk` | high-risk 작업 전 승인 요구. default pack 경로는 보수적으로 판단하므로 실행 전 approval이 필요하다. |
+| `always` | 항상 실행 전 승인 요구 |
+
+`approval_escalation=required` constraint는 planned verifier command가 high-risk로 분류될 때 추가 pre-execution approval을 요구한다.
+
+## 7. Run Phases
+
+| phase | 의미 |
+|---|---|
+| `Planning` | plan 생성 |
+| `ExecutingStep` | 단계 실행 |
+| `Verifying` | verification 실행 |
+| `Repairing` | repair 시도 |
+| `WaitingApproval` | operator approval 대기 |
+| `Blocked` | verification 실패로 차단 |
+| `Completed` | 성공 완료 |
+| `Failed` | 실패 종료 |
+| `Aborted` | operator abort |
+
+## 8. Terminal Outcomes
+
+| outcome | 의미 | operator next action |
+|---|---|---|
+| `success` | verification passed + done conditions 모두 증거 있음 | report와 replay evidence 확인 |
+| `approval_required` | `waiting_approval` 상태 | `resume`으로 승인 후 재개 |
+| `budget_exhausted` | step/minute/token budget 소진 | budget 상향 또는 scope 축소 |
+| `blocked` | weak verifier 또는 unresolved verification | verifier summary 확인 후 unblock |
+| `failed` | provider/tool/workspace 실패 | failure boundary 확인 후 repair |
+| `aborted` | operator `abort` 명령 | 필요시 새 run 시작 |
+
+각 terminal outcome은 operator-visible reason을 포함해야 한다.
+
+## 9. Replayable Evidence Contract
+
+모든 run은 `status`, `replay`, `doctor`, release check가 소비할 수 있는 evidence를 남겨야 한다.
+
+| evidence | 경로/필드 |
+|---|---|
+| run identifier + step identifiers | `run_id`, `step_ids` |
+| workspace/worktree binding | `execution_workspace`, checkpoint metadata |
+| plan/apply/verify/report artifacts | `.axiomrunner/artifacts/<intent_id>.(plan\|apply\|verify\|report).md` |
+| changed path summary | `changed_paths` |
+| patch digest + excerpt | `before_digest`, `after_digest`, `before_excerpt`, `after_excerpt`, `unified_diff` |
+| verification result | `verification.status`, `verification.summary`, `verification.checks` |
+| failure boundary | `first_failure.stage`, `first_failure.message` |
+
+---
+
+## 10. Pack Shape
+
+workflow pack manifest 필수 필드:
 
 - `pack_id`
 - `version`
@@ -25,109 +147,64 @@ workflow pack manifest는 아래 필드를 가져야 한다.
 - `verifier_rules[]`
 - `risk_policy`
 
-goal file은 선택적으로 `workflow_pack` 경로를 가질 수 있다.
-경로가 주어지면 AxiomRunner는 그 manifest를 먼저 읽고 검증한다.
-manifest가 깨졌으면 fail-closed 로 멈춘다.
-
-## Allowed Tools
+## 11. Allowed Tools
 
 `allowed_tools[]`는 기존 tool contract 안의 operation만 고를 수 있다.
 
-예:
-
-- `list_files`
-- `read_file`
-- `search_files`
-- `file_write`
-- `replace_in_file`
-- `remove_path`
-- `run_command`
+- `list_files`, `read_file`, `search_files`, `file_write`, `replace_in_file`, `remove_path`, `run_command`
 
 각 항목은 operation 이름과 허용 scope를 함께 가져야 한다.
 
-## Verifier Rules
+## 12. Verifier Rules
 
-`verifier_rules[]`는 기존 verifier profile만 쓸 수 있다.
+`verifier_rules[]`는 기존 verifier profile만 쓸 수 있다: `build`, `test`, `lint`, `generic`
 
-- `build`
-- `test`
-- `lint`
-- `generic`
+각 verifier rule 필수 필드:
 
-각 verifier rule은 아래를 가져야 한다.
+| 필드 | 의미 |
+|---|---|
+| `label` | rule 이름 |
+| `profile` | `build` / `test` / `lint` / `generic` |
+| `command_example` | 실행 예시 |
+| `artifact_expectation` | 기대 artifact |
+| `strength` | `strong` / `weak` / `unresolved` / `pack_required` |
+| `required` | 필수 여부 |
 
-- `label`
-- `profile`
-- `command_example`
-- `artifact_expectation`
-- `strength`
-- `required`
+**strength 의미**:
+- `strong` — 직접적인 검증 경로
+- `weak` — 약한 fallback probe. success로 숨기면 안 됨
+- `unresolved` — 안전한 strong verifier를 만들지 못함
+- `pack_required` — 도메인용 explicit pack이 필요
 
-`strength` 의미:
+`recommended_verifier_flow[]`는 `build` → `test` → `lint` → `generic` 순서 힌트다. 실제 verifier rule을 대체하지 않는다.
 
-- `strong` — verifier command가 직접적인 검증 경로다.
-- `weak` — 약한 fallback probe다. `success`로 숨기면 안 된다.
-- `unresolved` — detail에서 안전한 strong verifier를 만들지 못했다.
-- `pack_required` — 도메인용 explicit pack이 필요하다.
+## 13. Risk Policy
 
-`recommended_verifier_flow[]`는 pack이 추천하는 검증 순서를 고정한다.
+`risk_policy` 필드:
+- `approval_mode`: `never` / `on-risk` / `always`
+- `max_mutating_steps`: 최대 mutating step 수
 
-- `build`
-- `test`
-- `lint`
-- `generic`
+pack이 risk hint를 줄 수 있지만, 최종 승인 판단은 AxiomRunner가 한다.
 
-이 배열은 실제 verifier rule을 대체하지 않는다.
-의미는 "보통 이 순서로 보는 것이 좋다"는 힌트다.
+## 14. Ownership Boundary
 
-## Risk Policy
-
-workflow pack은 위험도 힌트를 줄 수 있지만, 최종 승인은 AxiomRunner가 판단한다.
-
-`risk_policy`는 아래를 가진다.
-
-- `approval_mode`
-- `max_mutating_steps`
-
-## Ownership Boundary
-
-workflow pack이 할 수 있는 것:
-
+**pack이 할 수 있는 것**:
 - planner 힌트 제공
 - 허용 도구 범위 축소
 - verifier rule 제공
-- 앱/서버 같은 도메인별 기본 흐름 제안
+- 도메인별 기본 흐름 제안
 
-workflow pack이 하면 안 되는 것:
-
+**pack이 하면 안 되는 것**:
 - 새 terminal outcome 정의
 - `status`/`replay` 출력 형식 변경
 - `done` 판단 규칙 우회
 - adapter마다 다른 resume/abort 의미 정의
 
-## Adapter Authoring Boundary
+**adapter가 소유하는 것**: provider substrate 연결, tool execution backend, memory backend, health probe detail
 
-user-provided adapter는 backend만 제공해야 한다.
+**adapter가 소유하지 않는 것**: `run`/`resume`/`abort` phase 의미, terminal outcome 의미, `status`/`replay`/`report` schema, verify-before-done rule
 
-adapter가 소유하는 것:
-
-- provider substrate 연결
-- tool execution backend
-- memory backend
-- health probe detail
-
-adapter가 소유하지 않는 것:
-
-- `run`, `resume`, `abort` phase 의미
-- `success`, `blocked`, `budget_exhausted`, `approval_required`, `failed`, `aborted` outcome 의미
-- `status`, `replay`, `report` schema
-- verify-before-done rule
-- workflow pack manifest schema
-
-즉 adapter는 AxiomRunner 본체 semantics를 구현하는 것이 아니라,
-이미 잠긴 semantics를 실행 가능한 backend로 연결하는 역할만 한다.
-
-## Example
+## 15. Example Pack
 
 ```text
 pack_id: rust-service-basic
@@ -141,8 +218,8 @@ allowed_tools:
   - run_command within workspace
   - read_file within workspace
 verifier_rules:
-  - test via cargo test, required=true
-  - lint via cargo clippy, required=false
+  - test via cargo test, required=true, strength=strong
+  - lint via cargo clippy, required=false, strength=weak
 risk_policy:
   approval_mode: on-risk
   max_mutating_steps: 8

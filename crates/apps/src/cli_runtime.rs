@@ -231,18 +231,22 @@ fn execute_intent(runtime: &mut CliRuntime, intent: &RunTemplate) -> Result<(), 
     let previous = runtime.runtime_snapshot();
     let started_at = Instant::now();
     let run_id = runtime.next_run_id();
-    let applied = runtime.apply_template(intent)?;
+    let mut applied = runtime.apply_template(intent)?;
     let plan = runtime
         .compose_state
         .plan_template(intent, &run_id, &applied.intent_id);
     let pre_execution_guard =
         lifecycle::goal_pre_execution_guard(intent, &plan, runtime.compose_state.max_tokens()).map(
-            |summary| {
+            |guard| {
+                if let Some(policy_code) = guard.policy_code {
+                    runtime.state.last_policy_code = Some(policy_code);
+                    applied.policy_code = policy_code;
+                }
                 (
                     runtime.compose_state.idle_execution(),
                     RuntimeRunVerification {
                         status: "skipped",
-                        summary,
+                        summary: guard.summary,
                         checks: vec![
                             format!("goal_file={}", intent.path),
                             format!("workspace_root={}", intent.goal.workspace_root),
@@ -804,6 +808,8 @@ mod tests {
                 run_id: String::from("run-1"),
                 goal: String::from("goal"),
                 summary: String::from("summary"),
+                workflow_pack: String::from("goal-default-v1"),
+                verifier_flow: String::from("generic"),
                 done_when: String::from("done"),
                 planned_steps: 4,
                 steps: Vec::new(),

@@ -20,6 +20,8 @@ pub struct RuntimeRunPlan {
     pub run_id: String,
     pub goal: String,
     pub summary: String,
+    pub workflow_pack: String,
+    pub verifier_flow: String,
     pub done_when: String,
     pub planned_steps: usize,
     pub steps: Vec<RuntimeRunPlanStep>,
@@ -166,6 +168,8 @@ fn build_goal_runtime_run_plan(
             goal_file.goal.done_conditions.len(),
             goal_file.goal.verification_checks.len()
         ),
+        workflow_pack: workflow_pack.pack_id.clone(),
+        verifier_flow: render_verifier_flow(&workflow_pack.recommended_verifier_flow),
         done_when: goal_file
             .goal
             .done_conditions

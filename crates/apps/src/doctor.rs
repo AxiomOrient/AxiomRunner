@@ -4,7 +4,7 @@ use crate::display::mode_name;
 use crate::runtime_compose::{RuntimeComposeConfig, RuntimeComposeHealth};
 use crate::state_store::PendingRunSnapshot;
 use crate::trace_store::TraceStore;
-use crate::workspace_lock::lock_path;
+use crate::workspace_lock::{inspect_lock_state, lock_path};
 use axiomrunner_adapters::provider_registry;
 use axiomrunner_core::AgentState;
 use serde::Serialize;
@@ -53,7 +53,10 @@ pub struct DoctorRuntime {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct DoctorPaths {
+    pub workspace_path: String,
+    pub artifact_path: String,
     pub workspace: String,
+    pub memory_path: String,
     pub state_path: String,
     pub trace_events_path: String,
     pub tool_log_path: String,
@@ -101,6 +104,17 @@ pub fn build_doctor_report(
         std::env::current_dir().unwrap_or_else(|_| Path::new(".").to_path_buf())
     });
     let workspace_display = workspace.display().to_string();
+    let artifact_path_display = compose_config
+        .artifact_workspace
+        .clone()
+        .unwrap_or_else(|| workspace.clone())
+        .display()
+        .to_string();
+    let memory_path_display = compose_config
+        .memory_path
+        .clone()
+        .map(|path| path.display().to_string())
+        .unwrap_or_else(|| String::from("none"));
     let state_path_display = state_path.display().to_string();
     let trace_path = trace_store.events_path().display().to_string();
 
@@ -143,7 +157,7 @@ pub fn build_doctor_report(
             tool_state: compose.tool.state.to_owned(),
             tool_detail: compose.tool.detail.clone(),
             async_host_detail: format_async_host_detail(&async_host),
-            lock_state: workspace_lock_state(&workspace),
+            lock_state: inspect_lock_state(&workspace),
             lock_path: lock_path(&workspace).display().to_string(),
             worktree_isolation: compose_config.git_worktree_isolation,
             command_allowlist: compose_config
@@ -157,7 +171,10 @@ pub fn build_doctor_report(
             latest_pack,
         },
         paths: DoctorPaths {
+            workspace_path: workspace_display.clone(),
+            artifact_path: artifact_path_display,
             workspace: workspace_display,
+            memory_path: memory_path_display,
             state_path: state_path_display,
             trace_events_path: trace_path,
             tool_log_path: compose_config.tool_log_path,
@@ -282,18 +299,6 @@ fn provider_check(compose: &RuntimeComposeHealth) -> DoctorCheck {
         name: String::from("provider_probe"),
         state: state.to_owned(),
         detail: compose.provider.detail.clone(),
-    }
-}
-
-fn workspace_lock_state(workspace: &Path) -> String {
-    let path = lock_path(workspace);
-    if !path.exists() {
-        return String::from("unlocked");
-    }
-    match std::fs::read_to_string(&path) {
-        Ok(raw) if raw.trim().is_empty() => String::from("locked_unknown_holder"),
-        Ok(raw) => format!("locked:{}", raw.trim()),
-        Err(error) => format!("locked_unreadable:{error}"),
     }
 }
 

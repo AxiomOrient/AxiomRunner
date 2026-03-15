@@ -108,7 +108,9 @@ for fixture in "$@"; do
   if [ "$run_rc" -ne 0 ] || [ "$replay_rc" -ne 0 ] || [ "$doctor_rc" -ne 0 ]; then
     status=failed
     FAILURES=$((FAILURES + 1))
-  elif [ "$false_success_intents" != "0" ] || [ "$false_done_intents" != "0" ]; then
+  elif [ "$false_success_intents" != "0" ] || [ "$false_done_intents" != "0" ] \
+    || [ "$weak_verifications" != "0" ] || [ "$unresolved_verifications" != "0" ] \
+    || [ "$pack_required_verifications" != "0" ]; then
     status=failed
     FAILURES=$((FAILURES + 1))
   fi

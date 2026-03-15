@@ -27,6 +27,12 @@ struct StepJournalInput<'a> {
     final_reason: &'a str,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct PreExecutionGuard {
+    pub(super) summary: String,
+    pub(super) policy_code: Option<axiomrunner_core::PolicyCode>,
+}
+
 pub(super) fn run_repair_loop(
     runtime: &CliRuntime,
     intent: &RunTemplate,
@@ -435,7 +441,7 @@ fn finalize_goal_run(
         (
             RuntimeRunPhase::WaitingApproval,
             RuntimeRunOutcome::ApprovalRequired,
-            String::from("approval_required_before_execution"),
+            verification.summary.clone(),
         )
     } else if verification.status == "passed" {
         (
@@ -513,12 +519,37 @@ pub(super) fn goal_pre_execution_guard(
     goal_file: &crate::cli_command::GoalFileTemplate,
     plan_ref: &crate::runtime_compose::RuntimeRunPlan,
     requested_max_tokens: usize,
-) -> Option<String> {
+) -> Option<PreExecutionGuard> {
     if let Some(reason) = goal_budget_guard_reason(goal_file, plan_ref, requested_max_tokens) {
-        return Some(reason);
+        return Some(PreExecutionGuard {
+            summary: reason,
+            policy_code: None,
+        });
     }
-    if goal_requires_pre_execution_approval(goal_file) {
-        return Some(String::from("approval_required_before_execution"));
+    let escalation_required = goal_file.goal.constraints.iter().any(|constraint| {
+        matches!(
+            constraint.policy_key(),
+            Some(axiomrunner_core::RunConstraintPolicyKey::ApprovalEscalation)
+        ) && constraint.detail.trim().eq_ignore_ascii_case("required")
+    });
+    if escalation_required
+        && crate::runtime_compose::constraint_requires_pre_execution_approval(goal_file)
+    {
+        return Some(PreExecutionGuard {
+            summary: String::from(
+                "approval_required_before_execution:constraint_approval_escalation",
+            ),
+            policy_code: Some(axiomrunner_core::PolicyCode::ConstraintApprovalEscalation),
+        });
+    }
+    if matches!(
+        goal_file.goal.approval_mode,
+        axiomrunner_core::RunApprovalMode::Always | axiomrunner_core::RunApprovalMode::OnRisk
+    ) {
+        return Some(PreExecutionGuard {
+            summary: String::from("approval_required_before_execution"),
+            policy_code: None,
+        });
     }
     None
 }

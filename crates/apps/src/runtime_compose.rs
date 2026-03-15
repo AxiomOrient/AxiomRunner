@@ -1457,12 +1457,16 @@ pub fn run_outcome_name(outcome: RuntimeRunOutcome) -> &'static str {
 pub fn run_reason_code(reason: &str) -> String {
     if reason == "verification_passed"
         || reason == "approval_required_before_execution"
+        || reason.starts_with("approval_required_before_execution:")
         || reason == "budget_exhausted_before_execution"
         || reason.starts_with("budget_exhausted_elapsed_minutes:")
         || reason == RUN_REASON_OPERATOR_ABORT
         || reason == "provider_health_blocked"
         || reason == "goal_execution_missing_verifier_output"
     {
+        if reason.starts_with("approval_required_before_execution:") {
+            return String::from("approval_required_before_execution");
+        }
         if reason.starts_with("budget_exhausted_elapsed_minutes:") {
             return String::from("budget_exhausted_elapsed_minutes");
         }
@@ -1513,6 +1517,26 @@ pub fn run_reason_detail(reason: &str) -> String {
         }
     }
     String::from("none")
+}
+
+/// Maps a terminal outcome string to an operator-facing next action hint.
+///
+/// This is the single authoritative mapping for outcome → next_action used by
+/// both the report artifact and operator replay output.
+pub fn next_action_for_outcome(outcome: &str) -> &'static str {
+    match outcome {
+        "success" => "review report and replay evidence",
+        "approval_required" => "approve and resume the pending run",
+        "budget_exhausted" => "raise budget or reduce planned scope",
+        "blocked" => "inspect verifier summary and unblock the run",
+        "failed" => "inspect failure boundary and repair before retry",
+        "aborted" => "decide whether to restart with a new run",
+        _ => "inspect replay evidence",
+    }
+}
+
+pub fn run_next_action(run: &RuntimeRunRecord) -> &'static str {
+    next_action_for_outcome(run_outcome_name(run.outcome))
 }
 
 pub(crate) fn step_name(step: &RuntimeComposeStep) -> &'static str {

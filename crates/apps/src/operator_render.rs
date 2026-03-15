@@ -1,6 +1,8 @@
 use crate::display::mode_name;
 use crate::doctor::DoctorReport;
-use crate::runtime_compose::{run_reason_code, run_reason_detail, verifier_strength_label};
+use crate::runtime_compose::{
+    next_action_for_outcome, run_reason_code, run_reason_detail, verifier_strength_label,
+};
 use crate::status::StatusSnapshot;
 use crate::trace_store::{ReplaySummary, TraceArtifactIndex, TraceIntentEvent};
 
@@ -40,11 +42,13 @@ pub fn render_status_lines(snapshot: &StatusSnapshot) -> Vec<String> {
             })
             .unwrap_or_else(|| String::from("none"));
         lines.push(format!(
-            "status run run_id={} phase={} outcome={} reason={} approval_state={} execution_workspace={} verifier_state={} verifier_strength={} verifier_summary={} planned_steps={} step_count={} artifact_summary={}",
+            "status run run_id={} phase={} outcome={} reason={} reason_code={} reason_detail={} approval_state={} execution_workspace={} verifier_state={} verifier_strength={} verifier_summary={} planned_steps={} step_count={} artifact_summary={}",
             run.run_id,
             run.phase,
             run.outcome,
             run.reason,
+            run_reason_code(&run.reason),
+            run_reason_detail(&run.reason),
             run.approval_state,
             run.execution_workspace,
             run.verifier_state,
@@ -57,11 +61,13 @@ pub fn render_status_lines(snapshot: &StatusSnapshot) -> Vec<String> {
     }
     if let Some(pending) = &snapshot.runtime.pending_run {
         lines.push(format!(
-            "status pending_run run_id={} goal_file_path={} phase={} reason={} approval_state={} verifier_state={} verifier_strength={}",
+            "status pending_run run_id={} goal_file_path={} phase={} reason={} reason_code={} reason_detail={} approval_state={} verifier_state={} verifier_strength={}",
             pending.run_id,
             pending.goal_file_path,
             pending.phase,
             pending.reason,
+            run_reason_code(&pending.reason),
+            run_reason_detail(&pending.reason),
             pending.approval_state,
             pending.verifier_state,
             verifier_strength_label(&pending.verifier_state)
@@ -112,7 +118,10 @@ pub fn render_doctor_lines(report: &DoctorReport) -> Vec<String> {
             report.runtime.async_host_detail
         ),
         format!(
-            "doctor paths workspace={} state_path={} trace_events_path={} tool_log_path={}",
+            "doctor paths workspace_path={} artifact_path={} memory_path={} workspace={} state_path={} trace_events_path={} tool_log_path={}",
+            report.paths.workspace_path,
+            report.paths.artifact_path,
+            report.paths.memory_path,
             report.paths.workspace,
             report.paths.state_path,
             report.paths.trace_events_path,
@@ -122,12 +131,14 @@ pub fn render_doctor_lines(report: &DoctorReport) -> Vec<String> {
 
     if let Some(pending) = &report.pending_run {
         lines.push(format!(
-            "doctor pending_run run_id={} intent_id={} goal_file_path={} phase={} reason={} approval_state={} verifier_state={} verifier_strength={}",
+            "doctor pending_run run_id={} intent_id={} goal_file_path={} phase={} reason={} reason_code={} reason_detail={} approval_state={} verifier_state={} verifier_strength={}",
             pending.run_id,
             pending.intent_id,
             pending.goal_file_path,
             pending.phase,
             pending.reason,
+            run_reason_code(&pending.reason),
+            run_reason_detail(&pending.reason),
             pending.approval_state,
             pending.verifier_state,
             verifier_strength_label(&pending.verifier_state)
@@ -187,13 +198,14 @@ pub fn render_replay_lines(
 
     if let Some(run) = &latest.run {
         lines.push(format!(
-            "replay run run_id={} phase={} outcome={} reason={} reason_code={} reason_detail={} approval_state={} verifier_state={} verifier_strength={} elapsed_ms={} planned_steps={} summary={}",
+            "replay run run_id={} phase={} outcome={} reason={} reason_code={} reason_detail={} next_action={} approval_state={} verifier_state={} verifier_strength={} elapsed_ms={} planned_steps={} summary={}",
             run.run_id,
             run.phase,
             run.outcome,
             run.reason,
             run_reason_code(&run.reason),
             run_reason_detail(&run.reason),
+            next_action_for_outcome(&run.outcome),
             run.approval_state,
             run.verifier_state,
             verifier_strength_label(&run.verifier_state),
@@ -324,3 +336,4 @@ pub fn render_replay_lines(
 
     lines
 }
+

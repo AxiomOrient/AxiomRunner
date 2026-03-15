@@ -7,14 +7,16 @@ pub enum PolicyCode {
     ConstraintPathScope,
     ConstraintDestructiveCommands,
     ConstraintExternalCommands,
+    ConstraintApprovalEscalation,
 }
 
-pub const POLICY_REJECTION_CODES: [PolicyCode; 5] = [
+pub const POLICY_REJECTION_CODES: [PolicyCode; 6] = [
     PolicyCode::ActorMissing,
     PolicyCode::PayloadTooLarge,
     PolicyCode::ConstraintPathScope,
     PolicyCode::ConstraintDestructiveCommands,
     PolicyCode::ConstraintExternalCommands,
+    PolicyCode::ConstraintApprovalEscalation,
 ];
 
 impl PolicyCode {
@@ -25,7 +27,8 @@ impl PolicyCode {
             | PolicyCode::PayloadTooLarge
             | PolicyCode::ConstraintPathScope
             | PolicyCode::ConstraintDestructiveCommands
-            | PolicyCode::ConstraintExternalCommands => true,
+            | PolicyCode::ConstraintExternalCommands
+            | PolicyCode::ConstraintApprovalEscalation => true,
         }
     }
 
@@ -37,6 +40,7 @@ impl PolicyCode {
             PolicyCode::ConstraintPathScope => "constraint_path_scope",
             PolicyCode::ConstraintDestructiveCommands => "constraint_destructive_commands",
             PolicyCode::ConstraintExternalCommands => "constraint_external_commands",
+            PolicyCode::ConstraintApprovalEscalation => "constraint_approval_escalation",
         }
     }
 }

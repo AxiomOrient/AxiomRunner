@@ -2,116 +2,113 @@
 
 ## Status
 
-This document describes the canonical goal/run contract that the shipped
-AxiomRunner product now uses. The public runtime surface is
-documented by `README.md`, `docs/project-charter.md`,
-`docs/CAPABILITY_MATRIX.md`, and `docs/RUNBOOK.md`.
+이 문서는 AxiomRunner가 목표로 삼는 canonical goal/run contract를 설명하는 bridge 문서다.
+현재 shipped truth는 `README.md`, `docs/project-charter.md`, `docs/RUNBOOK.md`,
+`docs/CAPABILITY_MATRIX.md`, `docs/WORKFLOW_PACK_CONTRACT.md`가 우선한다.
 
 ## Goal Schema
 
-A goal-oriented run must answer all of the following:
+AxiomRunner의 goal-oriented run은 최소 아래 질문에 답해야 한다.
 
-- objective: what outcome should be completed
-- workspace: which local workspace boundary the run may touch
-- constraints: explicit non-goals, compatibility rules, and safety limits
-- done condition: observable completion checks
-- verification plan: which commands, file checks, or assertions prove completion
-- artifact expectations: which trace, report, patch, and summary outputs must exist
+- objective: 무엇을 끝내야 하는가
+- workspace: 어느 local workspace 경계를 만질 수 있는가
+- constraints: explicit non-goal, compatibility rule, safety limit
+- done condition: 무엇이 완료 증거인가
+- verification plan: 어떤 verification이 완료를 증명하는가
+- artifacts: 어떤 artifacts가 남아야 하는가
 
 ## Constraint Labels
 
-The current goal schema accepts free-form `constraints[]`, but only the subset
-below is eligible for enforcement:
+현재 goal schema는 free-form `constraints[]`를 허용하지만,
+아래 subset만 enforced subset 대상이다.
 
-- `path_scope` — allowed workspace-relative roots
-- detail format: comma-separated relative paths. `workspace` or `.` means whole workspace.
-- `destructive_commands` — whether destructive command class is denied
-- detail format: `deny`
-- `external_commands` — whether non-local command class is denied
-- detail format: `deny`
-- `approval_escalation` — whether risky work must stop for approval
-- detail format: `required`
+- `path_scope`
+- `destructive_commands`
+- `external_commands`
+- `approval_escalation`
 
-Current runtime behavior:
+### detail 형식
 
-- `approval_mode=always` and `approval_mode=on-risk` still require pre-execution approval
-- `approval_escalation=required` adds the same pre-execution approval requirement when the
-  planned verifier command is classified as high-risk
+- `path_scope`: comma-separated relative paths. `workspace` 또는 `.`은 whole workspace
+- `destructive_commands`: `deny`
+- `external_commands`: `deny`
+- `approval_escalation`: `required`
 
-Any other constraint label remains advisory-only and must be shown as such.
-
-This document defines the subset first. Actual policy wiring follows in the
-runtime/policy layer.
+위 4개 외 label은 advisory-only다.
+advisory-only constraint는 advisory라고 보이게 해야 한다.
 
 ## Canonical Core Mapping
 
-The current core contract already has a stable goal shape:
+현재 core contract와의 매핑은 아래다.
 
 - `RunGoal.summary` -> objective
 - `RunGoal.workspace_root` -> workspace boundary
 - `RunGoal.constraints[]` -> explicit non-goals and compatibility rules
-- `RunGoal.done_conditions[]` -> externally checkable completion rules
+- `RunGoal.done_conditions[]` -> externally checkable done condition
 - `RunGoal.verification_checks[]` -> concrete verification steps
 - `RunGoal.budget` -> step/minute/token budget
-- `RunGoal.approval_mode` -> `never` / `on-risk` / `always`
+- `RunGoal.approval_mode` -> `never | on-risk | always`
 
-The contract is only valid when all required fields are present and non-empty,
-there is at least one done condition, there is at least one verification check,
-and every budget dimension is greater than zero.
+이 contract는 다음이 모두 참일 때만 유효하다.
+
+- summary non-empty
+- workspace_root non-empty
+- at least one done condition
+- at least one verification check
+- every budget dimension > 0
 
 ## Done Condition Schema
 
-A run is complete only when every declared `done condition` has evidence.
-Done conditions must be externally checkable and should use one or more of:
+done condition은 externally checkable해야 한다.
+아래 같은 evidence를 써야 한다.
 
-- file existence or file content assertions
-- build, test, or lint commands
-- changed-path summaries
+- file existence / file content assertion
+- build / test / lint command result
+- changed path summary
 - replayable patch evidence
-- operator-readable report summaries
+- operator-readable report summary
 
 ## Verification / Done Relation
 
-`success` is allowed only when both are true:
+`success`는 아래 둘이 모두 참일 때만 허용된다.
 
-- verification status is `passed`
-- every declared `done condition` is verified with evidence
+- verification status가 `passed`
+- every declared done condition이 evidence를 가진다
 
-The runtime must not lower this bar for default goal runs.
+default goal run도 이 기준을 낮추면 안 된다.
 
 - `verification_weak` => `blocked`
 - `verification_unresolved` => `blocked`
 - `pack_required` => `blocked`
 
-In other words, unresolved verification may be visible, but it must not be
-reported as completed success.
+즉 unresolved verification은 보일 수 있지만 completed success처럼 보이면 안 된다.
 
 ## Budget Schema
 
-Every autonomous run must carry an explicit budget:
+모든 autonomous run은 명시적 budget를 가져야 한다.
 
 - step budget
-- wall-clock or minute budget
+- minute budget
 - token budget
 
-Budget exhaustion must produce a visible terminal outcome rather than a silent stop.
+budget 소진은 silent stop이 아니라 `budget_exhausted` terminal outcome이어야 한다.
 
 ## Approval Policy Schema
 
-Supported approval modes:
+지원 approval mode:
 
 - `never`
 - `on-risk`
 - `always`
 
-`on-risk` applies to operations such as destructive file removal, broad replace,
-dangerous command execution, or other actions classified as high risk by policy.
-현재 default goal workflow-pack path에서는 risk를 보수적으로 취급하므로,
-`on-risk` goal은 실행 전에 approval을 요구한다.
+`on-risk`는 destructive file removal, broad replace, dangerous command execution,
+high-risk verifier 같은 작업에 붙는다.
+
+`approval_escalation=required`는 high-risk verifier path에서 pre-execution approval을 요구한다.
 
 ## Run Phases
 
-The target lifecycle is:
+target lifecycle은 아래다.
 
 1. `Planning`
 2. `ExecutingStep`
@@ -125,7 +122,7 @@ The target lifecycle is:
 
 ## Terminal Outcomes
 
-The public run contract should distinguish:
+public run contract는 아래 terminal outcomes를 구분해야 한다.
 
 - `success`
 - `blocked`
@@ -134,24 +131,24 @@ The public run contract should distinguish:
 - `failed`
 - `aborted`
 
-Each terminal outcome must include an operator-visible reason.
+각 terminal outcome은 operator-visible reason을 포함해야 한다.
 
 ## Replayable Evidence Contract
 
-Every run should leave evidence that can be consumed by `status`, `replay`,
-`doctor`, and release checks:
+모든 run은 아래 evidence를 남겨야 한다.
 
-- run identifier and step identifiers
-- selected workspace or worktree binding
-- plan/apply/verify/report artifacts
+- run identifier와 step identifiers
+- selected workspace 또는 worktree binding
+- plan / apply / verify / report artifacts
 - changed path summary
-- patch digest or excerpt
+- patch digest 또는 excerpt
 - verification result
-- failure boundary when a run stops unsuccessfully
+- failure boundary
+- checkpoint / rollback metadata
 
 ## CLI Target Surface
 
-The target public surface is:
+target public surface는 아래다.
 
 - `run <goal>`
 - `status [run-id|latest]`
@@ -159,6 +156,7 @@ The target public surface is:
 - `doctor [--json]`
 - `resume [run-id|latest]`
 - `abort [run-id|latest]`
+- `health`
+- `help`
 
-Single goal-file commands define the retained runtime surface once
-the goal/run contract becomes the canonical truth.
+single goal-file commands가 retained runtime surface다.

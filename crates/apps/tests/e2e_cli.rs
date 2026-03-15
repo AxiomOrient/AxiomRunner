@@ -404,6 +404,7 @@ fn e2e_cli_goal_file_run_persists_run_id_and_supports_status_and_replay_by_run_i
     assert!(replay.status.success());
     assert!(stdout_of(&status).contains("status run run_id=run-1 phase=completed outcome=success"));
     assert!(stdout_of(&status).contains("approval_state=not_required"));
+    assert!(stdout_of(&status).contains("reason_code=verification_passed"));
     assert!(stdout_of(&status).contains("artifact_summary="));
     assert!(stdout_of(&replay).contains("replay run run_id=run-1 phase=completed outcome=success"));
     assert!(
@@ -421,6 +422,11 @@ fn e2e_cli_goal_file_run_persists_run_id_and_supports_status_and_replay_by_run_i
             .expect("plan artifact should exist")
             .contains("goal=Ship one bounded goal package")
     );
+    let plan = fs::read_to_string(workspace.join(".axiomrunner/artifacts/cli-1.plan.md"))
+        .expect("plan artifact should exist");
+    assert!(plan.contains("run_id=run-1"));
+    assert!(plan.contains("workflow_pack=goal-default-v1"));
+    assert!(plan.contains("verifier_flow=generic"));
 
     let _ = fs::remove_dir_all(workspace);
     let _ = fs::remove_file(goal_file);
@@ -1639,9 +1645,12 @@ fn e2e_cli_constraints_escalate_high_risk_verifier_to_pending_approval() {
     assert!(run.status.success(), "stderr:\n{}", stderr_of(&run));
     assert!(status.status.success(), "stderr:\n{}", stderr_of(&status));
     assert!(stdout_of(&run).contains(
-        "phase=waiting_approval outcome=approval_required reason=approval_required_before_execution"
+        "phase=waiting_approval outcome=approval_required reason=approval_required_before_execution:constraint_approval_escalation"
     ));
     assert!(stdout_of(&status).contains("approval_state=required"));
+    assert!(stdout_of(&status).contains("last_policy=constraint_approval_escalation"));
+    assert!(stdout_of(&status).contains("reason_code=approval_required_before_execution"));
+    assert!(stdout_of(&status).contains("reason_detail=constraint_approval_escalation"));
 
     let _ = fs::remove_dir_all(workspace);
     let _ = fs::remove_file(state_path);
@@ -1694,6 +1703,9 @@ fn e2e_cli_doctor_reports_blocked_codek_binary_and_paths() {
     assert!(stdout.contains("lock_state="));
     assert!(stdout.contains("command_allowlist="));
     assert!(stdout.contains("constraint_enforcement="));
+    assert!(stdout.contains("workspace_path="));
+    assert!(stdout.contains("artifact_path="));
+    assert!(stdout.contains("memory_path="));
     assert!(stdout.contains("doctor check name=provider_probe state=fail"));
 
     let _ = fs::remove_dir_all(workspace);
@@ -1752,6 +1764,9 @@ fn e2e_cli_doctor_json_is_machine_readable() {
     assert!(json["runtime"]["latest_pack"].as_str().is_some());
     assert!(json["runtime"]["constraint_enforcement"].as_str().is_some());
     assert_eq!(json["checks"][0]["name"], "workspace_dir");
+    assert!(json["paths"]["workspace_path"].as_str().is_some());
+    assert!(json["paths"]["artifact_path"].as_str().is_some());
+    assert!(json["paths"]["memory_path"].as_str().is_some());
     assert!(json["paths"]["trace_events_path"].as_str().is_some());
 
     let _ = fs::remove_dir_all(workspace);
@@ -1905,6 +1920,9 @@ fn e2e_cli_status_and_replay_render_aborted_outcome_from_trace() {
     );
     assert!(
         stdout_of(&replay).contains("replay run run_id=run-abort phase=aborted outcome=aborted")
+    );
+    assert!(
+        stdout_of(&replay).contains("next_action=decide whether to restart with a new run")
     );
 
     let _ = fs::remove_dir_all(workspace);

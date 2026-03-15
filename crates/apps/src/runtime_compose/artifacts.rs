@@ -58,18 +58,21 @@ pub(super) fn write_report(
         run.reason
     );
     let risk_summary = report_risk_summary(run);
-    let next_action = report_next_action(run);
+    let next_action = super::run_next_action(run);
     let files = [
         (
             format!("{base}.plan.md"),
             format!(
-                "# Plan\n\nphase={}\nintent_id={}\nkind={}\noutcome={}\npolicy={}\ngoal={}\nsummary={}\ndone_when={}\nplanned_steps={}\nsteps={}\n",
+                "# Plan\n\nphase={}\nrun_id={}\nintent_id={}\nkind={}\noutcome={}\npolicy={}\ngoal={}\nworkflow_pack={}\nverifier_flow={}\nsummary={}\ndone_when={}\nplanned_steps={}\nsteps={}\n",
                 run_phase_name(RuntimeRunPhase::Planning),
+                run.plan.run_id,
                 input.intent_id,
                 template_kind(template),
                 outcome_name(input.outcome),
                 input.policy_code,
                 run.plan.goal,
+                run.plan.workflow_pack,
+                run.plan.verifier_flow,
                 run.plan.summary,
                 run.plan.done_when,
                 run.plan.planned_steps,
@@ -376,17 +379,6 @@ fn report_risk_summary(run: &RuntimeRunRecord) -> &'static str {
         RuntimeRunOutcome::Blocked => "blocked",
         RuntimeRunOutcome::Failed => "failed",
         RuntimeRunOutcome::Aborted => "operator_aborted",
-    }
-}
-
-fn report_next_action(run: &RuntimeRunRecord) -> &'static str {
-    match run.outcome {
-        RuntimeRunOutcome::Success => "review report and replay evidence",
-        RuntimeRunOutcome::ApprovalRequired => "approve and resume the pending run",
-        RuntimeRunOutcome::BudgetExhausted => "raise budget or reduce planned scope",
-        RuntimeRunOutcome::Blocked => "inspect verifier summary and unblock the run",
-        RuntimeRunOutcome::Failed => "inspect failure boundary and repair before retry",
-        RuntimeRunOutcome::Aborted => "decide whether to restart with a new run",
     }
 }
 
