@@ -19,6 +19,7 @@ const PENDING_RUN_REQUIRED_FIELDS: [&str; 7] = [
     "approval_state",
     "verifier_state",
 ];
+const ADVISORY_CONSTRAINTS_DEFAULT: &str = "none";
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct RuntimeStateSnapshot {
@@ -37,6 +38,12 @@ pub struct PendingRunSnapshot {
     pub reason: String,
     pub approval_state: String,
     pub verifier_state: String,
+    /// Comma-separated advisory constraint labels, or "none". Advisory
+    /// constraints are goal-file constraints that do not match an enforced
+    /// policy key (path_scope, destructive_commands, external_commands,
+    /// approval_escalation). Populated at approval-wait time so operators can
+    /// see which constraints are advisory before resuming.
+    pub advisory_constraints: String,
 }
 
 #[derive(Debug, Clone)]
@@ -213,6 +220,10 @@ fn serialize_snapshot(snapshot: &RuntimeStateSnapshot) -> String {
             "pending_run.verifier_state={}",
             hex_encode(pending_run.verifier_state.as_bytes())
         ));
+        lines.push(format!(
+            "pending_run.advisory_constraints={}",
+            hex_encode(pending_run.advisory_constraints.as_bytes())
+        ));
     }
 
     lines.push(String::new());
@@ -230,6 +241,7 @@ fn parse_snapshot(raw: &str) -> Result<RuntimeStateSnapshot, String> {
         reason: String::new(),
         approval_state: String::new(),
         verifier_state: String::new(),
+        advisory_constraints: String::from(ADVISORY_CONSTRAINTS_DEFAULT),
     };
     let mut saw_pending_run = false;
 
@@ -256,6 +268,7 @@ fn parse_snapshot(raw: &str) -> Result<RuntimeStateSnapshot, String> {
                 "reason" => pending_run.reason = decoded,
                 "approval_state" => pending_run.approval_state = decoded,
                 "verifier_state" => pending_run.verifier_state = decoded,
+                "advisory_constraints" => pending_run.advisory_constraints = decoded,
                 _ => {
                     return Err(format!(
                         "unknown pending run key '{}' on line {}",
@@ -442,6 +455,7 @@ mod tests {
                 reason: String::from("approval_required_before_execution"),
                 approval_state: String::from("required"),
                 verifier_state: String::from("passed"),
+                advisory_constraints: String::from("none"),
             }),
         };
 

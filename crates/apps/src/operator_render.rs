@@ -61,7 +61,7 @@ pub fn render_status_lines(snapshot: &StatusSnapshot) -> Vec<String> {
     }
     if let Some(pending) = &snapshot.runtime.pending_run {
         lines.push(format!(
-            "status pending_run run_id={} goal_file_path={} phase={} reason={} reason_code={} reason_detail={} approval_state={} verifier_state={} verifier_strength={}",
+            "status pending_run run_id={} goal_file_path={} phase={} reason={} reason_code={} reason_detail={} approval_state={} verifier_state={} verifier_strength={} advisory_constraints={}",
             pending.run_id,
             pending.goal_file_path,
             pending.phase,
@@ -70,7 +70,8 @@ pub fn render_status_lines(snapshot: &StatusSnapshot) -> Vec<String> {
             run_reason_detail(&pending.reason),
             pending.approval_state,
             pending.verifier_state,
-            verifier_strength_label(&pending.verifier_state)
+            verifier_strength_label(&pending.verifier_state),
+            pending.advisory_constraints
         ));
     }
     lines
@@ -131,7 +132,7 @@ pub fn render_doctor_lines(report: &DoctorReport) -> Vec<String> {
 
     if let Some(pending) = &report.pending_run {
         lines.push(format!(
-            "doctor pending_run run_id={} intent_id={} goal_file_path={} phase={} reason={} reason_code={} reason_detail={} approval_state={} verifier_state={} verifier_strength={}",
+            "doctor pending_run run_id={} intent_id={} goal_file_path={} phase={} reason={} reason_code={} reason_detail={} approval_state={} verifier_state={} verifier_strength={} advisory_constraints={}",
             pending.run_id,
             pending.intent_id,
             pending.goal_file_path,
@@ -141,7 +142,8 @@ pub fn render_doctor_lines(report: &DoctorReport) -> Vec<String> {
             run_reason_detail(&pending.reason),
             pending.approval_state,
             pending.verifier_state,
-            verifier_strength_label(&pending.verifier_state)
+            verifier_strength_label(&pending.verifier_state),
+            pending.advisory_constraints
         ));
     }
 
