@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.0
+
+- retained CLI surface를 `run`, `status`, `replay`, `resume`, `abort`, `doctor`, `health`, `help` 로 고정했다
+- goal-file 중심 단일 런타임으로 제품면을 다시 정리하고 문서 truth lock을 맞췄다
+- verification truth, rollback evidence, nightly dogfood, release gate 묶음을 릴리즈 기준으로 잠갔다
+- representative verifier examples와 workflow pack 경계를 현재 제품 계약에 맞게 정리했다
+- 이전 제품 이름 잔재와 경로 흔적을 정리했다
+
 ## 0.0.1
 
 - locked product identity to `AxiomRunner` / `axiomrunner_apps` / `AXIOMRUNNER_*`
