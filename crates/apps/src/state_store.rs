@@ -10,7 +10,7 @@ pub const ENV_RUNTIME_STATE_PATH: &str = "AXIOMRUNNER_RUNTIME_STATE_PATH";
 
 const FORMAT_VERSION: &str = "axiomrunner-state-v2";
 const NONE_SENTINEL: &str = "-";
-const PENDING_RUN_REQUIRED_FIELDS: [&str; 7] = [
+const PENDING_RUN_REQUIRED_FIELDS: [&str; 8] = [
     "run_id",
     "intent_id",
     "goal_file_path",
@@ -18,8 +18,8 @@ const PENDING_RUN_REQUIRED_FIELDS: [&str; 7] = [
     "reason",
     "approval_state",
     "verifier_state",
+    "advisory_constraints",
 ];
-const ADVISORY_CONSTRAINTS_DEFAULT: &str = "none";
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct RuntimeStateSnapshot {
@@ -241,7 +241,7 @@ fn parse_snapshot(raw: &str) -> Result<RuntimeStateSnapshot, String> {
         reason: String::new(),
         approval_state: String::new(),
         verifier_state: String::new(),
-        advisory_constraints: String::from(ADVISORY_CONSTRAINTS_DEFAULT),
+        advisory_constraints: String::new(),
     };
     let mut saw_pending_run = false;
 
@@ -339,6 +339,7 @@ fn missing_pending_run_field(pending_run: &PendingRunSnapshot) -> Option<&'stati
             "reason" => pending_run.reason.is_empty(),
             "approval_state" => pending_run.approval_state.is_empty(),
             "verifier_state" => pending_run.verifier_state.is_empty(),
+            "advisory_constraints" => pending_run.advisory_constraints.is_empty(),
             _ => false,
         };
         if missing {

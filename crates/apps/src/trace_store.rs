@@ -60,7 +60,6 @@ pub struct TracePatchArtifact {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TraceRepairSummary {
     pub attempted: bool,
-    #[serde(default)]
     pub attempts: usize,
     pub status: String,
     pub summary: String,
@@ -70,7 +69,6 @@ pub struct TraceRepairSummary {
 pub struct TraceRunSummary {
     pub run_id: String,
     pub step_ids: Vec<String>,
-    #[serde(default)]
     pub step_journal: Vec<TraceRunStepSummary>,
     pub provider_cwd: String,
     pub execution_workspace: String,
@@ -80,14 +78,11 @@ pub struct TraceRunSummary {
     pub approval_state: String,
     pub verifier_state: String,
     pub verifier_summary: String,
-    #[serde(default)]
     pub elapsed_ms: u64,
     pub plan_summary: String,
     pub planned_steps: usize,
     pub repair: TraceRepairSummary,
-    #[serde(default)]
     pub checkpoint: Option<TraceCheckpointSummary>,
-    #[serde(default)]
     pub rollback: Option<TraceRollbackSummary>,
 }
 
@@ -103,7 +98,6 @@ pub struct TraceCheckpointSummary {
 pub struct TraceRollbackSummary {
     pub metadata_path: String,
     pub restore_path: String,
-    #[serde(default)]
     pub cleanup_path: Option<String>,
     pub reason: String,
 }
@@ -115,7 +109,6 @@ pub struct TraceRunStepSummary {
     pub phase: String,
     pub status: String,
     pub evidence: String,
-    #[serde(default)]
     pub failure: Option<String>,
 }
 
@@ -137,9 +130,7 @@ pub struct TraceIntentEvent {
     pub tool_outputs: Vec<String>,
     pub first_failure: Option<TraceFailureBoundary>,
     pub verification: TraceVerificationSummary,
-    #[serde(default)]
     pub patch_artifacts: Vec<TracePatchArtifact>,
-    #[serde(default)]
     pub run: Option<TraceRunSummary>,
     pub artifacts: TraceArtifacts,
     pub report_written: bool,

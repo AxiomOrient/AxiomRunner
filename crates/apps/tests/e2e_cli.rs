@@ -1887,6 +1887,7 @@ fn e2e_cli_status_and_replay_render_aborted_outcome_from_trace() {
         "run": {
             "run_id": "run-abort",
             "step_ids": ["run-abort/step-1-planning"],
+            "step_journal": [],
             "provider_cwd": "/tmp/aborted-workspace",
             "execution_workspace": "/tmp/aborted-workspace",
             "phase": "aborted",
@@ -1895,13 +1896,17 @@ fn e2e_cli_status_and_replay_render_aborted_outcome_from_trace() {
             "approval_state": "not_required",
             "verifier_state": "passed",
             "verifier_summary": "operator_abort",
+            "elapsed_ms": 0_u64,
             "plan_summary": "intent_id=cli-abort goal outcome=accepted",
             "planned_steps": 4,
             "repair": {
                 "attempted": false,
+                "attempts": 0_u64,
                 "status": "skipped",
                 "summary": "not_needed"
-            }
+            },
+            "checkpoint": serde_json::Value::Null,
+            "rollback": serde_json::Value::Null
         },
         "artifacts": {
             "plan": ".axiomrunner/artifacts/cli-abort.plan.md",
@@ -1973,6 +1978,7 @@ fn e2e_cli_replay_counts_false_done_runs() {
         "run": {
             "run_id": "run-false-done",
             "step_ids": ["run-false-done/step-1-planning"],
+            "step_journal": [],
             "provider_cwd": "/tmp/workspace",
             "execution_workspace": "/tmp/workspace",
             "phase": "failed",
@@ -1981,13 +1987,17 @@ fn e2e_cli_replay_counts_false_done_runs() {
             "approval_state": "not_required",
             "verifier_state": "failed",
             "verifier_summary": "done_condition_missing_report_artifact:report",
+            "elapsed_ms": 0_u64,
             "plan_summary": "intent_id=cli-false-done goal",
             "planned_steps": 4,
             "repair": {
                 "attempted": false,
+                "attempts": 0_u64,
                 "status": "skipped",
                 "summary": "verification_passed"
-            }
+            },
+            "checkpoint": serde_json::Value::Null,
+            "rollback": serde_json::Value::Null
         },
         "artifacts": {
             "plan": ".axiomrunner/artifacts/cli-false-done.plan.md",
