@@ -15,8 +15,8 @@
     {
       "label": "workspace",
       "profile": "generic",
-      "command_example": "pwd",
-      "artifact_expectation": "workspace path is visible",
+      "command_example": "ls .",
+      "artifact_expectation": "workspace file list is visible",
       "required": true
     }
   ],

@@ -73,13 +73,13 @@ pub struct TraceRunSummary {
     #[serde(default)]
     pub step_journal: Vec<TraceRunStepSummary>,
     pub provider_cwd: String,
+    pub execution_workspace: String,
     pub phase: String,
     pub outcome: String,
     pub reason: String,
-    #[serde(default = "default_trace_approval_state")]
     pub approval_state: String,
-    #[serde(default = "default_trace_verifier_state")]
     pub verifier_state: String,
+    pub verifier_summary: String,
     #[serde(default)]
     pub elapsed_ms: u64,
     pub plan_summary: String,
@@ -136,7 +136,6 @@ pub struct TraceIntentEvent {
     pub tool: String,
     pub tool_outputs: Vec<String>,
     pub first_failure: Option<TraceFailureBoundary>,
-    #[serde(default = "default_trace_verification")]
     pub verification: TraceVerificationSummary,
     #[serde(default)]
     pub patch_artifacts: Vec<TracePatchArtifact>,
@@ -227,11 +226,13 @@ impl TraceStore {
                     .map(trace_run_step_summary)
                     .collect::<Vec<_>>(),
                 "provider_cwd": input.execution.provider_cwd,
+                "execution_workspace": trace_execution_workspace(input.run, input.execution),
                 "phase": run_phase_name(input.run.phase),
                 "outcome": run_outcome_name(input.run.outcome),
                 "reason": input.run.reason,
                 "approval_state": trace_approval_state(input.run),
                 "verifier_state": input.run.verification.status,
+                "verifier_summary": input.run.verification.summary,
                 "elapsed_ms": input.run.elapsed_ms,
                 "plan_summary": input.run.plan.summary,
                 "planned_steps": input.run.plan.planned_steps,
@@ -517,21 +518,6 @@ fn compact_artifact_paths(paths: Vec<String>) -> Vec<String> {
     compacted
 }
 
-fn default_trace_verification() -> TraceVerificationSummary {
-    TraceVerificationSummary {
-        status: String::from("unknown"),
-        summary: String::from("legacy_trace_without_verification"),
-    }
-}
-
-fn default_trace_approval_state() -> String {
-    String::from("unknown")
-}
-
-fn default_trace_verifier_state() -> String {
-    String::from("unknown")
-}
-
 fn verification_summary(
     execution: &RuntimeComposeExecution,
     run: &RuntimeRunRecord,
@@ -560,6 +546,16 @@ fn trace_approval_state(run: &RuntimeRunRecord) -> &'static str {
         crate::runtime_compose::RuntimeRunOutcome::ApprovalRequired => "required",
         _ => "not_required",
     }
+}
+
+fn trace_execution_workspace(
+    run: &RuntimeRunRecord,
+    execution: &RuntimeComposeExecution,
+) -> String {
+    run.checkpoint
+        .as_ref()
+        .map(|checkpoint| checkpoint.execution_workspace.clone())
+        .unwrap_or_else(|| execution.provider_cwd.clone())
 }
 
 fn trace_patch_artifact(artifact: &RuntimeComposePatchArtifact) -> TracePatchArtifact {
@@ -689,6 +685,7 @@ mod tests {
                     failure: None,
                 }],
                 provider_cwd: String::from("/tmp/workspace"),
+                execution_workspace: String::from("/tmp/workspace"),
                 phase: if failed {
                     String::from("failed")
                 } else {
@@ -710,9 +707,12 @@ mod tests {
                 } else {
                     String::from("passed")
                 },
-                plan_summary: String::from(
-                    "intent_id=cli-1 legacy_write key=alpha outcome=accepted",
-                ),
+                verifier_summary: if failed {
+                    String::from("stage=provider,message=boom")
+                } else {
+                    String::from("verification_passed")
+                },
+                plan_summary: String::from("intent_id=cli-1 goal outcome=accepted"),
                 planned_steps: 4,
                 repair: TraceRepairSummary {
                     attempted: false,
@@ -808,57 +808,6 @@ mod tests {
     }
 
     #[test]
-    fn trace_store_loads_legacy_events_without_new_fields() {
-        let root = unique_dir("legacy");
-        fs::create_dir_all(&root).expect("workspace should exist");
-        let store = TraceStore::from_workspace_root(Some(root.clone())).expect("store should init");
-        let path = root.join(".axonrunner/trace/events.jsonl");
-        fs::create_dir_all(path.parent().expect("trace parent should exist"))
-            .expect("trace parent should be created");
-
-        let legacy = serde_json::json!({
-            "schema": TRACE_INTENT_SCHEMA_V1,
-            "timestamp_ms": 1_u64,
-            "actor_id": "system",
-            "intent_id": "cli-legacy",
-            "kind": "write",
-            "outcome": "accepted",
-            "policy_code": "allowed",
-            "effect_count": 1,
-            "revision": 1,
-            "mode": "active",
-            "provider": "applied",
-            "memory": "applied",
-            "tool": "applied",
-            "tool_outputs": ["log=runtime.log"],
-            "first_failure": serde_json::Value::Null,
-            "artifacts": {
-                "plan": ".axonrunner/artifacts/cli-legacy.plan.md",
-                "apply": ".axonrunner/artifacts/cli-legacy.apply.md",
-                "verify": ".axonrunner/artifacts/cli-legacy.verify.md",
-                "report": ".axonrunner/artifacts/cli-legacy.report.md"
-            },
-            "report_written": true,
-            "report_error": serde_json::Value::Null
-        });
-        fs::write(
-            &path,
-            format!(
-                "{}\n",
-                serde_json::to_string(&legacy).expect("legacy trace should serialize")
-            ),
-        )
-        .expect("trace log should be written");
-
-        let events = store.load_events().expect("events should load");
-        assert_eq!(events.len(), 1);
-        assert_eq!(events[0].verification.status, "unknown");
-        assert!(events[0].patch_artifacts.is_empty());
-
-        let _ = fs::remove_dir_all(root);
-    }
-
-    #[test]
     fn trace_store_ignores_partial_final_line_without_newline() {
         let root = unique_dir("partial-tail");
         fs::create_dir_all(&root).expect("workspace should exist");
@@ -867,9 +816,13 @@ mod tests {
         fs::create_dir_all(path.parent().expect("trace parent should exist"))
             .expect("trace parent should be created");
 
-        let valid = serde_json::to_string(&event("cli-1", 1, false)).expect("event should serialize");
-        fs::write(&path, format!("{valid}\n{{\"schema\":\"axonrunner.trace.intent.v1\""))
-            .expect("trace log should be written");
+        let valid =
+            serde_json::to_string(&event("cli-1", 1, false)).expect("event should serialize");
+        fs::write(
+            &path,
+            format!("{valid}\n{{\"schema\":\"axonrunner.trace.intent.v1\""),
+        )
+        .expect("trace log should be written");
 
         let events = store.load_events().expect("events should load");
         assert_eq!(events.len(), 1);
@@ -887,10 +840,13 @@ mod tests {
         fs::create_dir_all(path.parent().expect("trace parent should exist"))
             .expect("trace parent should be created");
 
-        let valid = serde_json::to_string(&event("cli-1", 1, false)).expect("event should serialize");
+        let valid =
+            serde_json::to_string(&event("cli-1", 1, false)).expect("event should serialize");
         fs::write(&path, format!("{valid}\n{{bad json}}\n")).expect("trace log should be written");
 
-        let error = store.load_events().expect_err("malformed committed line should fail");
+        let error = store
+            .load_events()
+            .expect_err("malformed committed line should fail");
         assert!(error.contains("parse trace line 2 failed"));
 
         let _ = fs::remove_dir_all(root);
@@ -952,11 +908,13 @@ mod tests {
                 step_ids: vec![String::from("run-false-done/step-1-planning")],
                 step_journal: Vec::new(),
                 provider_cwd: String::from("/tmp/workspace"),
+                execution_workspace: String::from("/tmp/workspace"),
                 phase: String::from("failed"),
                 outcome: String::from("failed"),
                 reason: String::from("done_condition_missing_report_artifact:report"),
                 approval_state: String::from("not_required"),
                 verifier_state: String::from("failed"),
+                verifier_summary: String::from("done_condition_missing_report_artifact:report"),
                 plan_summary: String::from("intent_id=cli-false-done goal"),
                 planned_steps: 4,
                 repair: TraceRepairSummary {

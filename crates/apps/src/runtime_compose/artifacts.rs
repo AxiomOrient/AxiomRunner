@@ -13,6 +13,7 @@ pub(super) fn write_report(
 
     let base = format!(".axonrunner/artifacts/{}", input.intent_id);
     let verification_checks = render_string_list(&run.verification.checks);
+    let verifier_evidence = render_string_list(&execution.tool_outputs);
     let step_journal = render_step_journal(&run.step_journal);
     let tool_outputs = render_string_list(&execution.tool_outputs);
     let changed_paths = render_patch_targets(&execution.patch_artifacts);
@@ -82,12 +83,13 @@ pub(super) fn write_report(
         (
             format!("{base}.verify.md"),
             format!(
-                "# Verify\n\nphase={}\nrepair_phase={}\nstatus={}\nsummary={}\nchecks={}\nrepair_attempted={}\nrepair_attempts={}\nrepair_status={}\nrepair_summary={}\nfirst_failure={}\nstep_journal={}\n",
+                "# Verify\n\nphase={}\nrepair_phase={}\nstatus={}\nsummary={}\nchecks={}\nverifier_evidence={}\nrepair_attempted={}\nrepair_attempts={}\nrepair_status={}\nrepair_summary={}\nfirst_failure={}\nstep_journal={}\n",
                 run_phase_name(RuntimeRunPhase::Verifying),
                 run_phase_name(RuntimeRunPhase::Repairing),
                 run.verification.status,
                 run.verification.summary,
                 verification_checks,
+                verifier_evidence,
                 run.repair.attempted,
                 run.repair.attempts,
                 run.repair.status,
@@ -102,7 +104,7 @@ pub(super) fn write_report(
         (
             format!("{base}.report.md"),
             format!(
-                "# Report\n\nintent_id={}\nkind={}\noutcome={}\npolicy={}\nrun_phase={}\nrun_outcome={}\nrun_reason={}\nrun_reason_code={}\nrun_reason_detail={}\nrun_elapsed_ms={}\ncheckpoint={}\nrollback={}\nprovider_health_state={}\nprovider_health_detail={}\nprovider={}\nprovider_cwd={}\nmemory={}\ntool={}\noutputs={}\nchanged_paths={}\nevidence={}\n",
+                "# Report\n\nintent_id={}\nkind={}\noutcome={}\npolicy={}\nrun_phase={}\nrun_outcome={}\nrun_reason={}\nrun_reason_code={}\nrun_reason_detail={}\nrun_elapsed_ms={}\ncheckpoint={}\nrollback={}\nprovider_health_state={}\nprovider_health_detail={}\nprovider={}\nprovider_cwd={}\nmemory={}\ntool={}\noutputs={}\nverifier_evidence={}\nchanged_paths={}\nevidence={}\n",
                 input.intent_id,
                 template_kind(template),
                 outcome_name(input.outcome),
@@ -122,6 +124,7 @@ pub(super) fn write_report(
                 step_name(&execution.memory),
                 step_name(&execution.tool),
                 tool_outputs,
+                verifier_evidence,
                 changed_paths,
                 evidence,
             ),

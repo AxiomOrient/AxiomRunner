@@ -1,5 +1,5 @@
 use crate::async_runtime_host::global_async_runtime_host;
-use crate::cli_command::{LegacyIntentTemplate, RunTemplate};
+use crate::cli_command::RunTemplate;
 use crate::config_loader::AppConfig;
 use crate::display::outcome_name;
 use crate::env_util::read_env_trimmed;
@@ -15,14 +15,14 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
 
-mod plan;
 mod artifacts;
+mod plan;
 
 pub use self::plan::RuntimeRunPlan;
 
 use self::plan::{
-    MemoryPlan, ProviderPlan, RuntimeComposePlan, ToolCommandPlan, ToolPlan, build_runtime_compose_plan,
-    build_runtime_run_plan, goal_verifier_tool_plan,
+    MemoryPlan, ProviderPlan, RuntimeComposePlan, ToolCommandPlan, ToolPlan,
+    build_runtime_compose_plan, build_runtime_run_plan, goal_verifier_tool_plan,
 };
 
 const ENV_RUNTIME_MEMORY_PATH: &str = "AXONRUNNER_RUNTIME_MEMORY_PATH";
@@ -487,17 +487,9 @@ impl RuntimeComposeState {
     pub fn apply_template(
         &mut self,
         template: &RunTemplate,
-        intent_id: &str,
         outcome: DecisionOutcome,
     ) -> RuntimeComposeExecution {
-        self.apply_plan(build_runtime_compose_plan(
-            template,
-            intent_id,
-            outcome,
-            &self.config.provider_model,
-            self.config.max_tokens,
-            &self.config.tool_log_path,
-        ))
+        self.apply_plan(build_runtime_compose_plan(template, outcome))
     }
 
     pub fn plan_template(
@@ -505,9 +497,8 @@ impl RuntimeComposeState {
         template: &RunTemplate,
         run_id: &str,
         intent_id: &str,
-        outcome: DecisionOutcome,
     ) -> RuntimeRunPlan {
-        build_runtime_run_plan(template, run_id, intent_id, outcome)
+        build_runtime_run_plan(template, run_id, intent_id)
     }
 
     pub fn prepare_execution_workspace(&mut self, run_id: &str) -> Result<(), String> {
@@ -539,7 +530,7 @@ impl RuntimeComposeState {
     pub fn repair_template(
         &self,
         template: &RunTemplate,
-        intent_id: &str,
+        _intent_id: &str,
         outcome: DecisionOutcome,
         prior: &RuntimeComposeExecution,
     ) -> RuntimeRunRepair {
@@ -547,14 +538,7 @@ impl RuntimeComposeState {
             return RuntimeRunRepair::skipped("tool_step_not_failed");
         }
 
-        let plan = build_runtime_compose_plan(
-            template,
-            intent_id,
-            outcome,
-            &self.config.provider_model,
-            self.config.max_tokens,
-            &self.config.tool_log_path,
-        );
+        let plan = build_runtime_compose_plan(template, outcome);
         let goal_tool = goal_verifier_tool_plan(&plan);
         if goal_tool.is_none() && plan.tool.is_none() {
             return RuntimeRunRepair::skipped("no_tool_plan");
@@ -582,28 +566,6 @@ impl RuntimeComposeState {
             tool_outputs,
             patch_artifacts,
         }
-    }
-
-    pub fn clear(&mut self) -> Result<usize, String> {
-        let Some(memory) = self.memory.as_mut() else {
-            return Ok(0);
-        };
-
-        let entries = memory
-            .list()
-            .map_err(|error| format!("list memory records failed: {error}"))?;
-        let mut removed = 0usize;
-
-        for entry in entries {
-            let deleted = memory
-                .delete(&entry.key)
-                .map_err(|error| format!("clear key '{}' failed: {error}", entry.key))?;
-            if deleted {
-                removed = removed.saturating_add(1);
-            }
-        }
-
-        Ok(removed)
     }
 
     pub fn remember_run_summary(
@@ -796,27 +758,15 @@ impl RuntimeComposeState {
     }
 
     fn execute_memory(&mut self, plan: MemoryPlan) -> RuntimeComposeStep {
-        let Some(memory) = self.memory.as_mut() else {
-            return RuntimeComposeStep::Skipped;
-        };
-
         match plan {
             MemoryPlan::None => RuntimeComposeStep::Skipped,
-            MemoryPlan::Put { key, value } => match memory.store(&key, &value) {
-                Ok(()) => RuntimeComposeStep::Applied,
-                Err(error) => RuntimeComposeStep::Failed(error.to_string()),
-            },
-            MemoryPlan::Remove { key } => match memory.delete(&key) {
-                Ok(_) => RuntimeComposeStep::Applied,
-                Err(error) => RuntimeComposeStep::Failed(error.to_string()),
-            },
         }
     }
 
     fn execute_tool(
         &self,
         plan: Option<ToolPlan>,
-        provider_output: Option<&str>,
+        _provider_output: Option<&str>,
     ) -> (
         RuntimeComposeStep,
         Vec<String>,
@@ -826,34 +776,6 @@ impl RuntimeComposeState {
             return (RuntimeComposeStep::Skipped, Vec::new(), Vec::new());
         };
         match plan {
-            ToolPlan::WriteLog { path, line_prefix } => {
-                let Some(tool) = self.artifact_tool.as_ref() else {
-                    return (RuntimeComposeStep::Skipped, Vec::new(), Vec::new());
-                };
-                let line = format!(
-                    "{line_prefix} provider={}\n",
-                    provider_output.unwrap_or("<none>")
-                );
-                match tool.execute(ToolRequest::FileWrite {
-                    path,
-                    contents: line,
-                    append: true,
-                }) {
-                    Ok(ToolResult::FileWrite(FileWriteOutput { path, evidence, .. })) => (
-                        RuntimeComposeStep::Applied,
-                        vec![format!("log={}", path.display())],
-                        vec![artifacts::patch_artifact_from_write_output(path, evidence)],
-                    ),
-                    Ok(_) => (RuntimeComposeStep::Applied, Vec::new(), Vec::new()),
-                    Err(error) => (
-                        RuntimeComposeStep::Failed(format!(
-                            "runtime_compose.tool.file_write: {error}"
-                        )),
-                        Vec::new(),
-                        Vec::new(),
-                    ),
-                }
-            }
             ToolPlan::RunCommands { commands } => {
                 let Some(tool) = self.tool.as_ref() else {
                     return (RuntimeComposeStep::Skipped, Vec::new(), Vec::new());
@@ -912,50 +834,52 @@ fn execute_verifier_command(
     command: ToolCommandPlan,
 ) -> Result<String, (String, Option<String>)> {
     match tool.execute(ToolRequest::RunCommand {
-        program: command.program,
-        args: command.args,
+        program: command.program.clone(),
+        args: command.args.clone(),
     }) {
-        Ok(ToolResult::RunCommand(RunCommandOutput {
-            profile,
-            exit_code,
-            artifact_path,
-            ..
-        })) if exit_code == 0 => Ok(format!(
-            "verifier={} profile={} exit_code={} artifact={}",
-            command.label,
-            profile.as_str(),
-            exit_code,
-            artifact_path.display()
-        )),
-        Ok(ToolResult::RunCommand(RunCommandOutput {
-            profile,
-            exit_code,
-            artifact_path,
-            ..
-        })) => {
-            let output = format!(
-                "verifier={} profile={} exit_code={} artifact={}",
-                command.label,
-                profile.as_str(),
-                exit_code,
-                artifact_path.display()
-            );
+        Ok(ToolResult::RunCommand(output)) if output.exit_code == 0 => {
+            Ok(render_verifier_evidence(&command, &output))
+        }
+        Ok(ToolResult::RunCommand(output)) => {
+            let output_line = render_verifier_evidence(&command, &output);
             Err((
                 format!(
                     "runtime_compose.tool.verifier_failed: label={} exit_code={} artifact={}",
                     command.label,
-                    exit_code,
-                    artifact_path.display()
+                    output.exit_code,
+                    output.artifact_path.display()
                 ),
-                Some(output),
+                Some(output_line),
             ))
         }
         Ok(_) => Ok(String::new()),
-        Err(error) => Err((
-            format!("runtime_compose.tool.run_command: {error}"),
-            None,
-        )),
+        Err(error) => Err((format!("runtime_compose.tool.run_command: {error}"), None)),
     }
+}
+
+fn render_verifier_evidence(command: &ToolCommandPlan, output: &RunCommandOutput) -> String {
+    serde_json::json!({
+        "label": command.label,
+        "profile": output.profile.as_str(),
+        "strength": command.strength.as_str(),
+        "exit_code": output.exit_code,
+        "command": render_tool_command_line(&command.program, &command.args),
+        "artifact_path": output.artifact_path.display().to_string(),
+        "expectation": command.expectation,
+        "stdout_truncated": output.stdout_truncated,
+        "stderr_truncated": output.stderr_truncated,
+    })
+    .to_string()
+}
+
+fn render_tool_command_line(program: &str, args: &[String]) -> String {
+    if args.is_empty() {
+        return program.to_owned();
+    }
+    std::iter::once(program)
+        .chain(args.iter().map(String::as_str))
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn build_tool_adapter(
@@ -1323,16 +1247,8 @@ fn probe_provider_health(provider: Arc<dyn ProviderAdapter>) -> RuntimeComposeCo
 }
 
 fn template_kind(template: &RunTemplate) -> &'static str {
-    match template {
-        RunTemplate::GoalFile(_) => "goal",
-        RunTemplate::LegacyIntent(template) => match template {
-            LegacyIntentTemplate::Read { .. } => "read",
-            LegacyIntentTemplate::Write { .. } => "write",
-            LegacyIntentTemplate::Remove { .. } => "remove",
-            LegacyIntentTemplate::Freeze => "freeze",
-            LegacyIntentTemplate::Halt => "halt",
-        },
-    }
+    let RunTemplate::GoalFile(_) = template;
+    "goal"
 }
 
 pub fn run_phase_name(phase: RuntimeRunPhase) -> &'static str {
@@ -1439,10 +1355,10 @@ mod tests {
         RuntimeComposeConfig, RuntimeComposeExecution, RuntimeComposeState, RuntimeComposeStep,
         build_tool_adapter, run_outcome_name, run_phase_name,
     };
-    use crate::cli_command::{LegacyIntentTemplate, RunTemplate};
+    use crate::cli_command::{GoalFileTemplate, RunTemplate};
     use crate::config_loader::AppConfig;
     use axonrunner_adapters::{ToolAdapter, ToolRequest};
-    use axonrunner_core::DecisionOutcome;
+    use axonrunner_core::{DecisionOutcome, DoneCondition, RunApprovalMode, RunBudget, RunGoal, VerificationCheck};
     use std::fs;
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -1455,6 +1371,28 @@ mod tests {
             "axonrunner-runtime-compose-test-{label}-{}-{tick}",
             std::process::id()
         ))
+    }
+
+    fn sample_goal_template() -> RunTemplate {
+        RunTemplate::GoalFile(GoalFileTemplate {
+            path: String::from("GOAL.json"),
+            goal: RunGoal {
+                summary: String::from("goal"),
+                workspace_root: String::from("/workspace"),
+                constraints: Vec::new(),
+                done_conditions: vec![DoneCondition {
+                    label: String::from("report"),
+                    evidence: String::from("report artifact exists"),
+                }],
+                verification_checks: vec![VerificationCheck {
+                    label: String::from("workspace"),
+                    detail: String::from("ls ."),
+                }],
+                budget: RunBudget::bounded(5, 10, 8000),
+                approval_mode: RunApprovalMode::Never,
+            },
+            workflow_pack: None,
+        })
     }
 
     #[test]
@@ -1524,10 +1462,7 @@ mod tests {
             patch_artifacts: Vec::new(),
         };
         let repair = state.repair_template(
-            &RunTemplate::LegacyIntent(LegacyIntentTemplate::Write {
-                key: String::from("alpha"),
-                value: String::from("42"),
-            }),
+            &sample_goal_template(),
             "cli-repair",
             DecisionOutcome::Accepted,
             &prior,
@@ -1537,7 +1472,7 @@ mod tests {
         assert_eq!(repair.status, "repaired");
         assert!(matches!(repair.tool, RuntimeComposeStep::Applied));
         assert!(!repair.tool_outputs.is_empty());
-        assert!(!repair.patch_artifacts.is_empty());
+        assert!(repair.patch_artifacts.is_empty());
 
         let _ = fs::remove_dir_all(workspace);
     }
@@ -1569,10 +1504,7 @@ mod tests {
             patch_artifacts: Vec::new(),
         };
         let repair = state.repair_template(
-            &RunTemplate::LegacyIntent(LegacyIntentTemplate::Write {
-                key: String::from("alpha"),
-                value: String::from("42"),
-            }),
+            &sample_goal_template(),
             "cli-repair-skip",
             DecisionOutcome::Accepted,
             &prior,
@@ -1604,11 +1536,7 @@ mod tests {
         .expect("runtime compose state should init");
 
         let execution = state.apply_template(
-            &RunTemplate::LegacyIntent(LegacyIntentTemplate::Write {
-                key: String::from("alpha"),
-                value: String::from("42"),
-            }),
-            "cli-cwd",
+            &sample_goal_template(),
             DecisionOutcome::Accepted,
         );
 
@@ -1646,7 +1574,10 @@ mod tests {
 
     #[test]
     fn run_reason_schema_extracts_code_and_detail() {
-        assert_eq!(super::run_reason_code("verification_passed"), "verification_passed");
+        assert_eq!(
+            super::run_reason_code("verification_passed"),
+            "verification_passed"
+        );
         assert_eq!(super::run_reason_detail("verification_passed"), "none");
         assert_eq!(
             super::run_reason_code("repair_budget_exhausted:attempts=1/1"),
@@ -1722,62 +1653,6 @@ mod tests {
         let found = super::find_agents_md(Some(&nested)).expect("agents path should be found");
 
         assert_eq!(found, root.join("AGENTS.md"));
-
-        let _ = fs::remove_dir_all(root);
-    }
-
-    #[test]
-    fn runtime_compose_ingests_repo_docs_in_priority_order() {
-        let root = unique_dir("repo-doc-stack");
-        let nested = root.join("workspace").join("inner");
-        fs::create_dir_all(&nested).expect("nested workspace should exist");
-        fs::write(root.join("AGENTS.md"), "agent guidance").expect("agents doc should exist");
-        fs::write(root.join("STATUS.md"), "status guidance").expect("status doc should exist");
-        fs::write(root.join("PLAN.md"), "plan guidance").expect("plan doc should exist");
-        fs::write(root.join("SPEC.md"), "spec guidance").expect("spec doc should exist");
-
-        let mut state = RuntimeComposeState::new(RuntimeComposeConfig {
-            memory_path: None,
-            tool_workspace: Some(nested.clone()),
-            artifact_workspace: Some(nested.clone()),
-            git_worktree_isolation: false,
-            tool_log_path: nested.join("runtime.log").display().to_string(),
-            provider_id: String::from("mock-local"),
-            provider_model: String::from("mock-local"),
-            max_tokens: 256,
-            command_allowlist: None,
-        })
-        .expect("runtime compose state should init");
-
-        let execution = state.apply_template(
-            &RunTemplate::LegacyIntent(LegacyIntentTemplate::Write {
-                key: String::from("alpha"),
-                value: String::from("42"),
-            }),
-            "cli-docs",
-            DecisionOutcome::Accepted,
-        );
-
-        let prompt = execution
-            .provider_output
-            .expect("mock provider should echo the prompt");
-        let spec_idx = prompt
-            .find("[SPEC path=")
-            .expect("spec guidance should be included");
-        let plan_idx = prompt
-            .find("[PLAN path=")
-            .expect("plan guidance should be included");
-        let status_idx = prompt
-            .find("[STATUS path=")
-            .expect("status guidance should be included");
-        let agents_idx = prompt
-            .find("[AGENTS path=")
-            .expect("agents guidance should be included");
-
-        assert!(spec_idx < plan_idx);
-        assert!(plan_idx < status_idx);
-        assert!(status_idx < agents_idx);
-        assert!(prompt.contains("request:\nintent=cli-docs kind=write key=alpha value=42"));
 
         let _ = fs::remove_dir_all(root);
     }

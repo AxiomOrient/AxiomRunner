@@ -60,7 +60,15 @@ manifest가 깨졌으면 fail-closed 로 멈춘다.
 - `profile`
 - `command_example`
 - `artifact_expectation`
+- `strength`
 - `required`
+
+`strength` 의미:
+
+- `strong` — verifier command가 직접적인 검증 경로다.
+- `weak` — 약한 fallback probe다. `success`로 숨기면 안 된다.
+- `unresolved` — detail에서 안전한 strong verifier를 만들지 못했다.
+- `pack_required` — 도메인용 explicit pack이 필요하다.
 
 `recommended_verifier_flow[]`는 pack이 추천하는 검증 순서를 고정한다.
 

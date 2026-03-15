@@ -22,10 +22,7 @@ pub(super) struct FinalizeRunInput<'a> {
 struct StepJournalInput<'a> {
     template: &'a RunTemplate,
     plan: &'a crate::runtime_compose::RuntimeRunPlan,
-    applied: &'a AppliedIntent,
-    execution: &'a RuntimeComposeExecution,
     verification: &'a RuntimeRunVerification,
-    repair: &'a RuntimeRunRepair,
     final_phase: RuntimeRunPhase,
     final_reason: &'a str,
 }
@@ -85,11 +82,14 @@ pub(super) fn run_repair_loop(
     let mut verification = initial_verification;
 
     for attempt in 1..=repair_budget {
-        let repair = runtime
-            .compose_state
-            .repair_template(intent, &applied.intent_id, applied.outcome, &execution);
+        let repair = runtime.compose_state.repair_template(
+            intent,
+            &applied.intent_id,
+            applied.outcome,
+            &execution,
+        );
         let next_execution = execution.with_repair(&repair);
-        let next_verification = verify_run(intent, applied, &next_execution, &runtime.state);
+        let next_verification = verify_run(intent, &next_execution);
 
         if next_verification.status == "passed" {
             let summary = if attempt == 1 {
@@ -152,33 +152,26 @@ pub(super) fn run_repair_loop(
 }
 
 fn repair_budget(intent: &RunTemplate, plan: &crate::runtime_compose::RuntimeRunPlan) -> usize {
-    match intent {
-        RunTemplate::GoalFile(goal_file) => goal_file
-            .goal
-            .budget
-            .max_steps
-            .saturating_sub(plan.planned_steps as u64) as usize,
-        RunTemplate::LegacyIntent(_) => 1,
-    }
+    let RunTemplate::GoalFile(goal_file) = intent;
+    goal_file
+        .goal
+        .budget
+        .max_steps
+        .saturating_sub(plan.planned_steps as u64) as usize
 }
 
 pub(super) fn verify_run(
     intent: &RunTemplate,
-    applied: &AppliedIntent,
     execution: &RuntimeComposeExecution,
-    state: &AgentState,
 ) -> RuntimeRunVerification {
-    if let Some(goal_file) = intent.goal_file() {
-        return verify_goal_run(goal_file, execution);
-    }
-    verify_legacy_run(intent, applied, execution, state)
+    verify_goal_run(intent.goal_file().expect("goal template"), execution)
 }
 
 fn verify_goal_run(
     goal_file: &crate::cli_command::GoalFileTemplate,
     execution: &RuntimeComposeExecution,
 ) -> RuntimeRunVerification {
-    let checks: Vec<String> = [
+    let mut checks: Vec<String> = [
         format!("goal_file={}", goal_file.path),
         format!("workspace_root={}", goal_file.goal.workspace_root),
         format!("done_conditions={}", goal_file.goal.done_conditions.len()),
@@ -207,6 +200,33 @@ fn verify_goal_run(
         };
     }
 
+    let verifier_evidence = parse_goal_verifier_evidence(&execution.tool_outputs);
+    if verifier_evidence.is_empty() {
+        return RuntimeRunVerification {
+            status: "failed",
+            summary: String::from("verification_evidence_unreadable"),
+            checks,
+        };
+    }
+    checks.extend(verifier_evidence.iter().map(|evidence| {
+        format!(
+            "verifier={} strength={} exit_code={} command={} artifact={} expectation={}",
+            evidence.label,
+            evidence.strength,
+            evidence.exit_code,
+            evidence.command,
+            evidence.artifact_path,
+            evidence.expectation
+        )
+    }));
+    if let Some((status, summary)) = classify_goal_verifier_strength(&verifier_evidence) {
+        return RuntimeRunVerification {
+            status,
+            summary,
+            checks,
+        };
+    }
+
     match goal_file.goal.validate() {
         Ok(()) => RuntimeRunVerification {
             status: "passed",
@@ -221,60 +241,51 @@ fn verify_goal_run(
     }
 }
 
-fn verify_legacy_run(
-    intent: &RunTemplate,
-    applied: &AppliedIntent,
-    execution: &RuntimeComposeExecution,
-    state: &AgentState,
-) -> RuntimeRunVerification {
-    if applied.outcome == DecisionOutcome::Rejected {
-        let checks = vec![format!(
-            "policy_rejection={}",
-            applied.policy_code.as_str()
-        )];
-        return RuntimeRunVerification {
-            status: "passed",
-            summary: format!("blocked_by_policy={}", applied.policy_code.as_str()),
-            checks,
-        };
-    }
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct GoalVerifierEvidence {
+    label: String,
+    strength: String,
+    exit_code: i64,
+    command: String,
+    artifact_path: String,
+    expectation: String,
+}
 
-    let mut checks: Vec<String> = execution_step_checks(execution).into();
+fn parse_goal_verifier_evidence(tool_outputs: &[String]) -> Vec<GoalVerifierEvidence> {
+    tool_outputs
+        .iter()
+        .filter_map(|output| {
+            let value: serde_json::Value = serde_json::from_str(output).ok()?;
+            Some(GoalVerifierEvidence {
+                label: value.get("label")?.as_str()?.to_owned(),
+                strength: value.get("strength")?.as_str()?.to_owned(),
+                exit_code: value.get("exit_code")?.as_i64()?,
+                command: value.get("command")?.as_str()?.to_owned(),
+                artifact_path: value.get("artifact_path")?.as_str()?.to_owned(),
+                expectation: value.get("expectation")?.as_str()?.to_owned(),
+            })
+        })
+        .collect()
+}
 
-    if let Some((stage, message)) = execution.first_failure() {
-        return RuntimeRunVerification {
-            status: "failed",
-            summary: format!("stage={stage},message={message}"),
-            checks,
-        };
+fn classify_goal_verifier_strength(
+    evidence: &[GoalVerifierEvidence],
+) -> Option<(&'static str, String)> {
+    for (strength, status) in [
+        ("pack_required", "pack_required"),
+        ("unresolved", "verification_unresolved"),
+        ("weak", "verification_weak"),
+    ] {
+        let labels = evidence
+            .iter()
+            .filter(|entry| entry.strength == strength)
+            .map(|entry| entry.label.clone())
+            .collect::<Vec<_>>();
+        if !labels.is_empty() {
+            return Some((status, format!("{status}:{}", labels.join(","))));
+        }
     }
-
-    if matches!(
-        intent,
-        RunTemplate::LegacyIntent(LegacyIntentTemplate::Write { .. })
-            | RunTemplate::LegacyIntent(LegacyIntentTemplate::Remove { .. })
-    ) && let Some(failure) = verify_mutation_contract(intent, execution, state, &mut checks)
-    {
-        return RuntimeRunVerification {
-            status: "failed",
-            summary: failure,
-            checks,
-        };
-    }
-
-    if let Some(failure) = verify_control_contract(intent, state, &mut checks) {
-        return RuntimeRunVerification {
-            status: "failed",
-            summary: failure,
-            checks,
-        };
-    }
-
-    RuntimeRunVerification {
-        status: "passed",
-        summary: String::from("all_checks_passed"),
-        checks,
-    }
+    None
 }
 
 pub(super) fn apply_goal_done_conditions(
@@ -360,61 +371,6 @@ fn goal_done_condition_failure(
     None
 }
 
-fn verify_mutation_contract(
-    intent: &RunTemplate,
-    execution: &RuntimeComposeExecution,
-    state: &AgentState,
-    checks: &mut Vec<String>,
-) -> Option<String> {
-    if execution.patch_artifacts.is_empty() {
-        return Some(String::from("mutable_run_missing_changed_paths"));
-    }
-    if execution.tool_outputs.is_empty() {
-        return Some(String::from("mutable_run_missing_tool_output"));
-    }
-
-    checks.push(format!("changed_paths={}", execution.patch_artifacts.len()));
-
-    match intent {
-        RunTemplate::LegacyIntent(LegacyIntentTemplate::Write { key, value }) => {
-            checks.push(format!("state_fact={key}:{value}"));
-            match state.facts.get(key) {
-                Some(actual) if actual == value => None,
-                Some(actual) => Some(format!("state_fact_mismatch:{key}:{actual}")),
-                None => Some(format!("state_fact_missing:{key}")),
-            }
-        }
-        RunTemplate::LegacyIntent(LegacyIntentTemplate::Remove { key }) => {
-            checks.push(format!("state_fact_absent={key}"));
-            state
-                .facts
-                .contains_key(key)
-                .then(|| format!("state_fact_still_present:{key}"))
-        }
-        _ => None,
-    }
-}
-
-fn verify_control_contract(
-    intent: &RunTemplate,
-    state: &AgentState,
-    checks: &mut Vec<String>,
-) -> Option<String> {
-    match intent {
-        RunTemplate::LegacyIntent(LegacyIntentTemplate::Freeze) => {
-            checks.push(format!("mode={}", mode_name(state.mode)));
-            (state.mode != ExecutionMode::ReadOnly)
-                .then(|| String::from("mode_not_read_only_after_freeze"))
-        }
-        RunTemplate::LegacyIntent(LegacyIntentTemplate::Halt) => {
-            checks.push(format!("mode={}", mode_name(state.mode)));
-            (state.mode != ExecutionMode::Halted)
-                .then(|| String::from("mode_not_halted_after_halt"))
-        }
-        _ => None,
-    }
-}
-
 pub(super) fn finalize_run(
     compose: crate::runtime_compose::RuntimeComposeHealth,
     input: FinalizeRunInput<'_>,
@@ -431,28 +387,21 @@ pub(super) fn finalize_run(
         requested_max_tokens,
     } = input;
 
-    let (phase, outcome, reason) = if let Some(goal_file) = template.goal_file() {
-        finalize_goal_run(
-            goal_file,
-            &plan,
-            &applied,
-            &execution,
-            &verification,
-            &compose,
-            goal_approval_granted,
-            requested_max_tokens,
-        )
-    } else {
-        finalize_legacy_run(&applied, &execution, &verification, &compose)
-    };
+    let (phase, outcome, reason) = finalize_goal_run(
+        template.goal_file().expect("goal template"),
+        &plan,
+        &applied,
+        &execution,
+        &verification,
+        &compose,
+        goal_approval_granted,
+        requested_max_tokens,
+    );
 
     let step_journal = build_step_journal(StepJournalInput {
         template,
         plan: &plan,
-        applied: &applied,
-        execution: &execution,
         verification: &verification,
-        repair: &repair,
         final_phase: phase,
         final_reason: &reason,
     });
@@ -502,6 +451,15 @@ fn finalize_goal_run(
             RuntimeRunOutcome::Success,
             String::from("verification_passed"),
         )
+    } else if matches!(
+        verification.status,
+        "verification_weak" | "verification_unresolved" | "pack_required"
+    ) {
+        (
+            RuntimeRunPhase::Blocked,
+            RuntimeRunOutcome::Blocked,
+            verification.summary.clone(),
+        )
     } else if verification.summary.starts_with("repair_budget_exhausted") {
         (
             RuntimeRunPhase::Blocked,
@@ -517,43 +475,6 @@ fn finalize_goal_run(
             RuntimeRunPhase::Blocked,
             RuntimeRunOutcome::Blocked,
             String::from("provider_health_blocked"),
-        )
-    } else {
-        (
-            RuntimeRunPhase::Failed,
-            RuntimeRunOutcome::Failed,
-            verification.summary.clone(),
-        )
-    }
-}
-
-fn finalize_legacy_run(
-    applied: &AppliedIntent,
-    execution: &RuntimeComposeExecution,
-    verification: &RuntimeRunVerification,
-    compose: &crate::runtime_compose::RuntimeComposeHealth,
-) -> (RuntimeRunPhase, RuntimeRunOutcome, String) {
-    if applied.outcome == DecisionOutcome::Rejected {
-        blocked_policy_outcome(applied)
-    } else if verification.summary.starts_with("repair_budget_exhausted") {
-        (
-            RuntimeRunPhase::Blocked,
-            RuntimeRunOutcome::BudgetExhausted,
-            verification.summary.clone(),
-        )
-    } else if verification.status == "passed" {
-        (
-            RuntimeRunPhase::Completed,
-            RuntimeRunOutcome::Success,
-            String::from("verification_passed"),
-        )
-    } else if matches!(execution.first_failure(), Some(("provider", _)))
-        && compose.provider.state == "blocked"
-    {
-        (
-            RuntimeRunPhase::Blocked,
-            RuntimeRunOutcome::Blocked,
-            verification.summary.clone(),
         )
     } else {
         (
@@ -622,9 +543,7 @@ pub(super) fn apply_goal_elapsed_budget(
     template: &RunTemplate,
     record: RuntimeRunRecord,
 ) -> RuntimeRunRecord {
-    let Some(goal_file) = template.goal_file() else {
-        return record;
-    };
+    let goal_file = template.goal_file().expect("goal template");
     let limit_ms = goal_file.goal.budget.max_minutes.saturating_mul(60_000);
     if record.elapsed_ms > limit_ms
         && !matches!(
@@ -654,28 +573,11 @@ fn build_step_journal(input: StepJournalInput<'_>) -> Vec<RuntimeRunStepRecord> 
     let StepJournalInput {
         template,
         plan,
-        applied,
-        execution,
         verification,
-        repair,
         final_phase,
         final_reason,
     } = input;
-    let goal_file = match template {
-        RunTemplate::GoalFile(goal_file) => goal_file,
-        RunTemplate::LegacyIntent(_) => {
-            return build_legacy_step_journal(StepJournalInput {
-                template,
-                plan,
-                applied,
-                execution,
-                verification,
-                repair,
-                final_phase,
-                final_reason,
-            });
-        }
-    };
+    let goal_file = template.goal_file().expect("goal template");
 
     vec![
         RuntimeRunStepRecord {
@@ -720,173 +622,6 @@ fn goal_terminal_step_status(final_phase: RuntimeRunPhase) -> &'static str {
         | RuntimeRunPhase::ExecutingStep
         | RuntimeRunPhase::Verifying
         | RuntimeRunPhase::Repairing => "completed",
-    }
-}
-
-fn build_legacy_step_journal(input: StepJournalInput<'_>) -> Vec<RuntimeRunStepRecord> {
-    let StepJournalInput {
-        template,
-        plan,
-        applied,
-        execution,
-        verification,
-        repair,
-        final_phase,
-        final_reason,
-    } = input;
-    let mut steps = Vec::new();
-
-    steps.push(RuntimeRunStepRecord {
-        id: plan.steps[0].id.clone(),
-        label: plan.steps[0].label.clone(),
-        phase: plan.steps[0].phase.to_owned(),
-        status: String::from("completed"),
-        evidence: format!("intent_id={}", applied.intent_id),
-        failure: None,
-    });
-
-    match template {
-        RunTemplate::LegacyIntent(LegacyIntentTemplate::Write { .. })
-        | RunTemplate::LegacyIntent(LegacyIntentTemplate::Remove { .. }) => {
-            steps.push(step_record_from_compose_step(
-                &plan.steps[1].id,
-                &plan.steps[1].label,
-                plan.steps[1].phase,
-                &execution.provider,
-                execution
-                    .provider_output
-                    .clone()
-                    .unwrap_or_else(|| String::from("provider_output=<none>")),
-            ));
-            steps.push(RuntimeRunStepRecord {
-                id: plan.steps[2].id.clone(),
-                label: plan.steps[2].label.clone(),
-                phase: plan.steps[2].phase.to_owned(),
-                status: mutation_status(execution, repair),
-                evidence: mutation_evidence(execution, repair),
-                failure: mutation_failure(execution, repair),
-            });
-            if repair.attempted {
-                steps.push(RuntimeRunStepRecord {
-                    id: format!("{}/step-repair-1", plan.run_id),
-                    label: String::from("repair failed mutation"),
-                    phase: String::from("repairing"),
-                    status: repair.status.to_owned(),
-                    evidence: repair.summary.clone(),
-                    failure: matches!(
-                        repair.tool,
-                        crate::runtime_compose::RuntimeComposeStep::Failed(_)
-                    )
-                    .then(|| repair.summary.clone()),
-                });
-            }
-        }
-        RunTemplate::LegacyIntent(LegacyIntentTemplate::Read { .. }) => {}
-        RunTemplate::LegacyIntent(LegacyIntentTemplate::Freeze)
-        | RunTemplate::LegacyIntent(LegacyIntentTemplate::Halt) => {
-            steps.push(RuntimeRunStepRecord {
-                id: plan.steps[1].id.clone(),
-                label: plan.steps[1].label.clone(),
-                phase: String::from(run_phase_name(final_phase)),
-                status: if applied.outcome == DecisionOutcome::Accepted {
-                    String::from("completed")
-                } else {
-                    String::from("blocked")
-                },
-                evidence: final_reason.to_owned(),
-                failure: None,
-            });
-        }
-        RunTemplate::GoalFile(_) => {}
-    }
-
-    steps.push(RuntimeRunStepRecord {
-        id: plan
-            .steps
-            .last()
-            .map(|step| step.id.clone())
-            .unwrap_or_else(|| format!("{}/step-final-verifying", plan.run_id)),
-        label: plan
-            .steps
-            .last()
-            .map(|step| step.label.clone())
-            .unwrap_or_else(|| String::from("verify run")),
-        phase: String::from("verifying"),
-        status: if verification.status == "passed" {
-            String::from("verified")
-        } else {
-            String::from("failed")
-        },
-        evidence: verification.summary.clone(),
-        failure: (verification.status != "passed").then(|| verification.summary.clone()),
-    });
-
-    steps
-}
-
-fn step_record_from_compose_step(
-    step_id: &str,
-    label: &str,
-    phase: &str,
-    step: &crate::runtime_compose::RuntimeComposeStep,
-    evidence: String,
-) -> RuntimeRunStepRecord {
-    let (status, failure) = match step {
-        crate::runtime_compose::RuntimeComposeStep::Applied => (String::from("completed"), None),
-        crate::runtime_compose::RuntimeComposeStep::Skipped => (String::from("skipped"), None),
-        crate::runtime_compose::RuntimeComposeStep::Failed(message) => {
-            (String::from("failed"), Some(message.clone()))
-        }
-    };
-
-    RuntimeRunStepRecord {
-        id: step_id.to_owned(),
-        label: label.to_owned(),
-        phase: phase.to_owned(),
-        status,
-        evidence,
-        failure,
-    }
-}
-
-fn mutation_status(execution: &RuntimeComposeExecution, repair: &RuntimeRunRepair) -> String {
-    if repair.attempted && repair.status == "repaired" {
-        return String::from("repaired");
-    }
-    match (&execution.memory, &execution.tool) {
-        (crate::runtime_compose::RuntimeComposeStep::Failed(_), _)
-        | (_, crate::runtime_compose::RuntimeComposeStep::Failed(_)) => String::from("failed"),
-        (
-            crate::runtime_compose::RuntimeComposeStep::Skipped,
-            crate::runtime_compose::RuntimeComposeStep::Skipped,
-        ) => String::from("skipped"),
-        _ => String::from("completed"),
-    }
-}
-
-fn mutation_evidence(execution: &RuntimeComposeExecution, repair: &RuntimeRunRepair) -> String {
-    if repair.attempted {
-        return repair.summary.clone();
-    }
-    format!(
-        "memory={} tool={} changed_paths={}",
-        step_name(&execution.memory),
-        step_name(&execution.tool),
-        execution.patch_artifacts.len()
-    )
-}
-
-fn mutation_failure(
-    execution: &RuntimeComposeExecution,
-    repair: &RuntimeRunRepair,
-) -> Option<String> {
-    if repair.attempted && repair.status != "repaired" {
-        return Some(repair.summary.clone());
-    }
-    match (&execution.memory, &execution.tool) {
-        (crate::runtime_compose::RuntimeComposeStep::Failed(message), _) => Some(message.clone()),
-        (_, crate::runtime_compose::RuntimeComposeStep::Failed(message)) => Some(message.clone()),
-        _ => None,
     }
 }
 

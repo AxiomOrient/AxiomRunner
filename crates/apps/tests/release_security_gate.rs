@@ -24,6 +24,7 @@ use common::*;
 use config_loader::AppConfig;
 use dev_guard::{GuardError, enforce_current_build, enforce_release_gate};
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 fn mock_config(profile: &str) -> AppConfig {
     AppConfig {
@@ -34,6 +35,17 @@ fn mock_config(profile: &str) -> AppConfig {
         state_path: None,
         command_allowlist: None,
     }
+}
+
+fn unique_path(label: &str, extension: &str) -> PathBuf {
+    let tick = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("clock should be after epoch")
+        .as_nanos();
+    std::env::temp_dir().join(format!(
+        "axonrunner-release-gate-{label}-{}-{tick}.{extension}",
+        std::process::id()
+    ))
 }
 
 #[test]
@@ -193,22 +205,6 @@ fn release_security_gate_truth_surface_docs_match_retained_commands() {
         );
     }
 
-    assert!(
-        USAGE.contains("compatibility:"),
-        "cli usage missing compatibility section"
-    );
-    assert!(
-        readme.contains("compatibility"),
-        "README missing compatibility section"
-    );
-    assert!(
-        capability_matrix.contains("compatibility"),
-        "capability matrix missing compatibility section"
-    );
-    assert!(
-        runbook.contains("compatibility"),
-        "runbook missing compatibility section"
-    );
 }
 
 #[test]
@@ -243,7 +239,12 @@ fn release_security_gate_bridge_docs_lock_autonomous_target_contract() {
         );
     }
 
-    for token in ["README.md", "PROJECT_STRUCTURE.md", "bridge", "run <goal-file>"] {
+    for token in [
+        "README.md",
+        "PROJECT_STRUCTURE.md",
+        "bridge",
+        "run <goal-file>",
+    ] {
         assert!(
             docs_guide.contains(token),
             "docs guide missing token: {token}"
@@ -274,6 +275,8 @@ fn release_security_gate_autonomy_evidence_bundle_is_locked() {
     let readme = include_str!("../../../README.md");
     let capability_matrix = include_str!("../../../docs/CAPABILITY_MATRIX.md");
     let runbook = include_str!("../../../docs/RUNBOOK.md");
+    let versioning = include_str!("../../../docs/VERSIONING.md");
+    let workflow_pack = include_str!("../../../docs/WORKFLOW_PACK_CONTRACT.md");
 
     for token in [
         "autonomous_eval_corpus",
@@ -292,9 +295,16 @@ fn release_security_gate_autonomy_evidence_bundle_is_locked() {
         "false_done_intents",
         "nightly dogfood",
         "fault path suite",
+        "verification_weak",
+        "verification_unresolved",
+        "pack_required",
+        "rollback metadata",
     ] {
         assert!(
-            capability_matrix.contains(token) || runbook.contains(token),
+            capability_matrix.contains(token)
+                || runbook.contains(token)
+                || versioning.contains(token)
+                || workflow_pack.contains(token),
             "autonomy evidence docs missing detail: {token}"
         );
     }
@@ -318,7 +328,10 @@ fn release_security_gate_relative_doc_and_example_paths_exist() {
             "docs/WORKFLOW_PACK_CONTRACT.md",
             include_str!("../../../docs/WORKFLOW_PACK_CONTRACT.md"),
         ),
-        ("examples/README.md", include_str!("../../../examples/README.md")),
+        (
+            "examples/README.md",
+            include_str!("../../../examples/README.md"),
+        ),
     ];
 
     for (doc_name, contents) in docs {
@@ -335,6 +348,135 @@ fn release_security_gate_relative_doc_and_example_paths_exist() {
             );
         }
     }
+}
+
+#[test]
+fn release_security_gate_pack_required_goals_block_instead_of_claiming_success() {
+    let workspace = unique_path("pack-required-workspace", "dir");
+    let goal_file = unique_path("pack-required-goal", "json");
+    std::fs::create_dir_all(&workspace).expect("workspace should exist");
+    std::fs::write(
+        &goal_file,
+        r#"{
+  "summary": "Need a domain workflow pack",
+  "workspace_root": "/workspace",
+  "constraints": [],
+  "done_conditions": [
+    { "label": "report", "evidence": "report artifact exists" }
+  ],
+  "verification_checks": [
+    { "label": "domain verification", "detail": "representative domain path" }
+  ],
+  "budget": { "max_steps": 5, "max_minutes": 10, "max_tokens": 8000 },
+  "approval_mode": "never"
+}"#,
+    )
+    .expect("goal file should be written");
+
+    let run = run_cli_with_env(
+        &["run", goal_file.to_str().expect("utf8 path")],
+        &[(
+            "AXONRUNNER_RUNTIME_TOOL_WORKSPACE",
+            workspace.to_str().expect("utf8 path"),
+        )],
+    );
+    let replay = run_cli_with_env(
+        &["replay", "run-1"],
+        &[(
+            "AXONRUNNER_RUNTIME_TOOL_WORKSPACE",
+            workspace.to_str().expect("utf8 path"),
+        )],
+    );
+
+    assert!(run.status.success(), "stderr:\n{}", stderr_of(&run));
+    assert!(replay.status.success(), "stderr:\n{}", stderr_of(&replay));
+    assert!(stdout_of(&run).contains("phase=blocked outcome=blocked"));
+    assert!(stdout_of(&run).contains("reason=pack_required:domain verification"));
+    assert!(stdout_of(&replay).contains("replay verification status=pack_required"));
+
+    let _ = std::fs::remove_dir_all(workspace);
+    let _ = std::fs::remove_file(goal_file);
+}
+
+#[test]
+fn release_security_gate_nightly_summary_keeps_quality_metrics() {
+    let repo_root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let script = repo_root.join("../../scripts/nightly_dogfood.sh");
+    let log_root = unique_path("nightly-logs", "dir");
+    let timestamp = "20260314T010000Z";
+
+    let output = std::process::Command::new("sh")
+        .arg(&script)
+        .env(
+            "AXONRUNNER_NIGHTLY_BIN",
+            env!("CARGO_BIN_EXE_axonrunner_apps"),
+        )
+        .env("AXONRUNNER_NIGHTLY_SKIP_BUILD", "1")
+        .env("AXONRUNNER_NIGHTLY_FIXTURES", "rust_service.json")
+        .env("AXONRUNNER_NIGHTLY_LOG_ROOT", &log_root)
+        .env("AXONRUNNER_NIGHTLY_TIMESTAMP", timestamp)
+        .output()
+        .expect("nightly dogfood script should run");
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\n\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let summary =
+        std::fs::read_to_string(log_root.join(timestamp).join("summary.txt")).expect("summary");
+    assert!(summary.contains("failed_intents=0"));
+    assert!(summary.contains("false_success_intents=0"));
+    assert!(summary.contains("false_done_intents=0"));
+
+    let _ = std::fs::remove_dir_all(log_root);
+}
+
+#[test]
+fn release_security_gate_representative_and_rollback_evidence_bundle_stays_locked() {
+    let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .canonicalize()
+        .expect("repo root should resolve");
+    let e2e = include_str!("e2e_cli.rs");
+    let runbook = include_str!("../../../docs/RUNBOOK.md");
+
+    for path in [
+        "crates/apps/tests/fixtures/goals/rust_service.json",
+        "crates/apps/tests/fixtures/goals/node_api.json",
+        "crates/apps/tests/fixtures/goals/nextjs_app.json",
+        "crates/apps/tests/fixtures/goals/python_fastapi.json",
+        "crates/apps/tests/fixtures/packs/rust_service.json",
+        "crates/apps/tests/fixtures/packs/node_api.json",
+        "crates/apps/tests/fixtures/packs/nextjs_app.json",
+        "crates/apps/tests/fixtures/packs/python_fastapi.json",
+        "examples/rust_service/goal.json",
+        "examples/node_api/goal.json",
+        "examples/nextjs_app/goal.json",
+        "examples/python_fastapi/goal.json",
+    ] {
+        assert!(
+            repo_relative_path_exists(&repo_root, path),
+            "representative evidence path missing: {path}"
+        );
+    }
+
+    for token in [
+        "rollback metadata should exist",
+        "replay rollback metadata=",
+        "cli-1.rollback.json",
+    ] {
+        assert!(
+            e2e.contains(token),
+            "rollback evidence contract missing token: {token}"
+        );
+    }
+    assert!(
+        runbook.contains("rollback.json"),
+        "runbook must keep rollback recovery instructions"
+    );
 }
 
 fn relative_markdown_links(contents: &str) -> Vec<String> {

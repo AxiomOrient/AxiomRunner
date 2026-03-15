@@ -26,8 +26,6 @@ Transition references:
 - `doctor`
 - `health`
 - `help`
-- compatibility: `batch`
-- legacy aliases: `read`, `write`, `remove`, `freeze`, `halt`
 
 ## Non-goals
 

@@ -119,5 +119,5 @@ The target public surface is:
 - `resume [run-id|latest]`
 - `abort [run-id|latest]`
 
-Legacy single-intent commands may remain only as migration or debug paths once
+Single goal-file commands define the retained runtime surface once
 the goal/run contract becomes the canonical truth.

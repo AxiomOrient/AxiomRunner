@@ -1,4 +1,3 @@
-use axonrunner_adapters::{MemoryAdapter, memory::MarkdownMemoryAdapter};
 use std::fs;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
@@ -28,22 +27,7 @@ commands:
   abort [run-id|latest]
   doctor [--json]
   health
-  help
-
-compatibility:
-  batch [--reset-state] <intent-spec>...
-  read <key>
-  write <key> <value>
-  remove <key>
-  freeze
-  halt
-
-legacy intent-spec:
-  read:<key>
-  write:<key>=<value>
-  remove:<key>
-  freeze
-  halt";
+  help";
 
 const SANITIZED_ENV_KEYS: &[&str] = &[
     "AXONRUNNER_PROFILE",
@@ -130,13 +114,6 @@ fn stderr_of(output: &Output) -> String {
     String::from_utf8(output.stderr.clone()).expect("stderr should be UTF-8")
 }
 
-fn stdout_lines(output: &Output) -> Vec<String> {
-    stdout_of(output)
-        .lines()
-        .map(|line| line.to_owned())
-        .collect()
-}
-
 fn unique_path(label: &str, extension: &str) -> PathBuf {
     let tick = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -194,82 +171,6 @@ fn init_git_repo(path: &Path) {
 }
 
 #[test]
-fn e2e_cli_batch_pipeline_flow() {
-    let output = run_cli(&[
-        "batch",
-        "write:alpha=42",
-        "read:alpha",
-        "remove:alpha",
-        "read:alpha",
-        "freeze",
-        "halt",
-    ]);
-    let stdout = stdout_of(&output);
-    let stderr = stderr_of(&output);
-
-    assert!(output.status.success(), "stderr:\n{stderr}");
-    assert!(stderr.is_empty());
-    assert!(stdout.contains("intent id=cli-1 kind=write outcome=accepted"));
-    assert!(stdout.contains("run intent_id=cli-1 phase=completed outcome=success"));
-    assert!(stdout.contains("query intent_id=cli-2 key=alpha value=42"));
-    assert!(stdout.contains("batch completed count=6"));
-}
-
-#[test]
-fn e2e_cli_can_separate_execution_and_artifact_workspaces() {
-    let workspace = unique_path("artifact-separation-workspace", "dir");
-    let artifact_workspace = unique_path("artifact-separation-artifacts", "dir");
-    let output = run_cli_with_env(
-        &["run", "write:alpha=42"],
-        &[
-            ("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace)),
-            (
-                "AXONRUNNER_RUNTIME_ARTIFACT_WORKSPACE",
-                path_str(&artifact_workspace),
-            ),
-        ],
-        "artifact-separation",
-    );
-    let stderr = stderr_of(&output);
-    let replay = run_cli_with_env(
-        &["replay", "latest"],
-        &[
-            ("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace)),
-            (
-                "AXONRUNNER_RUNTIME_ARTIFACT_WORKSPACE",
-                path_str(&artifact_workspace),
-            ),
-        ],
-        "artifact-separation-replay",
-    );
-
-    assert!(output.status.success(), "stderr:\n{stderr}");
-    assert!(replay.status.success(), "stderr:\n{}", stderr_of(&replay));
-    assert!(artifact_workspace.join("runtime.log").exists());
-    assert!(
-        artifact_workspace
-            .join(".axonrunner/trace/events.jsonl")
-            .exists()
-    );
-    assert!(
-        artifact_workspace
-            .join(".axonrunner/artifacts/cli-1.report.md")
-            .exists()
-    );
-    assert!(!workspace.join("runtime.log").exists());
-    assert!(!workspace.join(".axonrunner/trace/events.jsonl").exists());
-    assert!(
-        !workspace
-            .join(".axonrunner/artifacts/cli-1.report.md")
-            .exists()
-    );
-    assert!(stdout_of(&replay).contains("replay artifact_index count=1"));
-
-    let _ = fs::remove_dir_all(workspace);
-    let _ = fs::remove_dir_all(artifact_workspace);
-}
-
-#[test]
 fn e2e_cli_goal_run_can_use_isolated_git_worktree() {
     let repo_root = unique_path("git-worktree-repo", "dir");
     let artifact_workspace = unique_path("git-worktree-artifacts", "dir");
@@ -305,9 +206,22 @@ fn e2e_cli_goal_run_can_use_isolated_git_worktree() {
         ],
         "git-worktree-run",
     );
+    let status = run_cli_with_env(
+        &["status", "run-1"],
+        &[
+            ("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&repo_root)),
+            (
+                "AXONRUNNER_RUNTIME_ARTIFACT_WORKSPACE",
+                path_str(&artifact_workspace),
+            ),
+            ("AXONRUNNER_RUNTIME_GIT_WORKTREE_ISOLATION", "1"),
+        ],
+        "git-worktree-status",
+    );
     let stderr = stderr_of(&run);
 
     assert!(run.status.success(), "stderr:\n{stderr}");
+    assert!(status.status.success(), "stderr:\n{}", stderr_of(&status));
     let commands_dir = artifact_workspace.join(".axonrunner/commands");
     let command_artifact_path = fs::read_dir(&commands_dir)
         .expect("command artifacts should exist")
@@ -326,6 +240,8 @@ fn e2e_cli_goal_run_can_use_isolated_git_worktree() {
     assert_ne!(pwd_stdout, repo_root.display().to_string());
     assert!(pwd_stdout.contains("run-1"));
     assert!(stdout_of(&run).contains("phase=completed outcome=success"));
+    assert!(stdout_of(&status).contains("execution_workspace="));
+    assert!(stdout_of(&status).contains("run-1"));
     assert!(
         artifact_workspace
             .join(".axonrunner/artifacts/cli-1.checkpoint.json")
@@ -341,11 +257,29 @@ fn e2e_cli_goal_run_can_use_isolated_git_worktree() {
 fn e2e_cli_failed_isolated_run_writes_rollback_metadata() {
     let repo_root = unique_path("rollback-repo", "dir");
     let artifact_workspace = unique_path("rollback-artifacts", "dir");
+    let goal_file = unique_path("rollback-goal", "json");
     init_git_repo(&repo_root);
     let canonical_repo_root = fs::canonicalize(&repo_root).unwrap_or(repo_root.clone());
+    fs::write(
+        &goal_file,
+        r#"{
+  "summary": "Need explicit workflow pack before execution",
+  "workspace_root": "/workspace",
+  "constraints": [],
+  "done_conditions": [
+    { "label": "report", "evidence": "report artifact exists" }
+  ],
+  "verification_checks": [
+    { "label": "domain verification", "detail": "representative domain path" }
+  ],
+  "budget": { "max_steps": 5, "max_minutes": 10, "max_tokens": 8000 },
+  "approval_mode": "never"
+}"#,
+    )
+    .expect("goal file should be written");
 
     let run = run_cli_with_env(
-        &["run", "write:alpha=42"],
+        &["run", path_str(&goal_file)],
         &[
             ("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&repo_root)),
             (
@@ -353,8 +287,6 @@ fn e2e_cli_failed_isolated_run_writes_rollback_metadata() {
                 path_str(&artifact_workspace),
             ),
             ("AXONRUNNER_RUNTIME_GIT_WORKTREE_ISOLATION", "1"),
-            ("AXONRUNNER_RUNTIME_PROVIDER", "codek"),
-            ("AXONRUNNER_CODEX_BIN", "/definitely-missing-codex-binary"),
         ],
         "rollback-run",
     );
@@ -371,7 +303,8 @@ fn e2e_cli_failed_isolated_run_writes_rollback_metadata() {
         "rollback-replay",
     );
 
-    assert_eq!(run.status.code(), Some(6));
+    assert!(run.status.success(), "stderr:\n{}", stderr_of(&run));
+    assert!(stdout_of(&run).contains("phase=blocked outcome=blocked"));
     assert!(replay.status.success(), "stderr:\n{}", stderr_of(&replay));
     let checkpoint_path = artifact_workspace.join(".axonrunner/artifacts/cli-1.checkpoint.json");
     let rollback_path = artifact_workspace.join(".axonrunner/artifacts/cli-1.rollback.json");
@@ -415,196 +348,9 @@ fn e2e_cli_failed_isolated_run_writes_rollback_metadata() {
 
     let _ = fs::remove_dir_all(repo_root);
     let _ = fs::remove_dir_all(artifact_workspace);
+    let _ = fs::remove_file(goal_file);
 }
 
-#[test]
-fn golden_provider_boundary_blocks_missing_codek_binary() {
-    let workspace = unique_path("golden-codek-blocked-workspace", "dir");
-    let output = run_cli_with_env(
-        &["run", "write:alpha=42"],
-        &[
-            ("AXONRUNNER_RUNTIME_PROVIDER", "codek"),
-            ("AXONRUNNER_CODEX_BIN", "/definitely-missing-codex-binary"),
-            ("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace)),
-        ],
-        "golden-codek-blocked",
-    );
-    let stderr = stderr_of(&output);
-
-    assert_eq!(output.status.code(), Some(6));
-    assert!(stderr.contains("runtime execution failed intent_id=cli-1 stage=provider"));
-    assert!(workspace.join(".axonrunner/trace/events.jsonl").exists());
-    assert!(
-        workspace
-            .join(".axonrunner/artifacts/cli-1.report.md")
-            .exists()
-    );
-
-    let _ = fs::remove_dir_all(workspace);
-}
-
-#[test]
-fn e2e_cli_run_composes_provider_memory_and_tool() {
-    let memory_path = unique_path("compose-memory", "md");
-    let workspace = unique_path("compose-workspace", "dir");
-
-    let output = run_cli_with_env(
-        &["--actor=system", "run", "write:alpha=42"],
-        &[
-            ("AXONRUNNER_RUNTIME_MEMORY_PATH", path_str(&memory_path)),
-            ("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace)),
-        ],
-        "write-compose",
-    );
-    let stdout = stdout_of(&output);
-    let stderr = stderr_of(&output);
-
-    assert!(output.status.success(), "stderr:\n{stderr}");
-    assert!(stderr.is_empty());
-    assert!(stdout.contains("intent id=cli-1 kind=write outcome=accepted"));
-
-    let reader = MarkdownMemoryAdapter::new(memory_path.clone()).expect("memory file should load");
-    let record = reader
-        .get("alpha")
-        .expect("memory read should succeed")
-        .expect("alpha should be persisted");
-    let recall = reader
-        .get("recall:last_run/cli-1")
-        .expect("recall read should succeed")
-        .expect("recall summary should be persisted");
-    assert_eq!(record.value, "42");
-    assert!(recall.value.contains("run_id=run-1"));
-    assert!(recall.value.contains("outcome=success"));
-    assert!(
-        recall
-            .value
-            .contains(".axonrunner/artifacts/cli-1.report.md")
-    );
-    assert!(recall.value.contains("changed_paths="));
-
-    let log_path = workspace.join("runtime.log");
-    let log = fs::read_to_string(&log_path).expect("tool log should exist");
-    assert!(log.contains("intent=cli-1 kind=write key=alpha"));
-    let report = fs::read_to_string(workspace.join(".axonrunner/artifacts/cli-1.report.md"))
-        .expect("report artifact should exist");
-    let plan = fs::read_to_string(workspace.join(".axonrunner/artifacts/cli-1.plan.md"))
-        .expect("plan artifact should exist");
-    let verify = fs::read_to_string(workspace.join(".axonrunner/artifacts/cli-1.verify.md"))
-        .expect("verify artifact should exist");
-    let trace = fs::read_to_string(workspace.join(".axonrunner/trace/events.jsonl"))
-        .expect("trace event log should exist");
-    assert!(report.contains("kind=write"));
-    assert!(report.contains("run_phase=completed"));
-    assert!(report.contains("run_outcome=success"));
-    assert!(report.contains("run_reason_code=verification_passed"));
-    assert!(report.contains("run_reason_detail=none"));
-    assert!(report.contains("outcome=accepted"));
-    assert!(plan.contains("policy=allowed"));
-    assert!(plan.contains("planned_steps=4"));
-    assert!(verify.contains("first_failure=none"));
-    assert!(verify.contains("status=passed"));
-    assert!(verify.contains("repair_status=skipped"));
-    assert!(verify.contains("state_fact=alpha:42"));
-    assert!(verify.contains("changed_paths="));
-    let trace_event: serde_json::Value =
-        serde_json::from_str(trace.lines().last().expect("trace line should exist"))
-            .expect("trace line should be valid json");
-    assert_eq!(trace_event["intent_id"], "cli-1");
-    assert_eq!(trace_event["tool"], "applied");
-    assert_eq!(trace_event["report_written"], true);
-    assert_eq!(trace_event["verification"]["status"], "passed");
-    assert_eq!(trace_event["run"]["run_id"], "run-1");
-    assert_eq!(trace_event["run"]["phase"], "completed");
-    assert_eq!(trace_event["run"]["outcome"], "success");
-    assert_eq!(trace_event["run"]["planned_steps"], 4);
-    assert_eq!(trace_event["run"]["step_ids"][0], "run-1/step-1-planning");
-    assert!(trace_event["patch_artifacts"].as_array().is_some());
-    assert!(
-        trace_event["patch_artifacts"]
-            .as_array()
-            .expect("patch artifacts should be an array")
-            .len()
-            >= 5
-    );
-
-    let _ = fs::remove_file(memory_path);
-    let _ = fs::remove_file(log_path);
-    let _ = fs::remove_dir_all(workspace);
-}
-
-#[test]
-fn e2e_cli_replay_latest_summarizes_recent_trace() {
-    let workspace = unique_path("replay-latest-workspace", "dir");
-    let output = run_cli_with_env(
-        &["run", "write:alpha=42"],
-        &[("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
-        "replay-latest-write",
-    );
-    assert!(output.status.success());
-
-    let replay = run_cli_with_env(
-        &["replay", "latest"],
-        &[("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
-        "replay-latest-read",
-    );
-    let stdout = stdout_of(&replay);
-    let stderr = stderr_of(&replay);
-
-    assert!(replay.status.success(), "stderr:\n{stderr}");
-    assert!(stderr.is_empty());
-    assert!(stdout.contains("replay intent_id=cli-1 count=1"));
-    assert!(stdout.contains("kind=write"));
-    assert!(stdout.contains("policy=allowed"));
-    assert!(stdout.contains("replay verification status=passed"));
-    assert!(stdout.contains("replay run run_id=run-1 phase=completed outcome=success"));
-    assert!(stdout.contains("replay repair attempted=false status=skipped"));
-    assert!(stdout.contains("run-1/step-1-planning"));
-    assert!(stdout.contains("replay step id="));
-    assert!(stdout.contains("phase=verifying"));
-    assert!(stdout.contains("artifacts"));
-    assert!(stdout.contains("replay artifact_index count=1"));
-    assert!(stdout.contains("replay patch target="));
-    assert!(stdout.contains("before="));
-    assert!(stdout.contains("after="));
-    assert!(stdout.contains("replay patch after_excerpt="));
-    assert!(
-        stdout.contains(
-            "replay summary failed_intents=0 false_success_intents=0 false_done_intents=0"
-        )
-    );
-
-    let _ = fs::remove_dir_all(workspace);
-}
-
-#[test]
-fn e2e_cli_status_and_health_are_minimal() {
-    let workspace = unique_path("status-run-workspace", "dir");
-    let _run = run_cli_with_env(
-        &["run", "write:alpha=42"],
-        &[("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
-        "status-run-write",
-    );
-    let status = run_cli_with_env(
-        &["status"],
-        &[("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
-        "status-run-status",
-    );
-    let health = run_cli(&["health"]);
-
-    let status_stdout = stdout_of(&status);
-    let health_stdout = stdout_of(&health);
-
-    assert!(status.status.success());
-    assert!(health.status.success());
-    assert!(status_stdout.contains("status revision="));
-    assert!(status_stdout.contains("status runtime provider_id="));
-    assert!(status_stdout.contains("status run run_id=run-1 phase=completed outcome=success"));
-    assert!(status_stdout.contains("provider_state=ready"));
-    assert!(health_stdout.contains("health ok=true"));
-    assert!(health_stdout.contains("provider_state=ready"));
-
-    let _ = fs::remove_dir_all(workspace);
-}
 
 #[test]
 fn e2e_cli_goal_file_run_persists_run_id_and_supports_status_and_replay_by_run_id() {
@@ -622,7 +368,7 @@ fn e2e_cli_goal_file_run_persists_run_id_and_supports_status_and_replay_by_run_i
     { "label": "report", "evidence": "report artifact exists" }
   ],
   "verification_checks": [
-    { "label": "release gate", "detail": "cargo test -p axonrunner_apps --test release_security_gate" }
+    { "label": "workspace files", "detail": "ls ." }
   ],
   "budget": { "max_steps": 5, "max_minutes": 10, "max_tokens": 8000 },
   "approval_mode": "never"
@@ -693,7 +439,7 @@ fn e2e_cli_goal_file_on_risk_requires_approval_before_execution() {
     { "label": "report", "evidence": "report artifact exists" }
   ],
   "verification_checks": [
-    { "label": "release gate", "detail": "cargo test -p axonrunner_apps --test release_security_gate" }
+    { "label": "workspace files", "detail": "ls ." }
   ],
   "budget": { "max_steps": 5, "max_minutes": 10, "max_tokens": 8000 },
   "approval_mode": "on-risk"
@@ -713,8 +459,9 @@ fn e2e_cli_goal_file_on_risk_requires_approval_before_execution() {
     assert!(stdout_of(&run).contains(
         "run intent_id=cli-1 phase=waiting_approval outcome=approval_required reason=approval_required_before_execution"
     ));
-    let pending_report = fs::read_to_string(workspace.join(".axonrunner/artifacts/cli-1.report.md"))
-        .expect("pending approval report should exist");
+    let pending_report =
+        fs::read_to_string(workspace.join(".axonrunner/artifacts/cli-1.report.md"))
+            .expect("pending approval report should exist");
     let pending_trace = fs::read_to_string(workspace.join(".axonrunner/trace/events.jsonl"))
         .expect("pending approval trace should exist");
     let pending_event: serde_json::Value = serde_json::from_str(
@@ -780,7 +527,7 @@ fn e2e_cli_goal_file_approval_can_resume_from_pending_run() {
     { "label": "report", "evidence": "report artifact exists" }
   ],
   "verification_checks": [
-    { "label": "release gate", "detail": "cargo test -p axonrunner_apps --test release_security_gate" }
+    { "label": "workspace files", "detail": "ls ." }
   ],
   "budget": { "max_steps": 5, "max_minutes": 10, "max_tokens": 8000 },
   "approval_mode": "always"
@@ -828,10 +575,7 @@ fn e2e_cli_goal_file_approval_can_resume_from_pending_run() {
         "goal-file-approval-pending-replay",
     );
     assert!(pending_replay.status.success());
-    assert!(
-        stdout_of(&pending_replay)
-            .contains("approval_state=required verifier_state=skipped")
-    );
+    assert!(stdout_of(&pending_replay).contains("approval_state=required verifier_state=skipped"));
 
     let resume = run_cli_with_env(
         &["resume", "run-1"],
@@ -884,7 +628,7 @@ fn e2e_cli_goal_file_pending_run_can_abort_cleanly() {
     { "label": "report", "evidence": "report artifact exists" }
   ],
   "verification_checks": [
-    { "label": "release gate", "detail": "cargo test -p axonrunner_apps --test release_security_gate" }
+    { "label": "workspace files", "detail": "ls ." }
   ],
   "budget": { "max_steps": 5, "max_minutes": 10, "max_tokens": 8000 },
   "approval_mode": "always"
@@ -925,7 +669,10 @@ fn e2e_cli_goal_file_pending_run_can_abort_cleanly() {
     );
     let trace = fs::read_to_string(workspace.join(".axonrunner/trace/events.jsonl"))
         .expect("trace should be readable");
-    let latest = trace.lines().last().expect("trace should contain latest event");
+    let latest = trace
+        .lines()
+        .last()
+        .expect("trace should contain latest event");
     let latest: serde_json::Value =
         serde_json::from_str(latest).expect("latest trace event should parse");
 
@@ -965,7 +712,7 @@ fn e2e_cli_goal_file_blocks_when_step_budget_is_already_exhausted() {
     { "label": "report", "evidence": "report artifact exists" }
   ],
   "verification_checks": [
-    { "label": "release gate", "detail": "cargo test -p axonrunner_apps --test release_security_gate" }
+    { "label": "workspace files", "detail": "ls ." }
   ],
   "budget": { "max_steps": 1, "max_minutes": 10, "max_tokens": 8000 },
   "approval_mode": "never"
@@ -1004,9 +751,8 @@ fn e2e_cli_goal_file_blocks_when_step_budget_is_already_exhausted() {
             .contains("replay run run_id=run-1 phase=blocked outcome=budget_exhausted")
     );
     assert!(
-        stdout_of(&replay).contains(
-            "reason_code=budget_exhausted_before_execution reason_detail=none"
-        )
+        stdout_of(&replay)
+            .contains("reason_code=budget_exhausted_before_execution reason_detail=none")
     );
     let report = fs::read_to_string(workspace.join(".axonrunner/artifacts/cli-1.report.md"))
         .expect("budget report should exist");
@@ -1033,7 +779,7 @@ fn e2e_cli_goal_file_blocks_when_token_budget_is_already_exhausted() {
     { "label": "report", "evidence": "report artifact exists" }
   ],
   "verification_checks": [
-    { "label": "release gate", "detail": "cargo test -p axonrunner_apps --test release_security_gate" }
+    { "label": "workspace files", "detail": "ls ." }
   ],
   "budget": { "max_steps": 5, "max_minutes": 10, "max_tokens": 64 },
   "approval_mode": "never"
@@ -1072,9 +818,8 @@ fn e2e_cli_goal_file_blocks_when_token_budget_is_already_exhausted() {
             .contains("replay run run_id=run-1 phase=blocked outcome=budget_exhausted")
     );
     assert!(
-        stdout_of(&replay).contains(
-            "reason_code=budget_exhausted_before_execution_tokens reason_detail=4096>64"
-        )
+        stdout_of(&replay)
+            .contains("reason_code=budget_exhausted_before_execution_tokens reason_detail=4096>64")
     );
     let report = fs::read_to_string(workspace.join(".axonrunner/artifacts/cli-1.report.md"))
         .expect("token budget report should exist");
@@ -1099,7 +844,7 @@ fn e2e_cli_goal_file_uses_bounded_repair_budget() {
     { "label": "report", "evidence": "report artifact exists" }
   ],
   "verification_checks": [
-    { "label": "release gate", "detail": "cargo test -p axonrunner_apps --test release_security_gate" }
+    { "label": "workspace files", "detail": "ls ." }
   ],
   "budget": { "max_steps": 6, "max_minutes": 10, "max_tokens": 8000 },
   "approval_mode": "never"
@@ -1179,10 +924,7 @@ fn e2e_cli_goal_file_zero_repair_budget_does_not_claim_attempt() {
     assert!(stdout_of(&run).contains("phase=blocked outcome=budget_exhausted"));
     assert!(stdout_of(&run).contains("repair_budget_exhausted:attempts=0/0"));
     assert!(replay.status.success());
-    assert!(
-        stdout_of(&replay)
-            .contains("replay repair attempted=false status=budget_exhausted")
-    );
+    assert!(stdout_of(&replay).contains("replay repair attempted=false status=budget_exhausted"));
     assert!(stdout_of(&replay).contains("repair_budget_exhausted:attempts=0/0"));
 
     let _ = fs::remove_dir_all(workspace);
@@ -1259,7 +1001,7 @@ fn e2e_cli_workspace_lock_recovers_stale_pid_and_runs() {
     { "label": "report", "evidence": "report artifact exists" }
   ],
   "verification_checks": [
-    { "label": "release gate", "detail": "cargo test -p axonrunner_apps --test release_security_gate" }
+    { "label": "workspace files", "detail": "ls ." }
   ],
   "budget": { "max_steps": 5, "max_minutes": 10, "max_tokens": 8000 },
   "approval_mode": "never"
@@ -1281,51 +1023,6 @@ fn e2e_cli_workspace_lock_recovers_stale_pid_and_runs() {
 }
 
 #[test]
-fn e2e_cli_rejected_control_action_surfaces_approval_required_outcome() {
-    let workspace = unique_path("approval-required-workspace", "dir");
-    let state_path = unique_path("approval-required-state", "snapshot");
-    let run = run_cli_with_env(
-        &["--actor=alice", "freeze"],
-        &[
-            ("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace)),
-            ("AXONRUNNER_RUNTIME_STATE_PATH", path_str(&state_path)),
-        ],
-        "approval-required-run",
-    );
-    let status = run_cli_with_env(
-        &["status"],
-        &[
-            ("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace)),
-            ("AXONRUNNER_RUNTIME_STATE_PATH", path_str(&state_path)),
-        ],
-        "approval-required-status",
-    );
-    let replay = run_cli_with_env(
-        &["replay", "latest"],
-        &[("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
-        "approval-required-replay",
-    );
-    assert!(run.status.success());
-    assert!(status.status.success());
-    assert!(replay.status.success());
-    assert!(
-        stdout_of(&run)
-            .contains("run intent_id=cli-1 phase=waiting_approval outcome=approval_required")
-    );
-    assert!(
-        stdout_of(&status)
-            .contains("status run run_id=run-1 phase=waiting_approval outcome=approval_required")
-    );
-    assert!(
-        stdout_of(&replay)
-            .contains("replay run run_id=run-1 phase=waiting_approval outcome=approval_required")
-    );
-
-    let _ = fs::remove_dir_all(workspace);
-    let _ = fs::remove_file(state_path);
-}
-
-#[test]
 fn e2e_cli_resume_rejects_non_pending_state_with_clear_error() {
     let workspace = unique_path("resume-no-pending-workspace", "dir");
     let state_path = unique_path("resume-no-pending-state", "snapshot");
@@ -1339,11 +1036,9 @@ fn e2e_cli_resume_rejects_non_pending_state_with_clear_error() {
     );
 
     assert!(!resume.status.success());
-    assert!(
-        stderr_of(&resume).contains(
-            "resume only supports pending goal-file approval runs; no pending approval run is available"
-        )
-    );
+    assert!(stderr_of(&resume).contains(
+        "resume only supports pending goal-file approval runs; no pending approval run is available"
+    ));
 
     let _ = fs::remove_dir_all(workspace);
     let _ = fs::remove_file(state_path);
@@ -1437,13 +1132,75 @@ fn e2e_cli_goal_file_executes_external_workflow_pack_verifier_sequence() {
     assert!(run.status.success(), "stderr:\n{}", stderr_of(&run));
     assert!(replay.status.success(), "stderr:\n{}", stderr_of(&replay));
     assert!(stdout_of(&run).contains("phase=completed outcome=success"));
-    let lint_idx = report.find("verifier=lint-pass").expect("lint verifier should exist");
-    let build_idx = report.find("verifier=build-pass").expect("build verifier should exist");
-    assert!(lint_idx < build_idx, "recommended verifier flow should drive execution order");
+    let lint_idx = report
+        .find("\"label\":\"lint-pass\"")
+        .expect("lint verifier should exist");
+    let build_idx = report
+        .find("\"label\":\"build-pass\"")
+        .expect("build verifier should exist");
+    assert!(
+        lint_idx < build_idx,
+        "recommended verifier flow should drive execution order"
+    );
 
     let _ = fs::remove_dir_all(workspace);
     let _ = fs::remove_file(goal_file);
     let _ = fs::remove_file(pack_file);
+}
+
+#[test]
+fn e2e_cli_default_goal_pack_blocks_when_verification_is_pack_required() {
+    let workspace = unique_path("goal-pack-required-workspace", "dir");
+    let goal_file = unique_path("goal-pack-required-goal", "json");
+    fs::create_dir_all(&workspace).expect("workspace should exist");
+    fs::write(
+        &goal_file,
+        r#"{
+  "summary": "Need a domain-specific workflow pack",
+  "workspace_root": "/workspace",
+  "constraints": [],
+  "done_conditions": [
+    { "label": "report", "evidence": "report artifact exists" }
+  ],
+  "verification_checks": [
+    { "label": "domain verification", "detail": "representative domain path" }
+  ],
+  "budget": { "max_steps": 5, "max_minutes": 10, "max_tokens": 8000 },
+  "approval_mode": "never"
+}"#,
+    )
+    .expect("goal file should be written");
+
+    let run = run_cli_with_env(
+        &["run", path_str(&goal_file)],
+        &[("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
+        "goal-pack-required-run",
+    );
+    let replay = run_cli_with_env(
+        &["replay", "run-1"],
+        &[("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
+        "goal-pack-required-replay",
+    );
+    let verify = fs::read_to_string(workspace.join(".axonrunner/artifacts/cli-1.verify.md"))
+        .expect("verify artifact should exist");
+    let report = fs::read_to_string(workspace.join(".axonrunner/artifacts/cli-1.report.md"))
+        .expect("report artifact should exist");
+
+    assert!(run.status.success(), "stderr:\n{}", stderr_of(&run));
+    assert!(replay.status.success(), "stderr:\n{}", stderr_of(&replay));
+    assert!(stdout_of(&run).contains("phase=blocked outcome=blocked"));
+    assert!(stdout_of(&run).contains("reason=pack_required:domain verification"));
+    assert!(stdout_of(&replay).contains("replay verification status=pack_required"));
+    assert!(stdout_of(&replay).contains("\"strength\":\"pack_required\""));
+    assert!(verify.contains("verifier_evidence="));
+    assert!(verify.contains("\"command\":\"ls .\""));
+    assert!(report.contains("verifier_evidence="));
+    assert!(report.contains(
+        "\"expectation\":\"pack_required fallback probe for verifier `domain verification`\""
+    ));
+
+    let _ = fs::remove_dir_all(workspace);
+    let _ = fs::remove_file(goal_file);
 }
 
 #[test]
@@ -1549,158 +1306,6 @@ fn e2e_cli_doctor_json_is_machine_readable() {
 }
 
 #[test]
-fn golden_truth_surface_doctor_text_contract_for_ready_mock_local_is_stable() {
-    let workspace = unique_path("doctor-golden-workspace", "dir");
-    let state_path = unique_path("doctor-golden-state", "snapshot");
-    let memory_path = unique_path("doctor-golden-memory", "md");
-
-    let run = run_cli_with_env(
-        &["run", "write:alpha=42"],
-        &[
-            ("AXONRUNNER_RUNTIME_MEMORY_PATH", path_str(&memory_path)),
-            ("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace)),
-            ("AXONRUNNER_RUNTIME_STATE_PATH", path_str(&state_path)),
-        ],
-        "doctor-golden-write",
-    );
-    assert!(run.status.success());
-
-    let doctor = run_cli_with_env(
-        &["doctor"],
-        &[
-            ("AXONRUNNER_RUNTIME_MEMORY_PATH", path_str(&memory_path)),
-            ("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace)),
-            ("AXONRUNNER_RUNTIME_STATE_PATH", path_str(&state_path)),
-        ],
-        "doctor-golden-read",
-    );
-    let stderr = stderr_of(&doctor);
-    assert!(doctor.status.success(), "stderr:\n{stderr}");
-    assert!(stderr.is_empty());
-    let canonical_workspace = fs::canonicalize(&workspace).unwrap_or(workspace.clone());
-
-    let expected = vec![
-        String::from(
-            "doctor ok=true profile=prod provider_id=mock-local provider_model=mock-local provider_experimental=false",
-        ),
-        String::from("doctor state revision=4 mode=active facts=1 denied=0 audit=1"),
-        String::from("doctor runtime provider_state=ready memory_state=ready tool_state=ready"),
-        format!(
-            "doctor detail provider_detail=provider=mock-local memory_detail=path={} tool_detail=workspace={}",
-            memory_path.display(),
-            canonical_workspace.display()
-        ),
-        String::from(
-            "doctor async_host detail=init_mode=configured,worker_threads=2,max_in_flight=8,timeout_ms=none",
-        ),
-        format!(
-            "doctor paths workspace={} state_path={} trace_events_path={} tool_log_path={}",
-            workspace.display(),
-            state_path.display(),
-            workspace.join(".axonrunner/trace/events.jsonl").display(),
-            workspace.join("runtime.log").display()
-        ),
-        format!(
-            "doctor check name=workspace_dir state=ok detail=exists,path={}",
-            workspace.display()
-        ),
-        format!(
-            "doctor check name=state_parent_dir state=ok detail=exists,path={}",
-            state_path
-                .parent()
-                .expect("state parent should exist")
-                .display()
-        ),
-        format!(
-            "doctor check name=trace_parent_dir state=ok detail=exists,path={}",
-            workspace.join(".axonrunner/trace").display()
-        ),
-        format!(
-            "doctor check name=state_snapshot state=ok detail=present,path={}",
-            state_path.display()
-        ),
-        format!(
-            "doctor check name=trace_log state=ok detail=events=1,path={}",
-            workspace.join(".axonrunner/trace/events.jsonl").display()
-        ),
-        String::from("doctor check name=provider_probe state=ok detail=provider=mock-local"),
-    ];
-    assert_eq!(stdout_lines(&doctor), expected);
-
-    let _ = fs::remove_file(memory_path);
-    let _ = fs::remove_file(state_path);
-    let _ = fs::remove_dir_all(workspace);
-}
-
-#[test]
-fn e2e_cli_read_runs_through_canonical_query_path_and_persisted_state() {
-    let state_path = unique_path("state-read-canonical", "snapshot");
-
-    let write = run_cli_with_env(
-        &["run", "write:alpha=42"],
-        &[("AXONRUNNER_RUNTIME_STATE_PATH", path_str(&state_path))],
-        "read-canonical-write",
-    );
-    let read = run_cli_with_env(
-        &["run", "read:alpha"],
-        &[("AXONRUNNER_RUNTIME_STATE_PATH", path_str(&state_path))],
-        "read-canonical-read",
-    );
-
-    let write_stdout = stdout_of(&write);
-    let read_stdout = stdout_of(&read);
-
-    assert!(write.status.success());
-    assert!(read.status.success());
-    assert!(write_stdout.contains("intent id=cli-1 kind=write outcome=accepted"));
-    assert!(read_stdout.contains("intent id=cli-2 kind=read outcome=accepted"));
-    assert!(read_stdout.contains("query intent_id=cli-2 key=alpha value=42"));
-
-    let _ = fs::remove_file(state_path);
-}
-
-#[test]
-fn golden_persisted_control_state_freeze_blocks_later_write() {
-    let state_path = unique_path("golden-freeze-state", "snapshot");
-
-    let freeze = run_cli_with_env(
-        &["run", "freeze"],
-        &[("AXONRUNNER_RUNTIME_STATE_PATH", path_str(&state_path))],
-        "golden-freeze-write",
-    );
-    let write = run_cli_with_env(
-        &["run", "write:alpha=42"],
-        &[("AXONRUNNER_RUNTIME_STATE_PATH", path_str(&state_path))],
-        "golden-freeze-read",
-    );
-
-    let freeze_stdout = stdout_of(&freeze);
-    let write_stdout = stdout_of(&write);
-
-    assert!(freeze.status.success());
-    assert!(write.status.success());
-    assert!(freeze_stdout.contains("kind=freeze outcome=accepted"));
-    assert!(write_stdout.contains("kind=write outcome=rejected"));
-    assert!(write_stdout.contains("policy=readonly_mutation"));
-
-    let _ = fs::remove_file(state_path);
-}
-
-#[test]
-fn e2e_cli_run_aliases_legacy_single_intent_commands() {
-    let write = run_cli(&["run", "write:alpha=42"]);
-    let freeze = run_cli(&["freeze"]);
-
-    let write_stdout = stdout_of(&write);
-    let freeze_stdout = stdout_of(&freeze);
-
-    assert!(write.status.success());
-    assert!(freeze.status.success());
-    assert!(write_stdout.contains("intent id=cli-1 kind=write outcome=accepted"));
-    assert!(freeze_stdout.contains("intent id=cli-1 kind=freeze"));
-}
-
-#[test]
 fn e2e_cli_rejects_unknown_runtime_provider_from_env() {
     let output = run_cli_with_env(
         &["status"],
@@ -1748,118 +1353,6 @@ fn golden_workspace_contract_blocks_runtime_when_workspace_is_undetermined() {
 }
 
 #[test]
-fn e2e_cli_run_uses_codek_provider_selection() {
-    let memory_path = unique_path("codek-provider-memory", "md");
-    let workspace = unique_path("codek-provider-workspace", "dir");
-    let output = run_cli_with_env(
-        &["run", "write:alpha=42"],
-        &[
-            ("AXONRUNNER_RUNTIME_PROVIDER", "codek"),
-            ("AXONRUNNER_CODEX_BIN", "/definitely-missing-codex-binary"),
-            ("AXONRUNNER_RUNTIME_MEMORY_PATH", path_str(&memory_path)),
-            ("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace)),
-        ],
-        "codek-provider-write",
-    );
-    let stdout = stdout_of(&output);
-    let stderr = stderr_of(&output);
-
-    assert_eq!(output.status.code(), Some(6), "stderr:\n{stderr}");
-    assert!(stdout.is_empty());
-    assert!(stderr.contains("runtime execution error:"));
-    assert!(stderr.contains("runtime execution failed intent_id=cli-1 stage=provider"));
-    assert!(stderr.contains("codex_runtime.connect"));
-    let failed_report = fs::read_to_string(workspace.join(".axonrunner/artifacts/cli-1.report.md"))
-        .expect("failed run report artifact should exist");
-    let failed_trace = fs::read_to_string(workspace.join(".axonrunner/trace/events.jsonl"))
-        .expect("failed run trace event log should exist");
-    assert!(failed_report.contains("tool=skipped"));
-    assert!(failed_report.contains("outcome=accepted"));
-    assert!(failed_report.contains("run_phase=blocked"));
-    assert!(failed_report.contains("run_outcome=blocked"));
-    assert!(failed_report.contains("provider_health_state=blocked"));
-    let failed_event: serde_json::Value = serde_json::from_str(
-        failed_trace
-            .lines()
-            .last()
-            .expect("trace line should exist"),
-    )
-    .expect("trace line should be valid json");
-    assert_eq!(failed_event["intent_id"], "cli-1");
-    assert_eq!(failed_event["provider"], "failed");
-    assert_eq!(failed_event["report_written"], true);
-    assert_eq!(failed_event["first_failure"]["stage"], "provider");
-    assert_eq!(failed_event["verification"]["status"], "failed");
-    assert_eq!(failed_event["run"]["run_id"], "run-1");
-    assert_eq!(failed_event["run"]["phase"], "blocked");
-    assert_eq!(failed_event["run"]["outcome"], "blocked");
-    assert!(
-        failed_event["patch_artifacts"]
-            .as_array()
-            .expect("patch artifacts should be an array")
-            .len()
-            >= 4
-    );
-
-    let reader = MarkdownMemoryAdapter::new(memory_path.clone()).expect("memory file should load");
-    assert!(
-        reader
-            .get("alpha")
-            .expect("memory read should succeed")
-            .is_none(),
-        "memory write should be skipped on provider failure"
-    );
-    assert!(
-        !workspace.join("runtime.log").exists(),
-        "tool write should be skipped on provider failure"
-    );
-
-    let _ = fs::remove_file(memory_path);
-    let _ = fs::remove_dir_all(workspace);
-}
-
-#[test]
-fn e2e_cli_replay_specific_intent_reports_failure_boundary() {
-    let workspace = unique_path("replay-failure-workspace", "dir");
-    let output = run_cli_with_env(
-        &["run", "write:alpha=42"],
-        &[
-            ("AXONRUNNER_RUNTIME_PROVIDER", "codek"),
-            ("AXONRUNNER_CODEX_BIN", "/definitely-missing-codex-binary"),
-            ("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace)),
-        ],
-        "replay-failure-write",
-    );
-    assert_eq!(output.status.code(), Some(6));
-
-    let replay = run_cli_with_env(
-        &["replay", "cli-1"],
-        &[("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
-        "replay-failure-read",
-    );
-    let stdout = stdout_of(&replay);
-    let stderr = stderr_of(&replay);
-
-    assert!(replay.status.success(), "stderr:\n{stderr}");
-    assert!(stderr.is_empty());
-    assert!(stdout.contains("replay intent_id=cli-1 count=1"));
-    assert!(stdout.contains("replay failure stage=provider"));
-    assert!(stdout.contains("replay verification status=failed"));
-    assert!(stdout.contains("replay run run_id=run-1 phase=blocked outcome=blocked"));
-    assert!(stdout.contains("replay artifact_index count=1"));
-    assert!(stdout.contains("replay patch target="));
-    assert!(stdout.contains("before="));
-    assert!(stdout.contains("after="));
-    assert!(
-        stdout.contains(
-            "replay summary failed_intents=1 false_success_intents=1 false_done_intents=0"
-        )
-    );
-
-    let _ = fs::remove_dir_all(workspace);
-}
-
-#[test]
 fn e2e_cli_replay_missing_target_is_runtime_error() {
     let workspace = unique_path("replay-missing-workspace", "dir");
     fs::create_dir_all(&workspace).expect("workspace should exist");
@@ -1876,60 +1369,6 @@ fn e2e_cli_replay_missing_target_is_runtime_error() {
     assert!(stdout.is_empty());
     assert!(stderr.contains("runtime execution error:"));
     assert!(stderr.contains("replay target not found"));
-
-    let _ = fs::remove_dir_all(workspace);
-}
-
-#[test]
-fn golden_schema_legacy_trace_replay_remains_compatible() {
-    let workspace = unique_path("replay-legacy-workspace", "dir");
-    fs::create_dir_all(workspace.join(".axonrunner/trace")).expect("trace dir should exist");
-    let legacy = serde_json::json!({
-        "schema": "axonrunner.trace.intent.v1",
-        "timestamp_ms": 1_u64,
-        "actor_id": "system",
-        "intent_id": "cli-legacy",
-        "kind": "write",
-        "outcome": "accepted",
-        "policy_code": "allowed",
-        "effect_count": 1,
-        "revision": 1,
-        "mode": "active",
-        "provider": "applied",
-        "memory": "applied",
-        "tool": "applied",
-        "tool_outputs": ["log=runtime.log"],
-        "first_failure": serde_json::Value::Null,
-        "artifacts": {
-            "plan": ".axonrunner/artifacts/cli-legacy.plan.md",
-            "apply": ".axonrunner/artifacts/cli-legacy.apply.md",
-            "verify": ".axonrunner/artifacts/cli-legacy.verify.md",
-            "report": ".axonrunner/artifacts/cli-legacy.report.md"
-        },
-        "report_written": true,
-        "report_error": serde_json::Value::Null
-    });
-    fs::write(
-        workspace.join(".axonrunner/trace/events.jsonl"),
-        format!(
-            "{}\n",
-            serde_json::to_string(&legacy).expect("legacy trace should serialize")
-        ),
-    )
-    .expect("trace log should be written");
-
-    let replay = run_cli_with_env(
-        &["replay", "latest"],
-        &[("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
-        "replay-legacy-read",
-    );
-    let stdout = stdout_of(&replay);
-    let stderr = stderr_of(&replay);
-
-    assert!(replay.status.success(), "stderr:\n{stderr}");
-    assert!(stderr.is_empty());
-    assert!(stdout.contains("replay intent_id=cli-legacy count=1"));
-    assert!(stdout.contains("replay verification status=unknown"));
 
     let _ = fs::remove_dir_all(workspace);
 }
@@ -1963,10 +1402,14 @@ fn e2e_cli_status_and_replay_render_aborted_outcome_from_trace() {
             "run_id": "run-abort",
             "step_ids": ["run-abort/step-1-planning"],
             "provider_cwd": "/tmp/aborted-workspace",
+            "execution_workspace": "/tmp/aborted-workspace",
             "phase": "aborted",
             "outcome": "aborted",
             "reason": "operator_abort",
-            "plan_summary": "intent_id=cli-abort legacy_write key=alpha outcome=accepted",
+            "approval_state": "not_required",
+            "verifier_state": "passed",
+            "verifier_summary": "operator_abort",
+            "plan_summary": "intent_id=cli-abort goal outcome=accepted",
             "planned_steps": 4,
             "repair": {
                 "attempted": false,
@@ -2016,80 +1459,6 @@ fn e2e_cli_status_and_replay_render_aborted_outcome_from_trace() {
 }
 
 #[test]
-fn golden_replay_legacy_text_contract_is_stable() {
-    let workspace = unique_path("replay-legacy-golden-workspace", "dir");
-    fs::create_dir_all(workspace.join(".axonrunner/trace")).expect("trace dir should exist");
-    let legacy = serde_json::json!({
-        "schema": "axonrunner.trace.intent.v1",
-        "timestamp_ms": 1_u64,
-        "actor_id": "system",
-        "intent_id": "cli-legacy",
-        "kind": "write",
-        "outcome": "accepted",
-        "policy_code": "allowed",
-        "effect_count": 1,
-        "revision": 1,
-        "mode": "active",
-        "provider": "applied",
-        "memory": "applied",
-        "tool": "applied",
-        "tool_outputs": ["log=runtime.log"],
-        "first_failure": serde_json::Value::Null,
-        "artifacts": {
-            "plan": ".axonrunner/artifacts/cli-legacy.plan.md",
-            "apply": ".axonrunner/artifacts/cli-legacy.apply.md",
-            "verify": ".axonrunner/artifacts/cli-legacy.verify.md",
-            "report": ".axonrunner/artifacts/cli-legacy.report.md"
-        },
-        "report_written": true,
-        "report_error": serde_json::Value::Null
-    });
-    fs::write(
-        workspace.join(".axonrunner/trace/events.jsonl"),
-        format!(
-            "{}\n",
-            serde_json::to_string(&legacy).expect("legacy trace should serialize")
-        ),
-    )
-    .expect("trace log should be written");
-
-    let replay = run_cli_with_env(
-        &["replay", "latest"],
-        &[("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
-        "replay-legacy-golden-read",
-    );
-    let stderr = stderr_of(&replay);
-
-    assert!(replay.status.success(), "stderr:\n{stderr}");
-    assert!(stderr.is_empty());
-    assert_eq!(
-        stdout_lines(&replay),
-        vec![
-            String::from(
-                "replay intent_id=cli-legacy count=1 revision=1 mode=active kind=write outcome=accepted policy=allowed",
-            ),
-            String::from(
-                "replay stages provider=applied memory=applied tool=applied report_written=true",
-            ),
-            String::from(
-                "replay verification status=unknown summary=legacy_trace_without_verification",
-            ),
-            String::from(
-                "replay artifacts plan=.axonrunner/artifacts/cli-legacy.plan.md apply=.axonrunner/artifacts/cli-legacy.apply.md verify=.axonrunner/artifacts/cli-legacy.verify.md report=.axonrunner/artifacts/cli-legacy.report.md",
-            ),
-            String::from(
-                "replay artifact_index count=1 latest_report=.axonrunner/artifacts/cli-legacy.report.md",
-            ),
-            String::from(
-                "replay summary failed_intents=0 false_success_intents=0 false_done_intents=0"
-            ),
-        ]
-    );
-
-    let _ = fs::remove_dir_all(workspace);
-}
-
-#[test]
 fn e2e_cli_replay_counts_false_done_runs() {
     let workspace = unique_path("replay-false-done-workspace", "dir");
     fs::create_dir_all(workspace.join(".axonrunner/trace")).expect("trace dir should exist");
@@ -2118,9 +1487,13 @@ fn e2e_cli_replay_counts_false_done_runs() {
             "run_id": "run-false-done",
             "step_ids": ["run-false-done/step-1-planning"],
             "provider_cwd": "/tmp/workspace",
+            "execution_workspace": "/tmp/workspace",
             "phase": "failed",
             "outcome": "failed",
             "reason": "done_condition_missing_report_artifact:report",
+            "approval_state": "not_required",
+            "verifier_state": "failed",
+            "verifier_summary": "done_condition_missing_report_artifact:report",
             "plan_summary": "intent_id=cli-false-done goal",
             "planned_steps": 4,
             "repair": {
@@ -2187,76 +1560,6 @@ fn e2e_cli_status_reports_blocked_codek_provider() {
 }
 
 #[test]
-fn e2e_cli_freeze_state_persists_across_processes() {
-    let state_path = unique_path("state-freeze", "snapshot");
-
-    let freeze = run_cli_with_env(
-        &["freeze"],
-        &[("AXONRUNNER_RUNTIME_STATE_PATH", path_str(&state_path))],
-        "state-freeze-freeze",
-    );
-    let write = run_cli_with_env(
-        &["run", "write:alpha=42"],
-        &[("AXONRUNNER_RUNTIME_STATE_PATH", path_str(&state_path))],
-        "state-freeze-write",
-    );
-    let status = run_cli_with_env(
-        &["status"],
-        &[("AXONRUNNER_RUNTIME_STATE_PATH", path_str(&state_path))],
-        "state-freeze-status",
-    );
-
-    let freeze_stdout = stdout_of(&freeze);
-    let write_stdout = stdout_of(&write);
-    let status_stdout = stdout_of(&status);
-
-    assert!(freeze.status.success());
-    assert!(write.status.success());
-    assert!(status.status.success());
-    assert!(freeze_stdout.contains("intent id=cli-1 kind=freeze outcome=accepted"));
-    assert!(write_stdout.contains("intent id=cli-2 kind=write outcome=rejected"));
-    assert!(write_stdout.contains("policy=readonly_mutation"));
-    assert!(status_stdout.contains("mode=read_only"));
-
-    let _ = fs::remove_file(state_path);
-}
-
-#[test]
-fn e2e_cli_halt_state_persists_and_halt_is_idempotent() {
-    let state_path = unique_path("state-halt", "snapshot");
-
-    let first_halt = run_cli_with_env(
-        &["halt"],
-        &[("AXONRUNNER_RUNTIME_STATE_PATH", path_str(&state_path))],
-        "state-halt-first",
-    );
-    let second_halt = run_cli_with_env(
-        &["halt"],
-        &[("AXONRUNNER_RUNTIME_STATE_PATH", path_str(&state_path))],
-        "state-halt-second",
-    );
-    let write = run_cli_with_env(
-        &["run", "write:alpha=42"],
-        &[("AXONRUNNER_RUNTIME_STATE_PATH", path_str(&state_path))],
-        "state-halt-write",
-    );
-
-    let first_stdout = stdout_of(&first_halt);
-    let second_stdout = stdout_of(&second_halt);
-    let write_stdout = stdout_of(&write);
-
-    assert!(first_halt.status.success());
-    assert!(second_halt.status.success());
-    assert!(write.status.success());
-    assert!(first_stdout.contains("intent id=cli-1 kind=halt outcome=accepted"));
-    assert!(second_stdout.contains("intent id=cli-2 kind=halt outcome=accepted"));
-    assert!(write_stdout.contains("intent id=cli-3 kind=write outcome=rejected"));
-    assert!(write_stdout.contains("policy=runtime_halted"));
-
-    let _ = fs::remove_file(state_path);
-}
-
-#[test]
 fn e2e_cli_health_reports_blocked_openai_provider_without_api_key() {
     let output = run_cli_with_env(
         &["health"],
@@ -2293,44 +1596,6 @@ fn e2e_cli_health_reports_missing_api_key_after_openai_experimental_opt_in() {
     assert!(stdout.contains("reason=missing_openai_api_key"));
 }
 
-#[test]
-fn e2e_cli_config_file_can_set_workspace_state_path_and_provider_model() {
-    let state_path = unique_path("config-state", "snapshot");
-    let workspace = unique_path("config-workspace", "dir");
-    let config_path = unique_path("runtime-config", "cfg");
-    let config_contents = format!(
-        "profile=prod\nprovider=mock-local\nprovider_model=mock-plan\nworkspace={}\nstate_path={}\n",
-        workspace.display(),
-        state_path.display()
-    );
-    fs::write(&config_path, config_contents).expect("config file should be written");
-
-    let config_arg = format!("--config-file={}", config_path.display());
-    let write = run_cli_without_runtime_defaults(
-        &[config_arg.as_str(), "run", "write:alpha=42"],
-        &[],
-        "config-file-write",
-    );
-    let status = run_cli_without_runtime_defaults(
-        &[config_arg.as_str(), "status"],
-        &[],
-        "config-file-status",
-    );
-
-    let write_stdout = stdout_of(&write);
-    let status_stdout = stdout_of(&status);
-
-    assert!(write.status.success());
-    assert!(status.status.success());
-    assert!(write_stdout.contains("intent id=cli-1 kind=write outcome=accepted"));
-    assert!(status_stdout.contains("provider_model=mock-plan"));
-    assert!(workspace.join("runtime.log").exists());
-    assert!(state_path.exists());
-
-    let _ = fs::remove_file(config_path);
-    let _ = fs::remove_file(state_path);
-    let _ = fs::remove_dir_all(workspace);
-}
 
 #[test]
 fn e2e_cli_unknown_command_stderr_stable() {

@@ -82,14 +82,29 @@ for fixture in "$@"; do
   AXONRUNNER_RUNTIME_STATE_PATH="$state_path" \
   "$BIN_PATH" doctor --json >"$doctor_json" 2>"$doctor_stderr" || doctor_rc=$?
 
+  failed_intents=unknown
+  false_success_intents=unknown
+  false_done_intents=unknown
+  if [ -f "$replay_stdout" ]; then
+    replay_summary=$(grep '^replay summary ' "$replay_stdout" | tail -n 1 || true)
+    if [ -n "$replay_summary" ]; then
+      failed_intents=$(printf '%s\n' "$replay_summary" | sed -n 's/.*failed_intents=\([0-9][0-9]*\).*/\1/p')
+      false_success_intents=$(printf '%s\n' "$replay_summary" | sed -n 's/.*false_success_intents=\([0-9][0-9]*\).*/\1/p')
+      false_done_intents=$(printf '%s\n' "$replay_summary" | sed -n 's/.*false_done_intents=\([0-9][0-9]*\).*/\1/p')
+      [ -n "$failed_intents" ] || failed_intents=unknown
+      [ -n "$false_success_intents" ] || false_success_intents=unknown
+      [ -n "$false_done_intents" ] || false_done_intents=unknown
+    fi
+  fi
+
   status=ok
   if [ "$run_rc" -ne 0 ] || [ "$replay_rc" -ne 0 ] || [ "$doctor_rc" -ne 0 ]; then
     status=failed
     FAILURES=$((FAILURES + 1))
   fi
 
-  printf '%s fixture=%s run_rc=%s replay_rc=%s doctor_rc=%s\n' \
-    "$status" "$fixture" "$run_rc" "$replay_rc" "$doctor_rc" >>"$SUMMARY_PATH"
+  printf '%s fixture=%s run_rc=%s replay_rc=%s doctor_rc=%s failed_intents=%s false_success_intents=%s false_done_intents=%s\n' \
+    "$status" "$fixture" "$run_rc" "$replay_rc" "$doctor_rc" "$failed_intents" "$false_success_intents" "$false_done_intents" >>"$SUMMARY_PATH"
 done
 
 printf 'failures=%s\n' "$FAILURES" >>"$SUMMARY_PATH"

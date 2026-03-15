@@ -339,7 +339,30 @@ pub struct WorkflowPackVerifierRule {
     pub profile: RunCommandProfile,
     pub command_example: String,
     pub artifact_expectation: String,
+    #[serde(default)]
+    pub strength: WorkflowPackVerifierStrength,
     pub required: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkflowPackVerifierStrength {
+    #[default]
+    Strong,
+    Weak,
+    Unresolved,
+    PackRequired,
+}
+
+impl WorkflowPackVerifierStrength {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Strong => "strong",
+            Self::Weak => "weak",
+            Self::Unresolved => "unresolved",
+            Self::PackRequired => "pack_required",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

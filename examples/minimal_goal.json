@@ -6,7 +6,7 @@
     { "label": "report", "evidence": "report artifact exists" }
   ],
   "verification_checks": [
-    { "label": "workspace", "detail": "pwd" }
+    { "label": "workspace files", "detail": "ls ." }
   ],
   "budget": { "max_steps": 5, "max_minutes": 10, "max_tokens": 8000 },
   "approval_mode": "never"

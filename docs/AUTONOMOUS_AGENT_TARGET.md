@@ -21,7 +21,6 @@
 - `replay [run-id|latest]`
 - `resume [run-id|latest]`
 - `abort [run-id|latest]`
-- compatibility surface: `batch`, `read`, `write`, `remove`, `freeze`, `halt`
 
 ## Next Backlog
 

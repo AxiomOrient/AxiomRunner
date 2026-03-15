@@ -1,4 +1,4 @@
-use crate::cli_command::{CliCommand, LegacyIntentTemplate, RunTemplate, USAGE};
+use crate::cli_command::{CliCommand, RunTemplate, USAGE};
 use crate::config_loader::AppConfig;
 use crate::display::{mode_name, outcome_name};
 use crate::doctor::{build_doctor_report, render_doctor_lines};
@@ -13,10 +13,7 @@ use crate::status::{
 };
 use crate::trace_store::{TraceEventInput, TraceStore};
 use crate::workspace_lock::WorkspaceLock;
-use axonrunner_core::{
-    AgentState, DecisionOutcome, DomainEvent, ExecutionMode, Intent, IntentKind, PolicyCode,
-    build_policy_audit, decide, evaluate_policy, project_from,
-};
+use axonrunner_core::{AgentState, DecisionOutcome, PolicyCode};
 use std::time::Instant;
 
 mod lifecycle;
@@ -29,7 +26,6 @@ struct AppliedIntent {
     policy_code: PolicyCode,
     effect_count: usize,
 }
-
 
 fn report_write_input(applied: &AppliedIntent) -> ReportWriteInput<'_> {
     ReportWriteInput {
@@ -101,78 +97,20 @@ impl CliRuntime {
         self.compose_state.shutdown()
     }
 
-    fn reset(&mut self) -> Result<(), String> {
-        self.state = AgentState::default();
-        self.next_intent_seq = 0;
-        self.next_run_seq = 0;
-        self.pending_run = None;
-        self.compose_state
-            .clear()
-            .map(|_| ())
-            .map_err(|error| format!("runtime execution failed stage=clear error={error}"))?;
-        self.persist_snapshot()
-    }
-
     fn apply_template(&mut self, template: &RunTemplate) -> Result<AppliedIntent, String> {
-        match template {
-            RunTemplate::LegacyIntent(template) => {
-                let intent = template.to_intent(self.next_intent_id(), Some(self.actor_id.clone()));
-                Ok(self.apply_intent(intent))
-            }
-            RunTemplate::GoalFile(goal_file) => {
-                goal_file
-                    .goal
-                    .validate()
-                    .map_err(|error| format!("goal file validation failed: {error:?}"))?;
-                let intent_id = self.next_intent_id();
-                Ok(AppliedIntent {
-                    intent_id,
-                    kind: "goal",
-                    outcome: DecisionOutcome::Accepted,
-                    policy_code: PolicyCode::Allowed,
-                    effect_count: 0,
-                })
-            }
-        }
-    }
-
-    fn apply_intent(&mut self, intent: Intent) -> AppliedIntent {
-        let verdict = evaluate_policy(&self.state, &intent);
-        let decision = decide(&intent, &verdict);
-        let audit = build_policy_audit(&self.state, &intent, &verdict);
-        let effects = decision.effects.clone();
-
-        let events = vec![
-            DomainEvent::IntentAccepted {
-                intent: intent.clone(),
-            },
-            DomainEvent::PolicyEvaluated { audit },
-            DomainEvent::DecisionCalculated { decision },
-            DomainEvent::EffectsApplied { effects },
-        ];
-
-        self.state = project_from(&self.state, &events);
-
-        let decision = match &events[2] {
-            DomainEvent::DecisionCalculated { decision } => decision,
-            _ => unreachable!("event order is fixed"),
-        };
-        let audit = match &events[1] {
-            DomainEvent::PolicyEvaluated { audit } => audit,
-            _ => unreachable!("event order is fixed"),
-        };
-        let effects = match &events[3] {
-            DomainEvent::EffectsApplied { effects } => effects,
-            _ => unreachable!("event order is fixed"),
-        };
-
-        AppliedIntent {
-            intent_id: intent.intent_id,
-            kind: intent_kind_name(&intent.kind),
-            outcome: decision.outcome,
-            policy_code: audit.code,
-            effect_count: effects.len(),
-        }
+        let RunTemplate::GoalFile(goal_file) = template;
+        goal_file
+            .goal
+            .validate()
+            .map_err(|error| format!("goal file validation failed: {error:?}"))?;
+        let intent_id = self.next_intent_id();
+        Ok(AppliedIntent {
+            intent_id,
+            kind: "goal",
+            outcome: DecisionOutcome::Accepted,
+            policy_code: PolicyCode::Allowed,
+            effect_count: 0,
+        })
     }
 
     fn persist_template_result(
@@ -181,7 +119,7 @@ impl CliRuntime {
         applied: &AppliedIntent,
     ) -> crate::runtime_compose::RuntimeComposeExecution {
         self.compose_state
-            .apply_template(template, &applied.intent_id, applied.outcome)
+            .apply_template(template, applied.outcome)
     }
 
     fn next_intent_id(&mut self) -> String {
@@ -244,19 +182,6 @@ pub fn execute_command(
             runtime.ensure_workspace_lock("run")?;
             execute_intent(runtime, &intent)?
         }
-        CliCommand::Batch {
-            intents,
-            reset_state,
-        } => {
-            runtime.ensure_workspace_lock("batch")?;
-            if reset_state {
-                runtime.reset()?;
-            }
-            for intent in &intents {
-                execute_intent(runtime, intent)?;
-            }
-            print_summary("batch", intents.len(), &runtime.state);
-        }
         CliCommand::Replay { .. } => {
             return Err(String::from(
                 "replay command should be handled before runtime execution",
@@ -292,7 +217,7 @@ fn execute_intent(runtime: &mut CliRuntime, intent: &RunTemplate) -> Result<(), 
     let plan =
         runtime
             .compose_state
-            .plan_template(intent, &run_id, &applied.intent_id, applied.outcome);
+            .plan_template(intent, &run_id, &applied.intent_id);
     let pre_execution_guard = intent.goal_file().and_then(|goal_file| {
         lifecycle::goal_pre_execution_guard(goal_file, &plan, runtime.compose_state.max_tokens()).map(
             |summary| {
@@ -324,7 +249,7 @@ fn execute_intent(runtime: &mut CliRuntime, intent: &RunTemplate) -> Result<(), 
             .compose_state
             .write_checkpoint_metadata(&applied.intent_id, &run_id)?;
         let execution = runtime.persist_template_result(intent, &applied);
-        let verification = lifecycle::verify_run(intent, &applied, &execution, &runtime.state);
+        let verification = lifecycle::verify_run(intent, &execution);
         let (execution, verification, repair) =
             lifecycle::run_repair_loop(runtime, intent, &plan, &applied, execution, verification);
         (execution, verification, repair, checkpoint)
@@ -443,13 +368,7 @@ fn execute_intent(runtime: &mut CliRuntime, intent: &RunTemplate) -> Result<(), 
     runtime.pending_run = pending_run_snapshot(intent, &applied, &finalized.record);
     runtime.persist_snapshot()?;
 
-    match intent {
-        RunTemplate::LegacyIntent(LegacyIntentTemplate::Read { key }) => {
-            print_intent_result(&applied);
-            print_read_value(&applied.intent_id, &runtime.state, key);
-        }
-        _ => print_intent_result(&applied),
-    }
+    print_intent_result(&applied);
     print_run_result(&applied.intent_id, &finalized.record);
     Ok(())
 }
@@ -468,15 +387,12 @@ fn execute_resume(runtime: &mut CliRuntime, target: &str) -> Result<(), String> 
         &template,
         &pending.run_id,
         &pending.intent_id,
-        DecisionOutcome::Accepted,
     );
-    let execution = runtime.compose_state.apply_template(
-        &template,
-        &pending.intent_id,
-        DecisionOutcome::Accepted,
-    );
+    let execution = runtime
+        .compose_state
+        .apply_template(&template, DecisionOutcome::Accepted);
     let resume_applied = accepted_goal_applied(&pending.intent_id);
-    let verification = lifecycle::verify_run(&template, &resume_applied, &execution, &runtime.state);
+    let verification = lifecycle::verify_run(&template, &execution);
     let (execution, verification, repair) = lifecycle::run_repair_loop(
         runtime,
         &template,
@@ -569,7 +485,6 @@ fn execute_abort(runtime: &mut CliRuntime, target: &str) -> Result<(), String> {
         &template,
         &pending.run_id,
         &pending.intent_id,
-        DecisionOutcome::Accepted,
     );
     let execution = runtime.compose_state.idle_execution();
     let verification = RuntimeRunVerification {
@@ -722,27 +637,6 @@ fn print_run_result(intent_id: &str, record: &RuntimeRunRecord) {
     );
 }
 
-fn print_read_value(intent_id: &str, state: &AgentState, key: &str) {
-    let value = state.facts.get(key).map(String::as_str).unwrap_or("<none>");
-    println!(
-        "query intent_id={} key={} value={} revision={}",
-        intent_id, key, value, state.revision
-    );
-}
-
-fn print_summary(label: &str, intent_count: usize, state: &AgentState) {
-    println!(
-        "{} completed count={} revision={} mode={} facts={} denied={} audit={}",
-        label,
-        intent_count,
-        state.revision,
-        mode_name(state.mode),
-        state.facts.len(),
-        state.denied_count,
-        state.audit_count
-    );
-}
-
 fn print_status(runtime: &CliRuntime, target: Option<&str>) {
     let compose = runtime.compose_state.health();
     let latest_run = match target {
@@ -831,17 +725,6 @@ fn print_doctor(runtime: &CliRuntime, config: &AppConfig, json: bool) -> Result<
     }
     Ok(())
 }
-
-fn intent_kind_name(kind: &IntentKind) -> &'static str {
-    match kind {
-        IntentKind::ReadFact { .. } => "read",
-        IntentKind::WriteFact { .. } => "write",
-        IntentKind::RemoveFact { .. } => "remove",
-        IntentKind::FreezeWrites => "freeze",
-        IntentKind::Halt => "halt",
-    }
-}
-
 
 #[cfg(test)]
 mod tests {

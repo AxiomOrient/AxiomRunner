@@ -311,18 +311,11 @@ fn parse_snapshot(raw: &str) -> Result<RuntimeStateSnapshot, String> {
     }
 
     snapshot.state.facts = facts;
-    if snapshot.next_run_seq == 0 {
-        snapshot.next_run_seq = snapshot.next_intent_seq;
-    }
     if saw_pending_run {
-        if pending_run.approval_state.is_empty() {
-            pending_run.approval_state = match pending_run.phase.as_str() {
-                "waiting_approval" => String::from("required"),
-                _ => String::from("unknown"),
-            };
-        }
-        if pending_run.verifier_state.is_empty() {
-            pending_run.verifier_state = String::from("unknown");
+        if pending_run.approval_state.is_empty() || pending_run.verifier_state.is_empty() {
+            return Err(String::from(
+                "pending run snapshot is missing approval_state or verifier_state",
+            ));
         }
         snapshot.pending_run = Some(pending_run);
     }
@@ -337,7 +330,7 @@ fn parse_u64(raw: &str, field: &str, line: usize) -> Result<u64, String> {
 fn parse_mode(raw: &str, line: usize) -> Result<ExecutionMode, String> {
     match raw {
         "active" => Ok(ExecutionMode::Active),
-        "read_only" | "readonly" => Ok(ExecutionMode::ReadOnly),
+        "read_only" => Ok(ExecutionMode::ReadOnly),
         "halted" => Ok(ExecutionMode::Halted),
         _ => Err(format!("invalid mode '{raw}' on line {line}")),
     }
@@ -466,80 +459,6 @@ mod tests {
 
         assert_eq!(decoded, snapshot);
         assert!(encoded.contains("mode=read_only"));
-    }
-
-    #[test]
-    fn state_snapshot_loads_legacy_readonly_mode() {
-        let raw = "\
-version=axonrunner-state-v1
-next_intent_seq=3
-next_run_seq=3
-revision=12
-mode=readonly
-last_intent_id=636c692d33
-last_actor_id=73797374656d
-last_decision=accepted
-last_policy_code=allowed
-denied_count=1
-audit_count=4
-fact.616c706861=3432
-";
-
-        let decoded = parse_snapshot(raw).expect("legacy snapshot should parse");
-
-        assert_eq!(decoded.next_intent_seq, 3);
-        assert_eq!(decoded.next_run_seq, 3);
-        assert_eq!(decoded.state.revision, 12);
-        assert_eq!(decoded.state.mode, ExecutionMode::ReadOnly);
-        assert_eq!(decoded.state.facts.get("alpha"), Some(&String::from("42")));
-    }
-
-    #[test]
-    fn state_snapshot_legacy_payload_defaults_next_run_seq_from_intent_seq() {
-        let raw = "\
-version=axonrunner-state-v1
-next_intent_seq=9
-revision=1
-mode=active
-last_intent_id=-
-last_actor_id=-
-last_decision=-
-last_policy_code=-
-denied_count=0
-audit_count=0
-";
-
-        let decoded = parse_snapshot(raw).expect("legacy snapshot should parse");
-        assert_eq!(decoded.next_intent_seq, 9);
-        assert_eq!(decoded.next_run_seq, 9);
-    }
-
-    #[test]
-    fn state_snapshot_legacy_pending_run_defaults_new_fields() {
-        let raw = "\
-version=axonrunner-state-v1
-next_intent_seq=2
-next_run_seq=2
-revision=1
-mode=active
-last_intent_id=-
-last_actor_id=-
-last_decision=-
-last_policy_code=-
-denied_count=0
-audit_count=0
-pending_run.run_id=72756e2d31
-pending_run.intent_id=636c692d31
-pending_run.goal_file_path=2f746d702f676f616c2e6a736f6e
-pending_run.phase=77616974696e675f617070726f76616c
-pending_run.reason=617070726f76616c5f72657175697265645f6265666f72655f657865637574696f6e
-";
-
-        let decoded = parse_snapshot(raw).expect("legacy pending snapshot should parse");
-        let pending = decoded.pending_run.expect("pending run should exist");
-
-        assert_eq!(pending.approval_state, "required");
-        assert_eq!(pending.verifier_state, "unknown");
     }
 
     fn unique_snapshot_path(label: &str) -> PathBuf {

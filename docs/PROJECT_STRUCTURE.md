@@ -51,7 +51,7 @@ AxonRunner 저장소는 크게 3개 실행 크레이트와 몇 개 보조 폴더
   - `main.rs`
   - `lib.rs`
 
-- 입력층 — 명령과 설정을 읽고 goal file인지 legacy intent인지 나눈다.
+- 입력층 — 명령과 설정을 읽고 goal file 경로를 해석한다.
   파일:
   - `cli_args.rs`
   - `cli_command.rs`

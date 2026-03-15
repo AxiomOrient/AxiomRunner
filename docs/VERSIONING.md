@@ -23,8 +23,10 @@ v0.1 출하 전에는 아래가 모두 잠겨 있어야 한다.
 
 - retained CLI surface: `run`, `status`, `replay`, `resume`, `abort`, `doctor`, `health`, `help`
 - operator-visible blocker: approval_required, budget_exhausted, blocked, failed, aborted
+- weak verification (`verification_weak`, `verification_unresolved`, `pack_required`)이 success처럼 보이지 않아야 한다
 - docs truth lock: README, RUNBOOK, CAPABILITY_MATRIX, charter, release gate 테스트가 같은 surface를 말함
 - autonomy evidence: `autonomous_eval_corpus`, `fault_path_suite`, `nightly_dogfood_contract`, `release_security_gate`
+- restore evidence: rollback metadata와 nightly evidence contract가 release gate에 같이 잠겨 있어야 한다
 
 이 중 하나라도 깨지면 version을 올리지 않고 release를 막는다.
 

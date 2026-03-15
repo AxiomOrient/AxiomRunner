@@ -212,6 +212,7 @@ fn workflow_pack_contract_shape_stays_explicit() {
             profile: RunCommandProfile::Test,
             command_example: String::from("cargo test"),
             artifact_expectation: String::from("test artifact exists"),
+            strength: axonrunner_adapters::WorkflowPackVerifierStrength::Strong,
             required: true,
         }],
         risk_policy: WorkflowPackRiskPolicy {

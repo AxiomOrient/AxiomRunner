@@ -28,11 +28,14 @@ pub fn render_status_lines(snapshot: &StatusSnapshot) -> Vec<String> {
     ];
     if let Some(run) = &snapshot.runtime.latest_run {
         lines.push(format!(
-            "status run run_id={} phase={} outcome={} reason={} planned_steps={} step_count={}",
+            "status run run_id={} phase={} outcome={} reason={} execution_workspace={} verifier_state={} verifier_summary={} planned_steps={} step_count={}",
             run.run_id,
             run.phase,
             run.outcome,
             run.reason,
+            run.execution_workspace,
+            run.verifier_state,
+            run.verifier_summary,
             run.planned_steps,
             run.step_ids.len()
         ));
@@ -79,7 +82,10 @@ pub fn render_doctor_lines(report: &DoctorReport) -> Vec<String> {
             report.runtime.memory_detail,
             report.runtime.tool_detail
         ),
-        format!("doctor async_host detail={}", report.runtime.async_host_detail),
+        format!(
+            "doctor async_host detail={}",
+            report.runtime.async_host_detail
+        ),
         format!(
             "doctor paths workspace={} state_path={} trace_events_path={} tool_log_path={}",
             report.paths.workspace,
@@ -211,6 +217,17 @@ pub fn render_replay_lines(
         latest.artifacts.verify,
         latest.artifacts.report,
     ));
+    if !latest.tool_outputs.is_empty() {
+        lines.push(format!(
+            "replay verifier_evidence count={} latest={}",
+            latest.tool_outputs.len(),
+            latest
+                .tool_outputs
+                .last()
+                .map(String::as_str)
+                .unwrap_or("none")
+        ));
+    }
     lines.push(format!(
         "replay artifact_index count={} latest_report={}",
         artifact_index.entries.len(),

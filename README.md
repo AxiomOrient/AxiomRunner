@@ -2,7 +2,7 @@
 
 AxonRunner는 로컬 워크스페이스 자동화를 위한 goal-file 중심 CLI agent runtime이다.
 
-제품 표면은 의도적으로 좁다. 지금 정식으로 노출하는 것은 `run`, `status`, `replay`, `resume`, `abort`, `doctor`, `health`, `help`다. `batch`와 legacy single-intent alias(`read`, `write`, `remove`, `freeze`, `halt`)는 compatibility 경로로만 유지한다.
+제품 표면은 의도적으로 좁다. 지금 정식으로 노출하는 것은 `run`, `status`, `replay`, `resume`, `abort`, `doctor`, `health`, `help`다.
 
 ## 현재 제품면
 
@@ -16,23 +16,6 @@ AxonRunner는 로컬 워크스페이스 자동화를 위한 goal-file 중심 CLI
 - `doctor [--json]`
 - `health`
 - `help`
-
-compatibility surface:
-
-- `batch [--reset-state] <intent-spec>...`
-- `read <key>`
-- `write <key> <value>`
-- `remove <key>`
-- `freeze`
-- `halt`
-
-legacy intent spec:
-
-- `read:<key>`
-- `write:<key>=<value>`
-- `remove:<key>`
-- `freeze`
-- `halt`
 
 ## 빠른 시작
 
@@ -164,7 +147,8 @@ env-only runtime knobs:
 - `run <goal-file>`은 run id, step journal, verify/report artifact를 남긴다.
 - `resume`은 `waiting_approval` 상태의 goal-file pending run 전용이다.
 - `abort`는 pending run control state를 기준으로 동작하는 terminal control이다.
-- compatibility 경로의 `read`, `write`, `remove`, `freeze`, `halt`도 기존 canonical path를 유지한다.
+- default goal path는 verification detail에서 command를 직접 파생한다.
+- detail에서 안전한 strong verifier를 만들 수 없으면 `verification_weak`, `verification_unresolved`, `pack_required` 로 드러나며 `success`로 숨기지 않는다.
 - provider/tool/memory 단계 실패는 성공 종료로 숨기지 않고 process failure로 승격된다.
 - provider health는 `ready`, `degraded`, `blocked`로 노출된다.
 - `openai` provider는 기본 비활성 experimental 경로다. 실제 사용은 `AXONRUNNER_EXPERIMENTAL_OPENAI=1` opt-in 이후에만 허용된다.

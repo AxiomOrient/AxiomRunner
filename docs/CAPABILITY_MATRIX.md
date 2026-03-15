@@ -25,8 +25,6 @@
 | CLI | `status` | Core | must pass |
 | CLI | `health` | Core | must pass |
 | CLI | `help` | Core | must pass |
-| CLI compat | `batch` | Core | must pass |
-| CLI alias | `read/write/remove/freeze/halt` | Compatibility | should pass |
 | State | persisted state snapshot (`revision/mode/facts`) | Core | must pass |
 | Provider | `codek` | Core | must pass |
 | Provider | `mock-local` | Core | must pass |
@@ -74,22 +72,6 @@ axonrunner_apps help
 ```
 
 `resume`은 `waiting_approval` 상태의 goal-file pending run 전용이다.
-
-### compatibility surface
-
-```bash
-axonrunner_apps batch [--reset-state] <intent-spec>...
-```
-
-### 유지되는 thin alias
-
-```bash
-axonrunner_apps read <key>
-axonrunner_apps write <key> <value>
-axonrunner_apps remove <key>
-axonrunner_apps freeze
-axonrunner_apps halt
-```
 
 ## 6. Tool Surface Contract
 
@@ -167,13 +149,14 @@ axonrunner_apps halt
 
 - `run` 또는 `status` 또는 `replay` 또는 `resume` 또는 `abort` 핵심 경로 실패
 - provider blocked/failure가 success처럼 보임
-- persisted `freeze`/`halt` 의미가 깨짐
 - workspace boundary 우회 가능
 - allowlist 우회 가능
 - report artifact가 남지 않음
+- weak verification 또는 pack required run이 success처럼 보임
 - README/help/DEPLOYMENT/charter/capability matrix 불일치
 - autonomous eval corpus가 representative run을 통과하지 못함
 - replay quality가 step journal / changed paths / failure visibility를 잃음
+- rollback metadata 또는 nightly dogfood evidence contract가 release truth에서 빠짐
 
 release evidence 기본 묶음:
 
@@ -188,6 +171,7 @@ autonomy evidence가 만족해야 하는 추가 기준:
 - replay summary에 `false_success_intents`와 `false_done_intents`가 보여야 한다.
 - nightly dogfood driver가 대표 fixture 로그 번들을 남겨야 한다.
 - fault path suite가 provider/tool/workspace substrate 고장 경로를 통과해야 한다.
+- weak verification / pack required run이 `blocked`로 남아야 한다.
 
 ## 10. Bridge References
 
