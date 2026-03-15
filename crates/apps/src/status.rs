@@ -6,9 +6,9 @@ use axonrunner_core::ExecutionMode;
 pub struct StateStatusInput {
     pub revision: u64,
     pub mode: ExecutionMode,
-    pub facts: usize,
-    pub denied: u64,
-    pub audit: u64,
+    pub last_intent_id: Option<String>,
+    pub last_decision: Option<String>,
+    pub last_policy_code: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -41,9 +41,9 @@ pub struct StatusSnapshot {
 pub struct StateSnapshot {
     pub revision: u64,
     pub mode: ExecutionMode,
-    pub facts: usize,
-    pub denied: u64,
-    pub audit: u64,
+    pub last_intent_id: Option<String>,
+    pub last_decision: Option<String>,
+    pub last_policy_code: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -66,9 +66,9 @@ impl From<StatusInput> for StatusSnapshot {
             state: StateSnapshot {
                 revision: input.state.revision,
                 mode: input.state.mode,
-                facts: input.state.facts,
-                denied: input.state.denied,
-                audit: input.state.audit,
+                last_intent_id: input.state.last_intent_id,
+                last_decision: input.state.last_decision,
+                last_policy_code: input.state.last_policy_code,
             },
             runtime: RuntimeSnapshot {
                 provider_id: input.runtime.provider_id,

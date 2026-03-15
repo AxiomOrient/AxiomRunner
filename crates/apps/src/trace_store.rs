@@ -1,4 +1,4 @@
-use crate::display::outcome_name;
+use crate::display::{mode_name, outcome_name};
 use crate::runtime_compose::{
     RuntimeComposeExecution, RuntimeComposePatchArtifact, RuntimeRunCheckpointMetadata,
     RuntimeRunRecord, RuntimeRunRollbackMetadata, RuntimeRunStepRecord, run_outcome_name,
@@ -420,14 +420,6 @@ fn step_name(step: &crate::runtime_compose::RuntimeComposeStep) -> &'static str 
         crate::runtime_compose::RuntimeComposeStep::Skipped => "skipped",
         crate::runtime_compose::RuntimeComposeStep::Applied => "applied",
         crate::runtime_compose::RuntimeComposeStep::Failed(_) => "failed",
-    }
-}
-
-fn mode_name(mode: axonrunner_core::ExecutionMode) -> &'static str {
-    match mode {
-        axonrunner_core::ExecutionMode::Active => "active",
-        axonrunner_core::ExecutionMode::ReadOnly => "read_only",
-        axonrunner_core::ExecutionMode::Halted => "halted",
     }
 }
 

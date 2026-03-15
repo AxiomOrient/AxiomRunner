@@ -7,12 +7,12 @@ use crate::trace_store::{ReplaySummary, TraceArtifactIndex, TraceIntentEvent};
 pub fn render_status_lines(snapshot: &StatusSnapshot) -> Vec<String> {
     let mut lines = vec![
         format!(
-            "status revision={} mode={} facts={} denied={} audit={}",
+            "status revision={} mode={} last_intent={} last_decision={} last_policy={}",
             snapshot.state.revision,
             mode_name(snapshot.state.mode),
-            snapshot.state.facts,
-            snapshot.state.denied,
-            snapshot.state.audit
+            option_value(snapshot.state.last_intent_id.as_deref()),
+            option_value(snapshot.state.last_decision.as_deref()),
+            option_value(snapshot.state.last_policy_code.as_deref())
         ),
         format!(
             "status runtime provider_id={} provider_model={} provider_state={} provider_detail={} memory_enabled={} memory_state={} tool_enabled={} tool_state={}",
@@ -65,12 +65,13 @@ pub fn render_doctor_lines(report: &DoctorReport) -> Vec<String> {
             report.provider_experimental
         ),
         format!(
-            "doctor state revision={} mode={} facts={} denied={} audit={}",
+            "doctor state revision={} mode={} last_intent={} last_actor={} last_decision={} last_policy={}",
             report.state.revision,
             report.state.mode,
-            report.state.facts,
-            report.state.denied,
-            report.state.audit
+            option_value(report.state.last_intent_id.as_deref()),
+            option_value(report.state.last_actor_id.as_deref()),
+            option_value(report.state.last_decision.as_deref()),
+            option_value(report.state.last_policy_code.as_deref())
         ),
         format!(
             "doctor runtime provider_state={} memory_state={} tool_state={}",
@@ -116,6 +117,10 @@ pub fn render_doctor_lines(report: &DoctorReport) -> Vec<String> {
     }
 
     lines
+}
+
+fn option_value(value: Option<&str>) -> &str {
+    value.unwrap_or("-")
 }
 
 pub fn render_replay_lines(

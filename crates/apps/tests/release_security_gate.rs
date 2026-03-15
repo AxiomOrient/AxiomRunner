@@ -102,7 +102,9 @@ fn release_security_gate_cli_build_profile_boundary_is_enforced() {
             output.status.success(),
             "stdout:\n{stdout}\n\nstderr:\n{stderr}"
         );
-        assert!(stdout.contains("status revision=0 mode=active facts=0 denied=0 audit=0"));
+        assert!(stdout.contains(
+            "status revision=0 mode=active last_intent=- last_decision=- last_policy=-"
+        ));
     } else {
         assert_eq!(
             output.status.code(),
@@ -138,7 +140,9 @@ fn release_security_gate_legacy_env_bypass_signal_does_not_allow_release_startup
             output.status.success(),
             "stdout:\n{stdout}\n\nstderr:\n{stderr}"
         );
-        assert!(stdout.contains("status revision=0 mode=active facts=0 denied=0 audit=0"));
+        assert!(stdout.contains(
+            "status revision=0 mode=active last_intent=- last_decision=- last_policy=-"
+        ));
     } else {
         assert_eq!(
             output.status.code(),

@@ -25,7 +25,7 @@
 | CLI | `status` | Core | must pass |
 | CLI | `health` | Core | must pass |
 | CLI | `help` | Core | must pass |
-| State | persisted state snapshot (`revision/mode/facts`) | Core | must pass |
+| State | persisted state snapshot (`revision/mode/last_intent/last_decision/last_policy`) | Core | must pass |
 | Provider | `codek` | Core | must pass |
 | Provider | `mock-local` | Core | must pass |
 | Tool | list/read/search/write/replace/remove/run-command | Core | must pass |

@@ -974,7 +974,9 @@ fn e2e_cli_workspace_lock_blocks_mutating_commands_but_allows_status_reads() {
     assert_eq!(run.status.code(), Some(6));
     assert!(stderr_of(&run).contains("workspace lock is active"));
     assert!(status.status.success());
-    assert!(stdout_of(&status).contains("status revision=0 mode=active facts=0 denied=0 audit=0"));
+    assert!(stdout_of(&status).contains(
+        "status revision=0 mode=active last_intent=- last_decision=- last_policy=-"
+    ));
 
     let _ = fs::remove_dir_all(workspace);
     let _ = fs::remove_file(goal_file);

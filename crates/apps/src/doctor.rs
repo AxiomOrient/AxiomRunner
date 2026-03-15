@@ -27,9 +27,10 @@ pub struct DoctorReport {
 pub struct DoctorState {
     pub revision: u64,
     pub mode: String,
-    pub facts: usize,
-    pub denied: u64,
-    pub audit: u64,
+    pub last_intent_id: Option<String>,
+    pub last_actor_id: Option<String>,
+    pub last_decision: Option<String>,
+    pub last_policy_code: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -110,9 +111,10 @@ pub fn build_doctor_report(
         state: DoctorState {
             revision: state.revision,
             mode: mode_name(state.mode).to_owned(),
-            facts: state.facts.len(),
-            denied: state.denied_count,
-            audit: state.audit_count,
+            last_intent_id: state.last_intent_id.clone(),
+            last_actor_id: state.last_actor_id.clone(),
+            last_decision: state.last_decision.map(|value| value.as_str().to_owned()),
+            last_policy_code: state.last_policy_code.map(|value| value.as_str().to_owned()),
         },
         runtime: DoctorRuntime {
             provider_state: compose.provider.state.to_owned(),
