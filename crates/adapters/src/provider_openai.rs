@@ -3,7 +3,7 @@ use crate::contracts::{
 };
 use crate::error::{AdapterError, RetryClass, classify_reqwest_error};
 
-pub const ENV_EXPERIMENTAL_OPENAI: &str = "AXONRUNNER_EXPERIMENTAL_OPENAI";
+pub const ENV_EXPERIMENTAL_OPENAI: &str = "AXIOMRUNNER_EXPERIMENTAL_OPENAI";
 const HTTP_CONNECT_TIMEOUT_SECS: u64 = 10;
 const HTTP_REQUEST_TIMEOUT_SECS: u64 = 30;
 
@@ -86,7 +86,7 @@ impl ProviderAdapter for OpenAiCompatProvider {
             if !self.experimental_enabled {
                 return Err(AdapterError::unavailable_with_class(
                     "openai_experimental",
-                    "AXONRUNNER_EXPERIMENTAL_OPENAI=1 required",
+                    "AXIOMRUNNER_EXPERIMENTAL_OPENAI=1 required",
                     RetryClass::NonRetryable,
                 ));
             }

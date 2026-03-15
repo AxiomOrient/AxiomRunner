@@ -3,7 +3,7 @@
 ## Status
 
 This document describes the canonical goal/run contract that the shipped
-AxonRunner product now uses. The public runtime surface is
+AxiomRunner product now uses. The public runtime surface is
 documented by `README.md`, `docs/project-charter.md`,
 `docs/CAPABILITY_MATRIX.md`, and `docs/RUNBOOK.md`.
 

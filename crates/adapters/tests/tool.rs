@@ -1,4 +1,4 @@
-use axonrunner_adapters::{
+use axiomrunner_adapters::{
     AdapterHealth, SearchMode, ToolAdapter, ToolPolicy, ToolRequest, ToolResult, ToolRiskTier,
     WorkspaceTool, classify_tool_request_risk,
 };
@@ -12,7 +12,7 @@ fn unique_path(label: &str) -> PathBuf {
         .unwrap_or(Duration::from_secs(0))
         .as_nanos();
     std::env::temp_dir().join(format!(
-        "axonrunner-tool-test-{label}-{}-{tick}",
+        "axiomrunner-tool-test-{label}-{}-{tick}",
         std::process::id()
     ))
 }
@@ -211,7 +211,7 @@ fn workspace_tool_writes_patch_artifact_with_before_and_after_digests() {
     );
     let artifact = fs::read_to_string(&write.evidence.artifact_path)
         .expect("patch artifact should be readable");
-    assert!(artifact.contains("\"schema\": \"axonrunner.patch.v2\""));
+    assert!(artifact.contains("\"schema\": \"axiomrunner.patch.v2\""));
     assert!(artifact.contains("\"operation\": \"overwrite\""));
     assert!(artifact.contains("\"target_path\": \"notes.txt\""));
     assert!(artifact.contains("\"after_excerpt\""));

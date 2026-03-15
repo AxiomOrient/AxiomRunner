@@ -1,4 +1,4 @@
-use axonrunner_adapters::{
+use axiomrunner_adapters::{
     FileMutationEvidence, FileWriteOutput, ListFilesOutput, ReadFileOutput, RemovePathOutput,
     ReplaceInFileOutput, RunCommandOutput, RunCommandProfile, SearchFilesOutput, SearchMatch,
     SearchMode, ToolRequest, ToolResult, WorkflowPackAllowedTool, WorkflowPackContract,
@@ -76,7 +76,7 @@ fn tool_contract_request_and_result_shapes_stay_explicit() {
 fn tool_contract_mutation_outputs_keep_evidence_fields() {
     let evidence = FileMutationEvidence {
         operation: String::from("overwrite"),
-        artifact_path: PathBuf::from(".axonrunner/patches/notes.json"),
+        artifact_path: PathBuf::from(".axiomrunner/patches/notes.json"),
         before_digest: Some(String::from("before")),
         after_digest: Some(String::from("after")),
         before_excerpt: Some(String::from("old")),
@@ -116,7 +116,7 @@ fn tool_contract_mutation_outputs_keep_evidence_fields() {
         stderr: String::new(),
         stdout_truncated: false,
         stderr_truncated: false,
-        artifact_path: PathBuf::from(".axonrunner/commands/cargo-test.json"),
+        artifact_path: PathBuf::from(".axiomrunner/commands/cargo-test.json"),
     };
 
     assert_eq!(write.evidence.operation, "overwrite");
@@ -212,7 +212,7 @@ fn workflow_pack_contract_shape_stays_explicit() {
             profile: RunCommandProfile::Test,
             command_example: String::from("cargo test"),
             artifact_expectation: String::from("test artifact exists"),
-            strength: axonrunner_adapters::WorkflowPackVerifierStrength::Strong,
+            strength: axiomrunner_adapters::WorkflowPackVerifierStrength::Strong,
             required: true,
         }],
         risk_policy: WorkflowPackRiskPolicy {

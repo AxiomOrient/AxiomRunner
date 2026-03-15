@@ -9,7 +9,7 @@ fn unique_path(label: &str, extension: &str) -> std::path::PathBuf {
         .expect("clock should be after epoch")
         .as_nanos();
     std::env::temp_dir().join(format!(
-        "axonrunner-nightly-{label}-{}-{tick}.{extension}",
+        "axiomrunner-nightly-{label}-{}-{tick}.{extension}",
         std::process::id()
     ))
 }
@@ -24,13 +24,13 @@ fn nightly_dogfood_script_writes_log_bundle_for_one_fixture() {
     let output = Command::new("sh")
         .arg(&script)
         .env(
-            "AXONRUNNER_NIGHTLY_BIN",
-            env!("CARGO_BIN_EXE_axonrunner_apps"),
+            "AXIOMRUNNER_NIGHTLY_BIN",
+            env!("CARGO_BIN_EXE_axiomrunner_apps"),
         )
-        .env("AXONRUNNER_NIGHTLY_SKIP_BUILD", "1")
-        .env("AXONRUNNER_NIGHTLY_FIXTURES", "rust_service.json")
-        .env("AXONRUNNER_NIGHTLY_LOG_ROOT", &log_root)
-        .env("AXONRUNNER_NIGHTLY_TIMESTAMP", timestamp)
+        .env("AXIOMRUNNER_NIGHTLY_SKIP_BUILD", "1")
+        .env("AXIOMRUNNER_NIGHTLY_FIXTURES", "rust_service.json")
+        .env("AXIOMRUNNER_NIGHTLY_LOG_ROOT", &log_root)
+        .env("AXIOMRUNNER_NIGHTLY_TIMESTAMP", timestamp)
         .output()
         .expect("nightly dogfood script should run");
 

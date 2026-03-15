@@ -45,10 +45,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0"
 
 [[package]]
-name = "axonrunner_adapters"
+name = "axiomrunner_adapters"
 version = "0.0.1"
 dependencies = [
- "axonrunner_core",
+ "axiomrunner_core",
  "codex-runtime",
  "ignore",
  "regex",
@@ -61,18 +61,18 @@ dependencies = [
 ]
 
 [[package]]
-name = "axonrunner_apps"
+name = "axiomrunner_apps"
 version = "0.0.1"
 dependencies = [
- "axonrunner_adapters",
- "axonrunner_core",
+ "axiomrunner_adapters",
+ "axiomrunner_core",
  "serde",
  "serde_json",
  "tokio",
 ]
 
 [[package]]
-name = "axonrunner_core"
+name = "axiomrunner_core"
 version = "0.0.1"
 
 [[package]]

@@ -3,12 +3,12 @@ use std::path::PathBuf;
 
 use crate::env_util::read_env_trimmed;
 
-const ENV_PROFILE: &str = "AXONRUNNER_PROFILE";
-const ENV_PROVIDER: &str = "AXONRUNNER_RUNTIME_PROVIDER";
-const ENV_PROVIDER_MODEL: &str = "AXONRUNNER_RUNTIME_PROVIDER_MODEL";
-const ENV_WORKSPACE: &str = "AXONRUNNER_RUNTIME_TOOL_WORKSPACE";
-const ENV_STATE_PATH: &str = "AXONRUNNER_RUNTIME_STATE_PATH";
-const ENV_COMMAND_ALLOWLIST: &str = "AXONRUNNER_RUNTIME_COMMAND_ALLOWLIST";
+const ENV_PROFILE: &str = "AXIOMRUNNER_PROFILE";
+const ENV_PROVIDER: &str = "AXIOMRUNNER_RUNTIME_PROVIDER";
+const ENV_PROVIDER_MODEL: &str = "AXIOMRUNNER_RUNTIME_PROVIDER_MODEL";
+const ENV_WORKSPACE: &str = "AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE";
+const ENV_STATE_PATH: &str = "AXIOMRUNNER_RUNTIME_STATE_PATH";
+const ENV_COMMAND_ALLOWLIST: &str = "AXIOMRUNNER_RUNTIME_COMMAND_ALLOWLIST";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AppConfig {
@@ -344,11 +344,11 @@ mod tests {
     #[test]
     fn parse_env_config_reads_provider() {
         let parsed = parse_env_config(|key| match key {
-            "AXONRUNNER_RUNTIME_PROVIDER" => Some(String::from("openrouter")),
-            "AXONRUNNER_RUNTIME_PROVIDER_MODEL" => Some(String::from("gpt-5-mini")),
-            "AXONRUNNER_RUNTIME_TOOL_WORKSPACE" => Some(String::from("/tmp/work")),
-            "AXONRUNNER_RUNTIME_STATE_PATH" => Some(String::from("/tmp/state")),
-            "AXONRUNNER_RUNTIME_COMMAND_ALLOWLIST" => Some(String::from("git,cargo")),
+            "AXIOMRUNNER_RUNTIME_PROVIDER" => Some(String::from("openrouter")),
+            "AXIOMRUNNER_RUNTIME_PROVIDER_MODEL" => Some(String::from("gpt-5-mini")),
+            "AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE" => Some(String::from("/tmp/work")),
+            "AXIOMRUNNER_RUNTIME_STATE_PATH" => Some(String::from("/tmp/state")),
+            "AXIOMRUNNER_RUNTIME_COMMAND_ALLOWLIST" => Some(String::from("git,cargo")),
             _ => None,
         })
         .expect("env parse should succeed");

@@ -61,14 +61,14 @@
 ### 허용
 
 ```bash
-axonrunner_apps run <goal-file>
-axonrunner_apps doctor [--json]
-axonrunner_apps replay [run-id|latest]
-axonrunner_apps status [run-id|latest]
-axonrunner_apps resume [run-id|latest]
-axonrunner_apps abort [run-id|latest]
-axonrunner_apps health
-axonrunner_apps help
+axiomrunner_apps run <goal-file>
+axiomrunner_apps doctor [--json]
+axiomrunner_apps replay [run-id|latest]
+axiomrunner_apps status [run-id|latest]
+axiomrunner_apps resume [run-id|latest]
+axiomrunner_apps abort [run-id|latest]
+axiomrunner_apps health
+axiomrunner_apps help
 ```
 
 `resume`은 `waiting_approval` 상태의 goal-file pending run 전용이다.
@@ -160,11 +160,11 @@ axonrunner_apps help
 
 release evidence 기본 묶음:
 
-- `cargo test -p axonrunner_apps --test autonomous_eval_corpus`
-- `cargo test -p axonrunner_apps --test fault_path_suite`
-- `cargo test -p axonrunner_apps --test nightly_dogfood_contract`
-- `cargo test -p axonrunner_apps --test release_security_gate`
-- `cargo test -p axonrunner_adapters`
+- `cargo test -p axiomrunner_apps --test autonomous_eval_corpus`
+- `cargo test -p axiomrunner_apps --test fault_path_suite`
+- `cargo test -p axiomrunner_apps --test nightly_dogfood_contract`
+- `cargo test -p axiomrunner_apps --test release_security_gate`
+- `cargo test -p axiomrunner_adapters`
 
 autonomy evidence가 만족해야 하는 추가 기준:
 

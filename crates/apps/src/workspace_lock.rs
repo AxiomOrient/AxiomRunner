@@ -81,7 +81,7 @@ impl Drop for WorkspaceLock {
 }
 
 pub fn lock_path(workspace_root: &Path) -> PathBuf {
-    workspace_root.join(".axonrunner").join("runtime.lock")
+    workspace_root.join(".axiomrunner").join("runtime.lock")
 }
 
 fn lock_holder_is_stale(holder: &str) -> bool {
@@ -123,7 +123,7 @@ mod tests {
             .expect("clock should be after epoch")
             .as_nanos();
         std::env::temp_dir().join(format!(
-            "axonrunner-workspace-lock-{label}-{}-{tick}",
+            "axiomrunner-workspace-lock-{label}-{}-{tick}",
             std::process::id()
         ))
     }
@@ -137,9 +137,9 @@ mod tests {
     #[test]
     fn acquire_recovers_stale_lock_once() {
         let workspace = unique_workspace("stale");
-        fs::create_dir_all(workspace.join(".axonrunner")).expect("lock dir should exist");
+        fs::create_dir_all(workspace.join(".axiomrunner")).expect("lock dir should exist");
         fs::write(
-            workspace.join(".axonrunner/runtime.lock"),
+            workspace.join(".axiomrunner/runtime.lock"),
             "pid=999999 command=run\n",
         )
         .expect("stale lock should exist");

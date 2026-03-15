@@ -6,7 +6,7 @@
 
 ## Session Reuse
 
-- AxonRunner는 요청마다 새 session을 무조건 만들지 않는다.
+- AxiomRunner는 요청마다 새 session을 무조건 만들지 않는다.
 - 현재 cached session은 `cwd`와 `model`이 모두 같은 경우에만 재사용한다.
 - `cwd` 또는 `model`이 달라지면 기존 session을 닫고 새 session을 만든다.
 - closed session은 재사용하지 않는다.

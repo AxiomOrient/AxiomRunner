@@ -1,14 +1,14 @@
 use crate::config_loader::AppConfig;
 use crate::display::mode_name;
 use crate::env_util::read_env_trimmed;
-use axonrunner_core::{AgentState, DecisionOutcome, ExecutionMode, PolicyCode};
+use axiomrunner_core::{AgentState, DecisionOutcome, ExecutionMode, PolicyCode};
 use std::fs;
 use std::io::ErrorKind;
 use std::path::PathBuf;
 
-pub const ENV_RUNTIME_STATE_PATH: &str = "AXONRUNNER_RUNTIME_STATE_PATH";
+pub const ENV_RUNTIME_STATE_PATH: &str = "AXIOMRUNNER_RUNTIME_STATE_PATH";
 
-const FORMAT_VERSION: &str = "axonrunner-state-v2";
+const FORMAT_VERSION: &str = "axiomrunner-state-v2";
 const NONE_SENTINEL: &str = "-";
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -45,7 +45,7 @@ impl StateStore {
             .or_else(|| {
                 std::env::var("HOME").ok().map(|home| {
                     PathBuf::from(home)
-                        .join(".axonrunner")
+                        .join(".axiomrunner")
                         .join("state.snapshot")
                 })
             })
@@ -385,7 +385,7 @@ fn hex_decode(hex: &str) -> Option<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::{PendingRunSnapshot, RuntimeStateSnapshot, StateStore, parse_snapshot, serialize_snapshot};
-    use axonrunner_core::{AgentState, DecisionOutcome, ExecutionMode, PolicyCode};
+    use axiomrunner_core::{AgentState, DecisionOutcome, ExecutionMode, PolicyCode};
     use std::fs;
     use std::path::PathBuf;
 
@@ -426,7 +426,7 @@ mod tests {
             .expect("clock should be after epoch")
             .as_nanos();
         std::env::temp_dir().join(format!(
-            "axonrunner-state-store-{label}-{}-{tick}.snapshot",
+            "axiomrunner-state-store-{label}-{}-{tick}.snapshot",
             std::process::id()
         ))
     }

@@ -13,7 +13,7 @@ fn unique_path(label: &str, extension: &str) -> PathBuf {
         .expect("clock should be after epoch")
         .as_nanos();
     std::env::temp_dir().join(format!(
-        "axonrunner-fault-{label}-{}-{tick}.{extension}",
+        "axiomrunner-fault-{label}-{}-{tick}.{extension}",
         std::process::id()
     ))
 }
@@ -55,9 +55,9 @@ fn fault_path_suite_covers_provider_tool_and_workspace_substrates() {
         let doctor = run_cli_with_env(
             &["doctor"],
             &[
-                ("AXONRUNNER_RUNTIME_PROVIDER", "codek"),
-                ("AXONRUNNER_CODEX_BIN", "/definitely-missing-codex-binary"),
-                ("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace)),
+                ("AXIOMRUNNER_RUNTIME_PROVIDER", "codek"),
+                ("AXIOMRUNNER_CODEX_BIN", "/definitely-missing-codex-binary"),
+                ("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace)),
             ],
         );
         assert!(doctor.status.success(), "stderr:\n{}", stderr_of(&doctor));
@@ -73,9 +73,9 @@ fn fault_path_suite_covers_provider_tool_and_workspace_substrates() {
         let doctor = run_cli_with_env(
             &["doctor"],
             &[
-                ("AXONRUNNER_RUNTIME_PROVIDER", "codek"),
-                ("AXONRUNNER_CODEX_BIN", path_str(&fake_cli)),
-                ("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace)),
+                ("AXIOMRUNNER_RUNTIME_PROVIDER", "codek"),
+                ("AXIOMRUNNER_CODEX_BIN", path_str(&fake_cli)),
+                ("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace)),
             ],
         );
 
@@ -97,13 +97,13 @@ fn fault_path_suite_covers_provider_tool_and_workspace_substrates() {
                     .expect("utf8 path"),
             ],
             &[
-                ("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace)),
-                ("AXONRUNNER_RUNTIME_COMMAND_ALLOWLIST", "git"),
+                ("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace)),
+                ("AXIOMRUNNER_RUNTIME_COMMAND_ALLOWLIST", "git"),
             ],
         );
         let replay = run_cli_with_env(
             &["replay", "run-1"],
-            &[("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
+            &[("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
         );
 
         assert!(run.status.success(), "stderr:\n{}", stderr_of(&run));
@@ -117,9 +117,9 @@ fn fault_path_suite_covers_provider_tool_and_workspace_substrates() {
 
     {
         let workspace = unique_path("workspace-blocked-workspace", "dir");
-        fs::create_dir_all(workspace.join(".axonrunner")).expect("lock dir should exist");
+        fs::create_dir_all(workspace.join(".axiomrunner")).expect("lock dir should exist");
         fs::write(
-            workspace.join(".axonrunner/runtime.lock"),
+            workspace.join(".axiomrunner/runtime.lock"),
             format!("pid={} command=run\n", std::process::id()),
         )
         .expect("lock file should exist");
@@ -130,11 +130,11 @@ fn fault_path_suite_covers_provider_tool_and_workspace_substrates() {
                     .to_str()
                     .expect("utf8 path"),
             ],
-            &[("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
+            &[("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
         );
         let status = run_cli_with_env(
             &["status"],
-            &[("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
+            &[("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
         );
 
         assert_eq!(run.status.code(), Some(6), "stderr:\n{}", stderr_of(&run));
@@ -146,9 +146,9 @@ fn fault_path_suite_covers_provider_tool_and_workspace_substrates() {
 
     {
         let workspace = unique_path("workspace-stale-lock-workspace", "dir");
-        fs::create_dir_all(workspace.join(".axonrunner")).expect("lock dir should exist");
+        fs::create_dir_all(workspace.join(".axiomrunner")).expect("lock dir should exist");
         fs::write(
-            workspace.join(".axonrunner/runtime.lock"),
+            workspace.join(".axiomrunner/runtime.lock"),
             "pid=999999 command=run\n",
         )
         .expect("stale lock file should exist");
@@ -159,7 +159,7 @@ fn fault_path_suite_covers_provider_tool_and_workspace_substrates() {
                     .to_str()
                     .expect("utf8 path"),
             ],
-            &[("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
+            &[("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
         );
 
         assert!(run.status.success(), "stderr:\n{}", stderr_of(&run));

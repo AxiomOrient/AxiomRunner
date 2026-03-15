@@ -8,7 +8,7 @@ use std::process::Command;
 use std::time::Duration;
 use tokio::sync::Mutex;
 
-pub const ENV_CODEX_BIN: &str = "AXONRUNNER_CODEX_BIN";
+pub const ENV_CODEX_BIN: &str = "AXIOMRUNNER_CODEX_BIN";
 const DEFAULT_CODEX_BIN: &str = "codex";
 const SESSION_TIMEOUT_SECS: u64 = 120;
 const MIN_SUPPORTED_CODEX_CLI: &str = "0.104.0";
@@ -387,7 +387,7 @@ mod tests {
             .unwrap_or(Duration::from_secs(0))
             .as_nanos();
         let path = std::env::temp_dir().join(format!(
-            "axonrunner-codex-fake-{label}-{}-{tick}.sh",
+            "axiomrunner-codex-fake-{label}-{}-{tick}.sh",
             std::process::id()
         ));
         fs::write(&path, format!("#!/bin/sh\nprintf '%s\\n' '{}'\n", stdout))

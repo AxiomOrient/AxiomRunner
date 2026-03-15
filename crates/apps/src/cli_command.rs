@@ -1,10 +1,10 @@
 use crate::goal_file::parse_goal_file_template;
-use axonrunner_core::RunGoal;
+use axiomrunner_core::RunGoal;
 use std::path::Path;
 
 pub const USAGE: &str = "\
 usage:
-  axonrunner_apps [global-options] <command> [command-args]
+  axiomrunner_apps [global-options] <command> [command-args]
 
 global-options:
   --config-file <path>
@@ -52,7 +52,7 @@ pub enum CliCommand {
 pub struct GoalFileTemplate {
     pub path: String,
     pub goal: RunGoal,
-    pub workflow_pack: Option<axonrunner_adapters::WorkflowPackContract>,
+    pub workflow_pack: Option<axiomrunner_adapters::WorkflowPackContract>,
 }
 
 pub type RunTemplate = GoalFileTemplate;

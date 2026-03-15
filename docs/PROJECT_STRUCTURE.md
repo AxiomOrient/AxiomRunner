@@ -1,6 +1,6 @@
 # Project Structure
 
-AxonRunner 저장소는 크게 3개 실행 크레이트와 몇 개 보조 폴더로 나뉜다.
+AxiomRunner 저장소는 크게 3개 실행 크레이트와 몇 개 보조 폴더로 나뉜다.
 
 ## 한눈에 보기
 

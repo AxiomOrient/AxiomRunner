@@ -85,7 +85,7 @@ pub(crate) fn resolve_workspace_path(
 pub(crate) fn collect_files_respecting_gitignore(base: &Path) -> Result<Vec<PathBuf>, io::Error> {
     let mut files = Vec::new();
     let mut first_io_error = None;
-    let internal_root = base.join(".axonrunner");
+    let internal_root = base.join(".axiomrunner");
 
     let walker = WalkBuilder::new(base)
         .hidden(false)

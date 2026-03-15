@@ -17,7 +17,7 @@
 실행 예:
 
 ```bash
-cargo run -q -p axonrunner_apps -- \
+cargo run -q -p axiomrunner_apps -- \
   --workspace="$PWD/examples/rust_service" \
   run examples/rust_service/goal.json
 ```

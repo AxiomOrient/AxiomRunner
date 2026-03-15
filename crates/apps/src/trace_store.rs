@@ -4,7 +4,7 @@ use crate::runtime_compose::{
     RuntimeRunRecord, RuntimeRunRollbackMetadata, RuntimeRunStepRecord, run_outcome_name,
     run_phase_name,
 };
-use axonrunner_core::{AgentState, DecisionOutcome};
+use axiomrunner_core::{AgentState, DecisionOutcome};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::fs::{self, OpenOptions};
@@ -12,7 +12,7 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-pub const TRACE_INTENT_SCHEMA_V1: &str = "axonrunner.trace.intent.v1";
+pub const TRACE_INTENT_SCHEMA_V1: &str = "axiomrunner.trace.intent.v1";
 const MAX_ARTIFACT_INDEX_PATCH_PATHS: usize = 6;
 
 #[derive(Debug, Clone)]
@@ -246,10 +246,10 @@ impl TraceStore {
                 "rollback": input.run.rollback.as_ref().map(trace_rollback_summary),
             },
             "artifacts": {
-                "plan": format!(".axonrunner/artifacts/{}.plan.md", input.intent_id),
-                "apply": format!(".axonrunner/artifacts/{}.apply.md", input.intent_id),
-                "verify": format!(".axonrunner/artifacts/{}.verify.md", input.intent_id),
-                "report": format!(".axonrunner/artifacts/{}.report.md", input.intent_id),
+                "plan": format!(".axiomrunner/artifacts/{}.plan.md", input.intent_id),
+                "apply": format!(".axiomrunner/artifacts/{}.apply.md", input.intent_id),
+                "verify": format!(".axiomrunner/artifacts/{}.verify.md", input.intent_id),
+                "report": format!(".axiomrunner/artifacts/{}.report.md", input.intent_id),
             },
             "report_written": input.report_written,
             "report_error": input.report_error,
@@ -351,7 +351,7 @@ impl JsonlTraceStorage {
             .or_else(|| std::env::current_dir().ok())
             .ok_or_else(|| String::from("trace workspace root is not available"))?;
         Ok(Self {
-            events_path: root.join(".axonrunner").join("trace").join("events.jsonl"),
+            events_path: root.join(".axiomrunner").join("trace").join("events.jsonl"),
         })
     }
 
@@ -609,7 +609,7 @@ mod tests {
             .unwrap_or(Duration::from_secs(0))
             .as_nanos();
         std::env::temp_dir().join(format!(
-            "axonrunner-trace-store-{label}-{}-{tick}",
+            "axiomrunner-trace-store-{label}-{}-{tick}",
             std::process::id()
         ))
     }
@@ -653,7 +653,7 @@ mod tests {
             patch_artifacts: vec![TracePatchArtifact {
                 operation: String::from("overwrite"),
                 target_path: String::from("runtime.log"),
-                artifact_path: String::from(".axonrunner/patches/runtime-log.json"),
+                artifact_path: String::from(".axiomrunner/patches/runtime-log.json"),
                 before_digest: None,
                 after_digest: Some(String::from("abcd")),
                 before_excerpt: None,
@@ -717,10 +717,10 @@ mod tests {
                 rollback: None,
             }),
             artifacts: TraceArtifacts {
-                plan: format!(".axonrunner/artifacts/{intent_id}.plan.md"),
-                apply: format!(".axonrunner/artifacts/{intent_id}.apply.md"),
-                verify: format!(".axonrunner/artifacts/{intent_id}.verify.md"),
-                report: format!(".axonrunner/artifacts/{intent_id}.report.md"),
+                plan: format!(".axiomrunner/artifacts/{intent_id}.plan.md"),
+                apply: format!(".axiomrunner/artifacts/{intent_id}.apply.md"),
+                verify: format!(".axiomrunner/artifacts/{intent_id}.verify.md"),
+                report: format!(".axiomrunner/artifacts/{intent_id}.report.md"),
             },
             report_written: true,
             report_error: None,
@@ -732,7 +732,7 @@ mod tests {
         let root = unique_dir("summary");
         fs::create_dir_all(&root).expect("workspace should exist");
         let store = TraceStore::from_workspace_root(Some(root.clone())).expect("store should init");
-        let path = root.join(".axonrunner/trace/events.jsonl");
+        let path = root.join(".axiomrunner/trace/events.jsonl");
         fs::create_dir_all(path.parent().expect("trace parent should exist"))
             .expect("trace parent should be created");
 
@@ -804,7 +804,7 @@ mod tests {
         let root = unique_dir("partial-tail");
         fs::create_dir_all(&root).expect("workspace should exist");
         let store = TraceStore::from_workspace_root(Some(root.clone())).expect("store should init");
-        let path = root.join(".axonrunner/trace/events.jsonl");
+        let path = root.join(".axiomrunner/trace/events.jsonl");
         fs::create_dir_all(path.parent().expect("trace parent should exist"))
             .expect("trace parent should be created");
 
@@ -812,7 +812,7 @@ mod tests {
             serde_json::to_string(&event("cli-1", 1, false)).expect("event should serialize");
         fs::write(
             &path,
-            format!("{valid}\n{{\"schema\":\"axonrunner.trace.intent.v1\""),
+            format!("{valid}\n{{\"schema\":\"axiomrunner.trace.intent.v1\""),
         )
         .expect("trace log should be written");
 
@@ -828,7 +828,7 @@ mod tests {
         let root = unique_dir("malformed-line");
         fs::create_dir_all(&root).expect("workspace should exist");
         let store = TraceStore::from_workspace_root(Some(root.clone())).expect("store should init");
-        let path = root.join(".axonrunner/trace/events.jsonl");
+        let path = root.join(".axiomrunner/trace/events.jsonl");
         fs::create_dir_all(path.parent().expect("trace parent should exist"))
             .expect("trace parent should be created");
 
@@ -851,7 +851,7 @@ mod tests {
             .map(|index| TracePatchArtifact {
                 operation: String::from("overwrite"),
                 target_path: format!("file-{index}.txt"),
-                artifact_path: format!(".axonrunner/patches/file-{index}.json"),
+                artifact_path: format!(".axiomrunner/patches/file-{index}.json"),
                 before_digest: None,
                 after_digest: Some(String::from("abcd")),
                 before_excerpt: None,
@@ -920,10 +920,10 @@ mod tests {
                 rollback: None,
             }),
             artifacts: TraceArtifacts {
-                plan: String::from(".axonrunner/artifacts/cli-false-done.plan.md"),
-                apply: String::from(".axonrunner/artifacts/cli-false-done.apply.md"),
-                verify: String::from(".axonrunner/artifacts/cli-false-done.verify.md"),
-                report: String::from(".axonrunner/artifacts/cli-false-done.report.md"),
+                plan: String::from(".axiomrunner/artifacts/cli-false-done.plan.md"),
+                apply: String::from(".axiomrunner/artifacts/cli-false-done.apply.md"),
+                verify: String::from(".axiomrunner/artifacts/cli-false-done.verify.md"),
+                report: String::from(".axiomrunner/artifacts/cli-false-done.report.md"),
             },
             report_written: true,
             report_error: None,

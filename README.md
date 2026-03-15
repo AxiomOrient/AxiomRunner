@@ -1,6 +1,6 @@
-# AxonRunner
+# AxiomRunner
 
-AxonRunner는 로컬 워크스페이스 자동화를 위한 goal-file 중심 CLI agent runtime이다.
+AxiomRunner는 로컬 워크스페이스 자동화를 위한 goal-file 중심 CLI agent runtime이다.
 
 제품 표면은 의도적으로 좁다. 지금 정식으로 노출하는 것은 `run`, `status`, `replay`, `resume`, `abort`, `doctor`, `health`, `help`다.
 
@@ -37,38 +37,38 @@ cat > GOAL.json <<'EOF'
     { "label": "report", "evidence": "report artifact exists" }
   ],
   "verification_checks": [
-    { "label": "release gate", "detail": "cargo test -p axonrunner_apps --test release_security_gate" }
+    { "label": "release gate", "detail": "cargo test -p axiomrunner_apps --test release_security_gate" }
   ],
   "budget": { "max_steps": 5, "max_minutes": 10, "max_tokens": 8000 },
   "approval_mode": "never"
 }
 EOF
 
-./target/debug/axonrunner_apps \
+./target/debug/axiomrunner_apps \
   --workspace="$PWD" \
-  --state-path="$PWD/.axonrunner/state.snapshot" \
+  --state-path="$PWD/.axiomrunner/state.snapshot" \
   run GOAL.json
 ```
 
 대기 중인 run을 다시 진행:
 
 ```bash
-./target/debug/axonrunner_apps \
+./target/debug/axiomrunner_apps \
   --workspace="$PWD" \
-  --state-path="$PWD/.axonrunner/state.snapshot" \
+  --state-path="$PWD/.axiomrunner/state.snapshot" \
   resume latest
 ```
 
 CLI 표면 확인:
 
 ```bash
-./target/debug/axonrunner_apps --help
+./target/debug/axiomrunner_apps --help
 ```
 
 현재 runtime / path / provider 상태 점검:
 
 ```bash
-./target/debug/axonrunner_apps \
+./target/debug/axiomrunner_apps \
   --workspace="$PWD" \
   doctor --json
 ```
@@ -76,17 +76,17 @@ CLI 표면 확인:
 가장 최근 run 요약 replay:
 
 ```bash
-./target/debug/axonrunner_apps \
+./target/debug/axiomrunner_apps \
   --workspace="$PWD" \
   replay latest
 ```
 
 autonomy evidence 기본 묶음:
 
-- `cargo test -p axonrunner_apps --test autonomous_eval_corpus`
-- `cargo test -p axonrunner_apps --test fault_path_suite`
-- `cargo test -p axonrunner_apps --test nightly_dogfood_contract`
-- `cargo test -p axonrunner_apps --test release_security_gate`
+- `cargo test -p axiomrunner_apps --test autonomous_eval_corpus`
+- `cargo test -p axiomrunner_apps --test fault_path_suite`
+- `cargo test -p axiomrunner_apps --test nightly_dogfood_contract`
+- `cargo test -p axiomrunner_apps --test release_security_gate`
 
 nightly 운영 경로:
 
@@ -119,19 +119,19 @@ developer automation milestone:
 
 환경 변수로도 같은 값을 줄 수 있다:
 
-- `AXONRUNNER_PROFILE`
-- `AXONRUNNER_RUNTIME_PROVIDER`
-- `AXONRUNNER_RUNTIME_PROVIDER_MODEL`
-- `AXONRUNNER_RUNTIME_TOOL_WORKSPACE`
-- `AXONRUNNER_RUNTIME_STATE_PATH`
+- `AXIOMRUNNER_PROFILE`
+- `AXIOMRUNNER_RUNTIME_PROVIDER`
+- `AXIOMRUNNER_RUNTIME_PROVIDER_MODEL`
+- `AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE`
+- `AXIOMRUNNER_RUNTIME_STATE_PATH`
 
 env-only runtime knobs:
 
-- `AXONRUNNER_RUNTIME_MEMORY_PATH`
-- `AXONRUNNER_RUNTIME_TOOL_LOG_PATH`
-- `AXONRUNNER_RUNTIME_MAX_TOKENS`
-- `AXONRUNNER_CODEX_BIN`
-- `AXONRUNNER_EXPERIMENTAL_OPENAI`
+- `AXIOMRUNNER_RUNTIME_MEMORY_PATH`
+- `AXIOMRUNNER_RUNTIME_TOOL_LOG_PATH`
+- `AXIOMRUNNER_RUNTIME_MAX_TOKENS`
+- `AXIOMRUNNER_CODEX_BIN`
+- `AXIOMRUNNER_EXPERIMENTAL_OPENAI`
 - `OPENAI_API_KEY`
 
 `provider=codek` contract:
@@ -151,7 +151,7 @@ env-only runtime knobs:
 - detail에서 안전한 strong verifier를 만들 수 없으면 `verification_weak`, `verification_unresolved`, `pack_required` 로 드러나며 `success`로 숨기지 않는다.
 - provider/tool/memory 단계 실패는 성공 종료로 숨기지 않고 process failure로 승격된다.
 - provider health는 `ready`, `degraded`, `blocked`로 노출된다.
-- `openai` provider는 기본 비활성 experimental 경로다. 실제 사용은 `AXONRUNNER_EXPERIMENTAL_OPENAI=1` opt-in 이후에만 허용된다.
+- `openai` provider는 기본 비활성 experimental 경로다. 실제 사용은 `AXIOMRUNNER_EXPERIMENTAL_OPENAI=1` opt-in 이후에만 허용된다.
 
 ## 문서
 

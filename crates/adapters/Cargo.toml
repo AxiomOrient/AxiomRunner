@@ -1,17 +1,17 @@
 [package]
-name = "axonrunner_adapters"
+name = "axiomrunner_adapters"
 version.workspace = true
 edition.workspace = true
 
 [lib]
-name = "axonrunner_adapters"
+name = "axiomrunner_adapters"
 path = "src/lib.rs"
 
 [lints]
 workspace = true
 
 [dependencies]
-axonrunner_core = { path = "../core" }
+axiomrunner_core = { path = "../core" }
 codex_runtime = { package = "codex-runtime", version = "0.5.0" }
 rusqlite = { version = "0.32.1", features = ["bundled"] }
 tokio = { version = "1", features = ["rt-multi-thread", "sync"] }

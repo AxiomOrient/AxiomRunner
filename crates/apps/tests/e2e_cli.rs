@@ -7,7 +7,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const CLI_USAGE: &str = "\
 usage:
-  axonrunner_apps [global-options] <command> [command-args]
+  axiomrunner_apps [global-options] <command> [command-args]
 
 global-options:
   --config-file <path>
@@ -30,18 +30,18 @@ commands:
   help";
 
 const SANITIZED_ENV_KEYS: &[&str] = &[
-    "AXONRUNNER_PROFILE",
-    "AXONRUNNER_CODEX_BIN",
-    "AXONRUNNER_RUNTIME_PROVIDER",
-    "AXONRUNNER_RUNTIME_PROVIDER_MODEL",
-    "AXONRUNNER_RUNTIME_MAX_TOKENS",
-    "AXONRUNNER_RUNTIME_MEMORY_PATH",
-    "AXONRUNNER_RUNTIME_STATE_PATH",
-    "AXONRUNNER_RUNTIME_TOOL_WORKSPACE",
-    "AXONRUNNER_RUNTIME_ARTIFACT_WORKSPACE",
-    "AXONRUNNER_RUNTIME_GIT_WORKTREE_ISOLATION",
-    "AXONRUNNER_RUNTIME_TOOL_LOG_PATH",
-    "AXONRUNNER_EXPERIMENTAL_OPENAI",
+    "AXIOMRUNNER_PROFILE",
+    "AXIOMRUNNER_CODEX_BIN",
+    "AXIOMRUNNER_RUNTIME_PROVIDER",
+    "AXIOMRUNNER_RUNTIME_PROVIDER_MODEL",
+    "AXIOMRUNNER_RUNTIME_MAX_TOKENS",
+    "AXIOMRUNNER_RUNTIME_MEMORY_PATH",
+    "AXIOMRUNNER_RUNTIME_STATE_PATH",
+    "AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE",
+    "AXIOMRUNNER_RUNTIME_ARTIFACT_WORKSPACE",
+    "AXIOMRUNNER_RUNTIME_GIT_WORKTREE_ISOLATION",
+    "AXIOMRUNNER_RUNTIME_TOOL_LOG_PATH",
+    "AXIOMRUNNER_EXPERIMENTAL_OPENAI",
     "OPENAI_API_KEY",
 ];
 
@@ -67,33 +67,33 @@ fn run_cli_internal(
     fs::create_dir_all(&home).expect("isolated home directory should be writable");
     let canonical_home = fs::canonicalize(&home).unwrap_or(home.clone());
     let explicit_tool_workspace = env.iter().find_map(|(key, value)| {
-        (*key == "AXONRUNNER_RUNTIME_TOOL_WORKSPACE").then(|| PathBuf::from(*value))
+        (*key == "AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE").then(|| PathBuf::from(*value))
     });
     let explicit_artifact_workspace = env.iter().find_map(|(key, value)| {
-        (*key == "AXONRUNNER_RUNTIME_ARTIFACT_WORKSPACE").then(|| PathBuf::from(*value))
+        (*key == "AXIOMRUNNER_RUNTIME_ARTIFACT_WORKSPACE").then(|| PathBuf::from(*value))
     });
     let tool_workspace = explicit_tool_workspace
         .clone()
-        .unwrap_or_else(|| canonical_home.join(".axonrunner").join("workspace"));
+        .unwrap_or_else(|| canonical_home.join(".axiomrunner").join("workspace"));
     let artifact_workspace = explicit_artifact_workspace
         .clone()
         .unwrap_or_else(|| tool_workspace.clone());
 
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_axonrunner_apps"));
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_axiomrunner_apps"));
     cmd.env("HOME", &canonical_home).args(args);
     for key in SANITIZED_ENV_KEYS {
         cmd.env_remove(key);
     }
     if inject_runtime_defaults && explicit_tool_workspace.is_none() {
-        cmd.env("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", &tool_workspace);
+        cmd.env("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", &tool_workspace);
     }
     if inject_runtime_defaults
         && !env
             .iter()
-            .any(|(key, _)| *key == "AXONRUNNER_RUNTIME_TOOL_LOG_PATH")
+            .any(|(key, _)| *key == "AXIOMRUNNER_RUNTIME_TOOL_LOG_PATH")
     {
         cmd.env(
-            "AXONRUNNER_RUNTIME_TOOL_LOG_PATH",
+            "AXIOMRUNNER_RUNTIME_TOOL_LOG_PATH",
             artifact_workspace.join("runtime.log"),
         );
     }
@@ -101,7 +101,7 @@ fn run_cli_internal(
         cmd.env(key, value);
     }
 
-    let output = cmd.output().expect("axonrunner_apps binary should run");
+    let output = cmd.output().expect("axiomrunner_apps binary should run");
     let _ = fs::remove_dir_all(&canonical_home);
     output
 }
@@ -120,7 +120,7 @@ fn unique_path(label: &str, extension: &str) -> PathBuf {
         .unwrap_or(Duration::from_secs(0))
         .as_nanos();
     std::env::temp_dir().join(format!(
-        "axonrunner-e2e-cli-{label}-{}-{tick}.{extension}",
+        "axiomrunner-e2e-cli-{label}-{}-{tick}.{extension}",
         std::process::id()
     ))
 }
@@ -164,7 +164,7 @@ fn init_git_repo(path: &Path) {
     fs::create_dir_all(path).expect("repo directory should exist");
     run_checked_command("git", &["init"], path);
     run_checked_command("git", &["config", "user.email", "test@example.com"], path);
-    run_checked_command("git", &["config", "user.name", "AxonRunner Test"], path);
+    run_checked_command("git", &["config", "user.name", "AxiomRunner Test"], path);
     fs::write(path.join("README.md"), "fixture\n").expect("fixture file should exist");
     run_checked_command("git", &["add", "README.md"], path);
     run_checked_command("git", &["commit", "-m", "init"], path);
@@ -197,24 +197,24 @@ fn e2e_cli_goal_run_can_use_isolated_git_worktree() {
     let run = run_cli_with_env(
         &["run", path_str(&goal_file)],
         &[
-            ("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&repo_root)),
+            ("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&repo_root)),
             (
-                "AXONRUNNER_RUNTIME_ARTIFACT_WORKSPACE",
+                "AXIOMRUNNER_RUNTIME_ARTIFACT_WORKSPACE",
                 path_str(&artifact_workspace),
             ),
-            ("AXONRUNNER_RUNTIME_GIT_WORKTREE_ISOLATION", "1"),
+            ("AXIOMRUNNER_RUNTIME_GIT_WORKTREE_ISOLATION", "1"),
         ],
         "git-worktree-run",
     );
     let status = run_cli_with_env(
         &["status", "run-1"],
         &[
-            ("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&repo_root)),
+            ("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&repo_root)),
             (
-                "AXONRUNNER_RUNTIME_ARTIFACT_WORKSPACE",
+                "AXIOMRUNNER_RUNTIME_ARTIFACT_WORKSPACE",
                 path_str(&artifact_workspace),
             ),
-            ("AXONRUNNER_RUNTIME_GIT_WORKTREE_ISOLATION", "1"),
+            ("AXIOMRUNNER_RUNTIME_GIT_WORKTREE_ISOLATION", "1"),
         ],
         "git-worktree-status",
     );
@@ -222,7 +222,7 @@ fn e2e_cli_goal_run_can_use_isolated_git_worktree() {
 
     assert!(run.status.success(), "stderr:\n{stderr}");
     assert!(status.status.success(), "stderr:\n{}", stderr_of(&status));
-    let commands_dir = artifact_workspace.join(".axonrunner/commands");
+    let commands_dir = artifact_workspace.join(".axiomrunner/commands");
     let command_artifact_path = fs::read_dir(&commands_dir)
         .expect("command artifacts should exist")
         .map(|entry| entry.expect("entry should exist").path())
@@ -244,7 +244,7 @@ fn e2e_cli_goal_run_can_use_isolated_git_worktree() {
     assert!(stdout_of(&status).contains("run-1"));
     assert!(
         artifact_workspace
-            .join(".axonrunner/artifacts/cli-1.checkpoint.json")
+            .join(".axiomrunner/artifacts/cli-1.checkpoint.json")
             .exists()
     );
 
@@ -281,24 +281,24 @@ fn e2e_cli_failed_isolated_run_writes_rollback_metadata() {
     let run = run_cli_with_env(
         &["run", path_str(&goal_file)],
         &[
-            ("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&repo_root)),
+            ("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&repo_root)),
             (
-                "AXONRUNNER_RUNTIME_ARTIFACT_WORKSPACE",
+                "AXIOMRUNNER_RUNTIME_ARTIFACT_WORKSPACE",
                 path_str(&artifact_workspace),
             ),
-            ("AXONRUNNER_RUNTIME_GIT_WORKTREE_ISOLATION", "1"),
+            ("AXIOMRUNNER_RUNTIME_GIT_WORKTREE_ISOLATION", "1"),
         ],
         "rollback-run",
     );
     let replay = run_cli_with_env(
         &["replay", "latest"],
         &[
-            ("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&repo_root)),
+            ("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&repo_root)),
             (
-                "AXONRUNNER_RUNTIME_ARTIFACT_WORKSPACE",
+                "AXIOMRUNNER_RUNTIME_ARTIFACT_WORKSPACE",
                 path_str(&artifact_workspace),
             ),
-            ("AXONRUNNER_RUNTIME_GIT_WORKTREE_ISOLATION", "1"),
+            ("AXIOMRUNNER_RUNTIME_GIT_WORKTREE_ISOLATION", "1"),
         ],
         "rollback-replay",
     );
@@ -306,11 +306,11 @@ fn e2e_cli_failed_isolated_run_writes_rollback_metadata() {
     assert!(run.status.success(), "stderr:\n{}", stderr_of(&run));
     assert!(stdout_of(&run).contains("phase=blocked outcome=blocked"));
     assert!(replay.status.success(), "stderr:\n{}", stderr_of(&replay));
-    let checkpoint_path = artifact_workspace.join(".axonrunner/artifacts/cli-1.checkpoint.json");
-    let rollback_path = artifact_workspace.join(".axonrunner/artifacts/cli-1.rollback.json");
+    let checkpoint_path = artifact_workspace.join(".axiomrunner/artifacts/cli-1.checkpoint.json");
+    let rollback_path = artifact_workspace.join(".axiomrunner/artifacts/cli-1.rollback.json");
     assert!(checkpoint_path.exists(), "checkpoint metadata should exist");
     assert!(rollback_path.exists(), "rollback metadata should exist");
-    let report_path = artifact_workspace.join(".axonrunner/artifacts/cli-1.report.md");
+    let report_path = artifact_workspace.join(".axiomrunner/artifacts/cli-1.report.md");
     let report = fs::read_to_string(&report_path).expect("rollback report should be readable");
     let checkpoint_json: serde_json::Value = serde_json::from_str(
         &fs::read_to_string(&checkpoint_path).expect("checkpoint metadata should be readable"),
@@ -320,12 +320,12 @@ fn e2e_cli_failed_isolated_run_writes_rollback_metadata() {
         &fs::read_to_string(&rollback_path).expect("rollback metadata should be readable"),
     )
     .expect("rollback metadata should be valid json");
-    assert_eq!(checkpoint_json["schema"], "axonrunner.checkpoint.v1");
+    assert_eq!(checkpoint_json["schema"], "axiomrunner.checkpoint.v1");
     assert_eq!(
         checkpoint_json["restore_path"],
         canonical_repo_root.display().to_string()
     );
-    assert_eq!(rollback_json["schema"], "axonrunner.rollback.v1");
+    assert_eq!(rollback_json["schema"], "axiomrunner.rollback.v1");
     assert_eq!(
         rollback_json["restore_path"],
         canonical_repo_root.display().to_string()
@@ -378,7 +378,7 @@ fn e2e_cli_goal_file_run_persists_run_id_and_supports_status_and_replay_by_run_i
 
     let run = run_cli_with_env(
         &["run", path_str(&goal_file)],
-        &[("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
+        &[("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
         "goal-file-run",
     );
     let run_stdout = stdout_of(&run);
@@ -392,12 +392,12 @@ fn e2e_cli_goal_file_run_persists_run_id_and_supports_status_and_replay_by_run_i
 
     let status = run_cli_with_env(
         &["status", "run-1"],
-        &[("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
+        &[("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
         "goal-file-status",
     );
     let replay = run_cli_with_env(
         &["replay", "run-1"],
-        &[("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
+        &[("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
         "goal-file-replay",
     );
 
@@ -415,7 +415,7 @@ fn e2e_cli_goal_file_run_persists_run_id_and_supports_status_and_replay_by_run_i
     assert!(stdout_of(&replay).contains("replay step id="));
     assert!(stdout_of(&replay).contains("label=validate goal contract"));
     assert!(
-        fs::read_to_string(workspace.join(".axonrunner/artifacts/cli-1.plan.md"))
+        fs::read_to_string(workspace.join(".axiomrunner/artifacts/cli-1.plan.md"))
             .expect("plan artifact should exist")
             .contains("goal=Ship one bounded goal package")
     );
@@ -450,8 +450,8 @@ fn e2e_cli_goal_file_on_risk_requires_approval_before_execution() {
     let run = run_cli_with_env(
         &["run", path_str(&goal_file)],
         &[
-            ("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace)),
-            ("AXONRUNNER_RUNTIME_STATE_PATH", path_str(&state_path)),
+            ("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace)),
+            ("AXIOMRUNNER_RUNTIME_STATE_PATH", path_str(&state_path)),
         ],
         "goal-file-on-risk-run",
     );
@@ -460,9 +460,9 @@ fn e2e_cli_goal_file_on_risk_requires_approval_before_execution() {
         "run intent_id=cli-1 phase=waiting_approval outcome=approval_required reason=approval_required_before_execution"
     ));
     let pending_report =
-        fs::read_to_string(workspace.join(".axonrunner/artifacts/cli-1.report.md"))
+        fs::read_to_string(workspace.join(".axiomrunner/artifacts/cli-1.report.md"))
             .expect("pending approval report should exist");
-    let pending_trace = fs::read_to_string(workspace.join(".axonrunner/trace/events.jsonl"))
+    let pending_trace = fs::read_to_string(workspace.join(".axiomrunner/trace/events.jsonl"))
         .expect("pending approval trace should exist");
     let pending_event: serde_json::Value = serde_json::from_str(
         pending_trace
@@ -479,22 +479,22 @@ fn e2e_cli_goal_file_on_risk_requires_approval_before_execution() {
     let resume = run_cli_with_env(
         &["resume", "run-1"],
         &[
-            ("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace)),
-            ("AXONRUNNER_RUNTIME_STATE_PATH", path_str(&state_path)),
+            ("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace)),
+            ("AXIOMRUNNER_RUNTIME_STATE_PATH", path_str(&state_path)),
         ],
         "goal-file-on-risk-resume",
     );
     let status = run_cli_with_env(
         &["status", "run-1"],
         &[
-            ("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace)),
-            ("AXONRUNNER_RUNTIME_STATE_PATH", path_str(&state_path)),
+            ("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace)),
+            ("AXIOMRUNNER_RUNTIME_STATE_PATH", path_str(&state_path)),
         ],
         "goal-file-on-risk-status",
     );
     let replay = run_cli_with_env(
         &["replay", "run-1"],
-        &[("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
+        &[("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
         "goal-file-on-risk-replay",
     );
 
@@ -538,24 +538,24 @@ fn e2e_cli_goal_file_approval_can_resume_from_pending_run() {
     let run = run_cli_with_env(
         &["run", path_str(&goal_file)],
         &[
-            ("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace)),
-            ("AXONRUNNER_RUNTIME_STATE_PATH", path_str(&state_path)),
+            ("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace)),
+            ("AXIOMRUNNER_RUNTIME_STATE_PATH", path_str(&state_path)),
         ],
         "goal-file-approval-run",
     );
     let pending_status = run_cli_with_env(
         &["status", "run-1"],
         &[
-            ("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace)),
-            ("AXONRUNNER_RUNTIME_STATE_PATH", path_str(&state_path)),
+            ("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace)),
+            ("AXIOMRUNNER_RUNTIME_STATE_PATH", path_str(&state_path)),
         ],
         "goal-file-approval-pending-status",
     );
     let pending_doctor = run_cli_with_env(
         &["doctor"],
         &[
-            ("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace)),
-            ("AXONRUNNER_RUNTIME_STATE_PATH", path_str(&state_path)),
+            ("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace)),
+            ("AXIOMRUNNER_RUNTIME_STATE_PATH", path_str(&state_path)),
         ],
         "goal-file-approval-pending-doctor",
     );
@@ -571,7 +571,7 @@ fn e2e_cli_goal_file_approval_can_resume_from_pending_run() {
     assert!(stdout_of(&pending_doctor).contains("approval_state=required verifier_state=skipped"));
     let pending_replay = run_cli_with_env(
         &["replay", "run-1"],
-        &[("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
+        &[("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
         "goal-file-approval-pending-replay",
     );
     assert!(pending_replay.status.success());
@@ -580,22 +580,22 @@ fn e2e_cli_goal_file_approval_can_resume_from_pending_run() {
     let resume = run_cli_with_env(
         &["resume", "run-1"],
         &[
-            ("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace)),
-            ("AXONRUNNER_RUNTIME_STATE_PATH", path_str(&state_path)),
+            ("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace)),
+            ("AXIOMRUNNER_RUNTIME_STATE_PATH", path_str(&state_path)),
         ],
         "goal-file-approval-resume",
     );
     let status = run_cli_with_env(
         &["status", "run-1"],
         &[
-            ("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace)),
-            ("AXONRUNNER_RUNTIME_STATE_PATH", path_str(&state_path)),
+            ("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace)),
+            ("AXIOMRUNNER_RUNTIME_STATE_PATH", path_str(&state_path)),
         ],
         "goal-file-approval-status",
     );
     let replay = run_cli_with_env(
         &["replay", "run-1"],
-        &[("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
+        &[("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
         "goal-file-approval-replay",
     );
 
@@ -639,8 +639,8 @@ fn e2e_cli_goal_file_pending_run_can_abort_cleanly() {
     let run = run_cli_with_env(
         &["run", path_str(&goal_file)],
         &[
-            ("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace)),
-            ("AXONRUNNER_RUNTIME_STATE_PATH", path_str(&state_path)),
+            ("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace)),
+            ("AXIOMRUNNER_RUNTIME_STATE_PATH", path_str(&state_path)),
         ],
         "goal-file-abort-run",
     );
@@ -649,25 +649,25 @@ fn e2e_cli_goal_file_pending_run_can_abort_cleanly() {
     let abort = run_cli_with_env(
         &["abort", "run-1"],
         &[
-            ("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace)),
-            ("AXONRUNNER_RUNTIME_STATE_PATH", path_str(&state_path)),
+            ("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace)),
+            ("AXIOMRUNNER_RUNTIME_STATE_PATH", path_str(&state_path)),
         ],
         "goal-file-abort-command",
     );
     let status = run_cli_with_env(
         &["status", "run-1"],
         &[
-            ("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace)),
-            ("AXONRUNNER_RUNTIME_STATE_PATH", path_str(&state_path)),
+            ("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace)),
+            ("AXIOMRUNNER_RUNTIME_STATE_PATH", path_str(&state_path)),
         ],
         "goal-file-abort-status",
     );
     let replay = run_cli_with_env(
         &["replay", "run-1"],
-        &[("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
+        &[("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
         "goal-file-abort-replay",
     );
-    let trace = fs::read_to_string(workspace.join(".axonrunner/trace/events.jsonl"))
+    let trace = fs::read_to_string(workspace.join(".axiomrunner/trace/events.jsonl"))
         .expect("trace should be readable");
     let latest = trace
         .lines()
@@ -722,17 +722,17 @@ fn e2e_cli_goal_file_blocks_when_step_budget_is_already_exhausted() {
 
     let run = run_cli_with_env(
         &["run", path_str(&goal_file)],
-        &[("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
+        &[("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
         "goal-file-budget-run",
     );
     let status = run_cli_with_env(
         &["status", "run-1"],
-        &[("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
+        &[("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
         "goal-file-budget-status",
     );
     let replay = run_cli_with_env(
         &["replay", "run-1"],
-        &[("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
+        &[("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
         "goal-file-budget-replay",
     );
 
@@ -754,7 +754,7 @@ fn e2e_cli_goal_file_blocks_when_step_budget_is_already_exhausted() {
         stdout_of(&replay)
             .contains("reason_code=budget_exhausted_before_execution reason_detail=none")
     );
-    let report = fs::read_to_string(workspace.join(".axonrunner/artifacts/cli-1.report.md"))
+    let report = fs::read_to_string(workspace.join(".axiomrunner/artifacts/cli-1.report.md"))
         .expect("budget report should exist");
     assert!(report.contains("provider=skipped"));
     assert!(report.contains("tool=skipped"));
@@ -789,17 +789,17 @@ fn e2e_cli_goal_file_blocks_when_token_budget_is_already_exhausted() {
 
     let run = run_cli_with_env(
         &["run", path_str(&goal_file)],
-        &[("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
+        &[("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
         "goal-file-token-budget-run",
     );
     let status = run_cli_with_env(
         &["status", "run-1"],
-        &[("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
+        &[("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
         "goal-file-token-budget-status",
     );
     let replay = run_cli_with_env(
         &["replay", "run-1"],
-        &[("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
+        &[("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
         "goal-file-token-budget-replay",
     );
 
@@ -821,7 +821,7 @@ fn e2e_cli_goal_file_blocks_when_token_budget_is_already_exhausted() {
         stdout_of(&replay)
             .contains("reason_code=budget_exhausted_before_execution_tokens reason_detail=4096>64")
     );
-    let report = fs::read_to_string(workspace.join(".axonrunner/artifacts/cli-1.report.md"))
+    let report = fs::read_to_string(workspace.join(".axiomrunner/artifacts/cli-1.report.md"))
         .expect("token budget report should exist");
     assert!(report.contains("run_reason_code=budget_exhausted_before_execution_tokens"));
     assert!(report.contains("run_reason_detail=4096>64"));
@@ -855,14 +855,14 @@ fn e2e_cli_goal_file_uses_bounded_repair_budget() {
     let run = run_cli_with_env(
         &["run", path_str(&goal_file)],
         &[
-            ("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace)),
-            ("AXONRUNNER_RUNTIME_COMMAND_ALLOWLIST", "git"),
+            ("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace)),
+            ("AXIOMRUNNER_RUNTIME_COMMAND_ALLOWLIST", "git"),
         ],
         "goal-file-repair-budget-run",
     );
     let replay = run_cli_with_env(
         &["replay", "run-1"],
-        &[("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
+        &[("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
         "goal-file-repair-budget-replay",
     );
 
@@ -898,7 +898,7 @@ fn e2e_cli_goal_file_zero_repair_budget_does_not_claim_attempt() {
     { "label": "report", "evidence": "report artifact exists" }
   ],
   "verification_checks": [
-    { "label": "release gate", "detail": "cargo test -p axonrunner_apps --test release_security_gate" }
+    { "label": "release gate", "detail": "cargo test -p axiomrunner_apps --test release_security_gate" }
   ],
   "budget": { "max_steps": 5, "max_minutes": 10, "max_tokens": 8000 },
   "approval_mode": "never"
@@ -909,14 +909,14 @@ fn e2e_cli_goal_file_zero_repair_budget_does_not_claim_attempt() {
     let run = run_cli_with_env(
         &["run", path_str(&goal_file)],
         &[
-            ("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace)),
-            ("AXONRUNNER_RUNTIME_COMMAND_ALLOWLIST", "git"),
+            ("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace)),
+            ("AXIOMRUNNER_RUNTIME_COMMAND_ALLOWLIST", "git"),
         ],
         "goal-file-zero-repair-budget-run",
     );
     let replay = run_cli_with_env(
         &["replay", "run-1"],
-        &[("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
+        &[("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
         "goal-file-zero-repair-budget-replay",
     );
 
@@ -934,9 +934,9 @@ fn e2e_cli_goal_file_zero_repair_budget_does_not_claim_attempt() {
 #[test]
 fn e2e_cli_workspace_lock_blocks_mutating_commands_but_allows_status_reads() {
     let workspace = unique_path("workspace-lock-workspace", "dir");
-    fs::create_dir_all(workspace.join(".axonrunner")).expect("lock dir should exist");
+    fs::create_dir_all(workspace.join(".axiomrunner")).expect("lock dir should exist");
     fs::write(
-        workspace.join(".axonrunner/runtime.lock"),
+        workspace.join(".axiomrunner/runtime.lock"),
         format!("pid={} command=run\n", std::process::id()),
     )
     .expect("lock file should exist");
@@ -952,7 +952,7 @@ fn e2e_cli_workspace_lock_blocks_mutating_commands_but_allows_status_reads() {
     { "label": "report", "evidence": "report artifact exists" }
   ],
   "verification_checks": [
-    { "label": "release gate", "detail": "cargo test -p axonrunner_apps --test release_security_gate" }
+    { "label": "release gate", "detail": "cargo test -p axiomrunner_apps --test release_security_gate" }
   ],
   "budget": { "max_steps": 5, "max_minutes": 10, "max_tokens": 8000 },
   "approval_mode": "never"
@@ -962,12 +962,12 @@ fn e2e_cli_workspace_lock_blocks_mutating_commands_but_allows_status_reads() {
 
     let run = run_cli_with_env(
         &["run", path_str(&goal_file)],
-        &[("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
+        &[("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
         "workspace-lock-run",
     );
     let status = run_cli_with_env(
         &["status"],
-        &[("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
+        &[("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
         "workspace-lock-status",
     );
 
@@ -985,9 +985,9 @@ fn e2e_cli_workspace_lock_blocks_mutating_commands_but_allows_status_reads() {
 #[test]
 fn e2e_cli_workspace_lock_recovers_stale_pid_and_runs() {
     let workspace = unique_path("workspace-stale-lock-workspace", "dir");
-    fs::create_dir_all(workspace.join(".axonrunner")).expect("lock dir should exist");
+    fs::create_dir_all(workspace.join(".axiomrunner")).expect("lock dir should exist");
     fs::write(
-        workspace.join(".axonrunner/runtime.lock"),
+        workspace.join(".axiomrunner/runtime.lock"),
         "pid=999999 command=run\n",
     )
     .expect("stale lock file should exist");
@@ -1013,7 +1013,7 @@ fn e2e_cli_workspace_lock_recovers_stale_pid_and_runs() {
 
     let run = run_cli_with_env(
         &["run", path_str(&goal_file)],
-        &[("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
+        &[("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
         "workspace-stale-lock-run",
     );
 
@@ -1031,8 +1031,8 @@ fn e2e_cli_resume_rejects_non_pending_state_with_clear_error() {
     let resume = run_cli_with_env(
         &["resume", "latest"],
         &[
-            ("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace)),
-            ("AXONRUNNER_RUNTIME_STATE_PATH", path_str(&state_path)),
+            ("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace)),
+            ("AXIOMRUNNER_RUNTIME_STATE_PATH", path_str(&state_path)),
         ],
         "resume-no-pending",
     );
@@ -1051,7 +1051,7 @@ fn e2e_cli_run_missing_goal_file_surfaces_file_not_found_directly() {
     let workspace = unique_path("missing-goal-workspace", "dir");
     let output = run_cli_with_env(
         &["run", "./missing-goal.json"],
-        &[("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
+        &[("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
         "missing-goal",
     );
 
@@ -1120,15 +1120,15 @@ fn e2e_cli_goal_file_executes_external_workflow_pack_verifier_sequence() {
 
     let run = run_cli_with_env(
         &["run", path_str(&goal_file)],
-        &[("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
+        &[("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
         "goal-pack-run",
     );
     let replay = run_cli_with_env(
         &["replay", "run-1"],
-        &[("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
+        &[("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
         "goal-pack-replay",
     );
-    let report = fs::read_to_string(workspace.join(".axonrunner/artifacts/cli-1.report.md"))
+    let report = fs::read_to_string(workspace.join(".axiomrunner/artifacts/cli-1.report.md"))
         .expect("report should exist");
 
     assert!(run.status.success(), "stderr:\n{}", stderr_of(&run));
@@ -1175,17 +1175,17 @@ fn e2e_cli_default_goal_pack_blocks_when_verification_is_pack_required() {
 
     let run = run_cli_with_env(
         &["run", path_str(&goal_file)],
-        &[("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
+        &[("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
         "goal-pack-required-run",
     );
     let replay = run_cli_with_env(
         &["replay", "run-1"],
-        &[("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
+        &[("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
         "goal-pack-required-replay",
     );
-    let verify = fs::read_to_string(workspace.join(".axonrunner/artifacts/cli-1.verify.md"))
+    let verify = fs::read_to_string(workspace.join(".axiomrunner/artifacts/cli-1.verify.md"))
         .expect("verify artifact should exist");
-    let report = fs::read_to_string(workspace.join(".axonrunner/artifacts/cli-1.report.md"))
+    let report = fs::read_to_string(workspace.join(".axiomrunner/artifacts/cli-1.report.md"))
         .expect("report artifact should exist");
 
     assert!(run.status.success(), "stderr:\n{}", stderr_of(&run));
@@ -1230,10 +1230,10 @@ fn e2e_cli_doctor_reports_blocked_codek_binary_and_paths() {
     let output = run_cli_with_env(
         &["doctor"],
         &[
-            ("AXONRUNNER_RUNTIME_PROVIDER", "codek"),
-            ("AXONRUNNER_CODEX_BIN", "/definitely-missing-codex-binary"),
-            ("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace)),
-            ("AXONRUNNER_RUNTIME_STATE_PATH", path_str(&state_path)),
+            ("AXIOMRUNNER_RUNTIME_PROVIDER", "codek"),
+            ("AXIOMRUNNER_CODEX_BIN", "/definitely-missing-codex-binary"),
+            ("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace)),
+            ("AXIOMRUNNER_RUNTIME_STATE_PATH", path_str(&state_path)),
         ],
         "doctor-codek",
     );
@@ -1261,10 +1261,10 @@ fn e2e_cli_doctor_reports_codex_version_and_compatibility_for_old_binary() {
     let output = run_cli_with_env(
         &["doctor"],
         &[
-            ("AXONRUNNER_RUNTIME_PROVIDER", "codek"),
-            ("AXONRUNNER_CODEX_BIN", path_str(&fake_cli)),
-            ("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace)),
-            ("AXONRUNNER_RUNTIME_STATE_PATH", path_str(&state_path)),
+            ("AXIOMRUNNER_RUNTIME_PROVIDER", "codek"),
+            ("AXIOMRUNNER_CODEX_BIN", path_str(&fake_cli)),
+            ("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace)),
+            ("AXIOMRUNNER_RUNTIME_STATE_PATH", path_str(&state_path)),
         ],
         "doctor-old-codek",
     );
@@ -1287,7 +1287,7 @@ fn e2e_cli_doctor_json_is_machine_readable() {
     let workspace = unique_path("doctor-json-workspace", "dir");
     let output = run_cli_with_env(
         &["doctor", "--json"],
-        &[("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
+        &[("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
         "doctor-json",
     );
     let stdout = stdout_of(&output);
@@ -1311,7 +1311,7 @@ fn e2e_cli_doctor_json_is_machine_readable() {
 fn e2e_cli_rejects_unknown_runtime_provider_from_env() {
     let output = run_cli_with_env(
         &["status"],
-        &[("AXONRUNNER_RUNTIME_PROVIDER", "openrouter")],
+        &[("AXIOMRUNNER_RUNTIME_PROVIDER", "openrouter")],
         "invalid-provider-env",
     );
     let stdout = stdout_of(&output);
@@ -1321,7 +1321,7 @@ fn e2e_cli_rejects_unknown_runtime_provider_from_env() {
     assert!(stdout.is_empty());
     assert!(stderr.contains("runtime init error:"));
     assert!(stderr.contains("unknown runtime provider 'openrouter'"));
-    assert!(stderr.contains("AXONRUNNER_RUNTIME_PROVIDER"));
+    assert!(stderr.contains("AXIOMRUNNER_RUNTIME_PROVIDER"));
 }
 
 #[test]
@@ -1361,7 +1361,7 @@ fn e2e_cli_replay_missing_target_is_runtime_error() {
 
     let replay = run_cli_with_env(
         &["replay", "missing-intent"],
-        &[("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
+        &[("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
         "replay-missing-read",
     );
     let stdout = stdout_of(&replay);
@@ -1378,9 +1378,9 @@ fn e2e_cli_replay_missing_target_is_runtime_error() {
 #[test]
 fn e2e_cli_status_and_replay_render_aborted_outcome_from_trace() {
     let workspace = unique_path("aborted-trace-workspace", "dir");
-    fs::create_dir_all(workspace.join(".axonrunner/trace")).expect("trace dir should exist");
+    fs::create_dir_all(workspace.join(".axiomrunner/trace")).expect("trace dir should exist");
     let trace = serde_json::json!({
-        "schema": "axonrunner.trace.intent.v1",
+        "schema": "axiomrunner.trace.intent.v1",
         "timestamp_ms": 1_u64,
         "actor_id": "system",
         "intent_id": "cli-abort",
@@ -1420,16 +1420,16 @@ fn e2e_cli_status_and_replay_render_aborted_outcome_from_trace() {
             }
         },
         "artifacts": {
-            "plan": ".axonrunner/artifacts/cli-abort.plan.md",
-            "apply": ".axonrunner/artifacts/cli-abort.apply.md",
-            "verify": ".axonrunner/artifacts/cli-abort.verify.md",
-            "report": ".axonrunner/artifacts/cli-abort.report.md"
+            "plan": ".axiomrunner/artifacts/cli-abort.plan.md",
+            "apply": ".axiomrunner/artifacts/cli-abort.apply.md",
+            "verify": ".axiomrunner/artifacts/cli-abort.verify.md",
+            "report": ".axiomrunner/artifacts/cli-abort.report.md"
         },
         "report_written": true,
         "report_error": serde_json::Value::Null
     });
     fs::write(
-        workspace.join(".axonrunner/trace/events.jsonl"),
+        workspace.join(".axiomrunner/trace/events.jsonl"),
         format!(
             "{}\n",
             serde_json::to_string(&trace).expect("trace should serialize")
@@ -1439,12 +1439,12 @@ fn e2e_cli_status_and_replay_render_aborted_outcome_from_trace() {
 
     let status = run_cli_with_env(
         &["status"],
-        &[("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
+        &[("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
         "aborted-status",
     );
     let replay = run_cli_with_env(
         &["replay", "latest"],
-        &[("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
+        &[("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
         "aborted-replay",
     );
 
@@ -1463,9 +1463,9 @@ fn e2e_cli_status_and_replay_render_aborted_outcome_from_trace() {
 #[test]
 fn e2e_cli_replay_counts_false_done_runs() {
     let workspace = unique_path("replay-false-done-workspace", "dir");
-    fs::create_dir_all(workspace.join(".axonrunner/trace")).expect("trace dir should exist");
+    fs::create_dir_all(workspace.join(".axiomrunner/trace")).expect("trace dir should exist");
     let trace = serde_json::json!({
-        "schema": "axonrunner.trace.intent.v1",
+        "schema": "axiomrunner.trace.intent.v1",
         "timestamp_ms": 1_u64,
         "actor_id": "system",
         "intent_id": "cli-false-done",
@@ -1505,16 +1505,16 @@ fn e2e_cli_replay_counts_false_done_runs() {
             }
         },
         "artifacts": {
-            "plan": ".axonrunner/artifacts/cli-false-done.plan.md",
-            "apply": ".axonrunner/artifacts/cli-false-done.apply.md",
-            "verify": ".axonrunner/artifacts/cli-false-done.verify.md",
-            "report": ".axonrunner/artifacts/cli-false-done.report.md"
+            "plan": ".axiomrunner/artifacts/cli-false-done.plan.md",
+            "apply": ".axiomrunner/artifacts/cli-false-done.apply.md",
+            "verify": ".axiomrunner/artifacts/cli-false-done.verify.md",
+            "report": ".axiomrunner/artifacts/cli-false-done.report.md"
         },
         "report_written": true,
         "report_error": serde_json::Value::Null
     });
     fs::write(
-        workspace.join(".axonrunner/trace/events.jsonl"),
+        workspace.join(".axiomrunner/trace/events.jsonl"),
         format!(
             "{}\n",
             serde_json::to_string(&trace).expect("trace should serialize")
@@ -1524,7 +1524,7 @@ fn e2e_cli_replay_counts_false_done_runs() {
 
     let replay = run_cli_with_env(
         &["replay", "latest"],
-        &[("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
+        &[("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
         "replay-false-done-read",
     );
     let stdout = stdout_of(&replay);
@@ -1547,8 +1547,8 @@ fn e2e_cli_status_reports_blocked_codek_provider() {
     let output = run_cli_with_env(
         &["status"],
         &[
-            ("AXONRUNNER_RUNTIME_PROVIDER", "codek"),
-            ("AXONRUNNER_CODEX_BIN", "/definitely-missing-codex-binary"),
+            ("AXIOMRUNNER_RUNTIME_PROVIDER", "codek"),
+            ("AXIOMRUNNER_CODEX_BIN", "/definitely-missing-codex-binary"),
         ],
         "codek-provider-status",
     );
@@ -1565,7 +1565,7 @@ fn e2e_cli_status_reports_blocked_codek_provider() {
 fn e2e_cli_health_reports_blocked_openai_provider_without_api_key() {
     let output = run_cli_with_env(
         &["health"],
-        &[("AXONRUNNER_RUNTIME_PROVIDER", "openai")],
+        &[("AXIOMRUNNER_RUNTIME_PROVIDER", "openai")],
         "openai-provider-health",
     );
     let stdout = stdout_of(&output);
@@ -1583,8 +1583,8 @@ fn e2e_cli_health_reports_missing_api_key_after_openai_experimental_opt_in() {
     let output = run_cli_with_env(
         &["health"],
         &[
-            ("AXONRUNNER_RUNTIME_PROVIDER", "openai"),
-            ("AXONRUNNER_EXPERIMENTAL_OPENAI", "1"),
+            ("AXIOMRUNNER_RUNTIME_PROVIDER", "openai"),
+            ("AXIOMRUNNER_EXPERIMENTAL_OPENAI", "1"),
         ],
         "openai-provider-health-opt-in",
     );

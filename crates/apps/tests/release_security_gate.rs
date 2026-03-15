@@ -43,7 +43,7 @@ fn unique_path(label: &str, extension: &str) -> PathBuf {
         .expect("clock should be after epoch")
         .as_nanos();
     std::env::temp_dir().join(format!(
-        "axonrunner-release-gate-{label}-{}-{tick}.{extension}",
+        "axiomrunner-release-gate-{label}-{}-{tick}.{extension}",
         std::process::id()
     ))
 }
@@ -130,7 +130,7 @@ fn release_security_gate_rejects_legacy_cli_bypass_flag() {
 fn release_security_gate_legacy_env_bypass_signal_does_not_allow_release_startup() {
     let output = run_cli_with_env(
         &["--profile=dev", "status"],
-        &[("AXONRUNNER_ALLOW_DEV_IN_RELEASE", "true")],
+        &[("AXIOMRUNNER_ALLOW_DEV_IN_RELEASE", "true")],
     );
     let stdout = stdout_of(&output);
     let stderr = stderr_of(&output);
@@ -380,14 +380,14 @@ fn release_security_gate_pack_required_goals_block_instead_of_claiming_success()
     let run = run_cli_with_env(
         &["run", goal_file.to_str().expect("utf8 path")],
         &[(
-            "AXONRUNNER_RUNTIME_TOOL_WORKSPACE",
+            "AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE",
             workspace.to_str().expect("utf8 path"),
         )],
     );
     let replay = run_cli_with_env(
         &["replay", "run-1"],
         &[(
-            "AXONRUNNER_RUNTIME_TOOL_WORKSPACE",
+            "AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE",
             workspace.to_str().expect("utf8 path"),
         )],
     );
@@ -412,13 +412,13 @@ fn release_security_gate_nightly_summary_keeps_quality_metrics() {
     let output = std::process::Command::new("sh")
         .arg(&script)
         .env(
-            "AXONRUNNER_NIGHTLY_BIN",
-            env!("CARGO_BIN_EXE_axonrunner_apps"),
+            "AXIOMRUNNER_NIGHTLY_BIN",
+            env!("CARGO_BIN_EXE_axiomrunner_apps"),
         )
-        .env("AXONRUNNER_NIGHTLY_SKIP_BUILD", "1")
-        .env("AXONRUNNER_NIGHTLY_FIXTURES", "rust_service.json")
-        .env("AXONRUNNER_NIGHTLY_LOG_ROOT", &log_root)
-        .env("AXONRUNNER_NIGHTLY_TIMESTAMP", timestamp)
+        .env("AXIOMRUNNER_NIGHTLY_SKIP_BUILD", "1")
+        .env("AXIOMRUNNER_NIGHTLY_FIXTURES", "rust_service.json")
+        .env("AXIOMRUNNER_NIGHTLY_LOG_ROOT", &log_root)
+        .env("AXIOMRUNNER_NIGHTLY_TIMESTAMP", timestamp)
         .output()
         .expect("nightly dogfood script should run");
 

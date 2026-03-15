@@ -4,8 +4,8 @@ use crate::config_loader::AppConfig;
 use crate::display::mode_name;
 use crate::runtime_compose::{RuntimeComposeConfig, RuntimeComposeHealth};
 use crate::trace_store::TraceStore;
-use axonrunner_adapters::provider_registry;
-use axonrunner_core::AgentState;
+use axiomrunner_adapters::provider_registry;
+use axiomrunner_core::AgentState;
 use serde::Serialize;
 use std::path::Path;
 

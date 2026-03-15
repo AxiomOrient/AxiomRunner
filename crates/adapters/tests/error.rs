@@ -1,5 +1,5 @@
-use axonrunner_adapters::{AdapterError, AdapterErrorKind, RetryClass};
-use axonrunner_core::PolicyCode;
+use axiomrunner_adapters::{AdapterError, AdapterErrorKind, RetryClass};
+use axiomrunner_core::PolicyCode;
 
 #[test]
 fn adapter_error_classification_is_explicit_and_data_first() {

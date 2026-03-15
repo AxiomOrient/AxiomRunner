@@ -1,9 +1,9 @@
 use crate::cli_command::RunTemplate;
-use axonrunner_adapters::{
+use axiomrunner_adapters::{
     RunCommandProfile, WorkflowPackAllowedTool, WorkflowPackContract, WorkflowPackRiskPolicy,
     WorkflowPackVerifierRule, WorkflowPackVerifierStrength,
 };
-use axonrunner_core::DecisionOutcome;
+use axiomrunner_core::DecisionOutcome;
 
 const MAX_GOAL_PLAN_STEPS: usize = 8;
 
@@ -281,11 +281,11 @@ fn render_verifier_flow(flow: &[RunCommandProfile]) -> String {
         .join(">")
 }
 
-fn approval_mode_name(mode: axonrunner_core::RunApprovalMode) -> &'static str {
+fn approval_mode_name(mode: axiomrunner_core::RunApprovalMode) -> &'static str {
     match mode {
-        axonrunner_core::RunApprovalMode::Never => "never",
-        axonrunner_core::RunApprovalMode::OnRisk => "on-risk",
-        axonrunner_core::RunApprovalMode::Always => "always",
+        axiomrunner_core::RunApprovalMode::Never => "never",
+        axiomrunner_core::RunApprovalMode::OnRisk => "on-risk",
+        axiomrunner_core::RunApprovalMode::Always => "always",
     }
 }
 
@@ -488,25 +488,25 @@ fn plan_step(
 mod tests {
     use super::{ToolPlan, build_runtime_compose_plan, build_runtime_run_plan, goal_verifier_tool_plan};
     use crate::cli_command::GoalFileTemplate;
-    use axonrunner_adapters::{RunCommandProfile, WorkflowPackVerifierStrength};
-    use axonrunner_core::DecisionOutcome;
+    use axiomrunner_adapters::{RunCommandProfile, WorkflowPackVerifierStrength};
+    use axiomrunner_core::DecisionOutcome;
 
     #[test]
     fn planner_resolves_default_goal_workflow_pack() {
-        let goal = axonrunner_core::RunGoal {
+        let goal = axiomrunner_core::RunGoal {
             summary: String::from("Ship one bounded goal package"),
             workspace_root: String::from("/workspace"),
             constraints: Vec::new(),
-            done_conditions: vec![axonrunner_core::DoneCondition {
+            done_conditions: vec![axiomrunner_core::DoneCondition {
                 label: String::from("report"),
                 evidence: String::from("report artifact exists"),
             }],
-            verification_checks: vec![axonrunner_core::VerificationCheck {
+            verification_checks: vec![axiomrunner_core::VerificationCheck {
                 label: String::from("release gate"),
-                detail: String::from("cargo test -p axonrunner_apps --test release_security_gate"),
+                detail: String::from("cargo test -p axiomrunner_apps --test release_security_gate"),
             }],
-            budget: axonrunner_core::RunBudget::bounded(5, 10, 8000),
-            approval_mode: axonrunner_core::RunApprovalMode::OnRisk,
+            budget: axiomrunner_core::RunBudget::bounded(5, 10, 8000),
+            approval_mode: axiomrunner_core::RunApprovalMode::OnRisk,
         };
         let template = GoalFileTemplate {
             path: String::from("GOAL.json"),
@@ -530,7 +530,7 @@ mod tests {
         assert!(pack.verifier_rules[0].required);
         assert_eq!(
             pack.verifier_rules[0].command_example,
-            "cargo test -p axonrunner_apps --test release_security_gate"
+            "cargo test -p axiomrunner_apps --test release_security_gate"
         );
         assert_eq!(
             pack.verifier_rules[0].strength,
@@ -540,20 +540,20 @@ mod tests {
 
     #[test]
     fn planner_derives_goal_verifier_command_plan() {
-        let goal = axonrunner_core::RunGoal {
+        let goal = axiomrunner_core::RunGoal {
             summary: String::from("Ship one bounded goal package"),
             workspace_root: String::from("/workspace"),
             constraints: Vec::new(),
-            done_conditions: vec![axonrunner_core::DoneCondition {
+            done_conditions: vec![axiomrunner_core::DoneCondition {
                 label: String::from("report"),
                 evidence: String::from("report artifact exists"),
             }],
-            verification_checks: vec![axonrunner_core::VerificationCheck {
+            verification_checks: vec![axiomrunner_core::VerificationCheck {
                 label: String::from("release gate"),
-                detail: String::from("cargo test -p axonrunner_apps --test release_security_gate"),
+                detail: String::from("cargo test -p axiomrunner_apps --test release_security_gate"),
             }],
-            budget: axonrunner_core::RunBudget::bounded(5, 10, 8000),
-            approval_mode: axonrunner_core::RunApprovalMode::Never,
+            budget: axiomrunner_core::RunBudget::bounded(5, 10, 8000),
+            approval_mode: axiomrunner_core::RunApprovalMode::Never,
         };
         let template = GoalFileTemplate {
             path: String::from("GOAL.json"),
@@ -576,7 +576,7 @@ mod tests {
             vec![
                 String::from("test"),
                 String::from("-p"),
-                String::from("axonrunner_apps"),
+                String::from("axiomrunner_apps"),
                 String::from("--test"),
                 String::from("release_security_gate"),
             ]
@@ -585,20 +585,20 @@ mod tests {
 
     #[test]
     fn planner_marks_non_command_default_goal_verifier_as_pack_required() {
-        let goal = axonrunner_core::RunGoal {
+        let goal = axiomrunner_core::RunGoal {
             summary: String::from("Need domain-specific verification"),
             workspace_root: String::from("/workspace"),
             constraints: Vec::new(),
-            done_conditions: vec![axonrunner_core::DoneCondition {
+            done_conditions: vec![axiomrunner_core::DoneCondition {
                 label: String::from("report"),
                 evidence: String::from("report artifact exists"),
             }],
-            verification_checks: vec![axonrunner_core::VerificationCheck {
+            verification_checks: vec![axiomrunner_core::VerificationCheck {
                 label: String::from("domain verification"),
                 detail: String::from("representative domain path"),
             }],
-            budget: axonrunner_core::RunBudget::bounded(5, 10, 8000),
-            approval_mode: axonrunner_core::RunApprovalMode::Never,
+            budget: axiomrunner_core::RunBudget::bounded(5, 10, 8000),
+            approval_mode: axiomrunner_core::RunApprovalMode::Never,
         };
         let template = GoalFileTemplate {
             path: String::from("GOAL.json"),
@@ -626,34 +626,34 @@ mod tests {
 
     #[test]
     fn planner_infers_pack_specific_verifier_flow_from_goal_checks() {
-        let goal = axonrunner_core::RunGoal {
+        let goal = axiomrunner_core::RunGoal {
             summary: String::from("Infer verifier flow"),
             workspace_root: String::from("/workspace"),
             constraints: Vec::new(),
-            done_conditions: vec![axonrunner_core::DoneCondition {
+            done_conditions: vec![axiomrunner_core::DoneCondition {
                 label: String::from("report"),
                 evidence: String::from("report artifact exists"),
             }],
             verification_checks: vec![
-                axonrunner_core::VerificationCheck {
+                axiomrunner_core::VerificationCheck {
                     label: String::from("build"),
                     detail: String::from("cargo build"),
                 },
-                axonrunner_core::VerificationCheck {
+                axiomrunner_core::VerificationCheck {
                     label: String::from("test"),
                     detail: String::from("cargo test"),
                 },
-                axonrunner_core::VerificationCheck {
+                axiomrunner_core::VerificationCheck {
                     label: String::from("lint"),
                     detail: String::from("cargo clippy"),
                 },
-                axonrunner_core::VerificationCheck {
+                axiomrunner_core::VerificationCheck {
                     label: String::from("smoke"),
                     detail: String::from("python scripts/smoke.py"),
                 },
             ],
-            budget: axonrunner_core::RunBudget::bounded(8, 10, 8000),
-            approval_mode: axonrunner_core::RunApprovalMode::Never,
+            budget: axiomrunner_core::RunBudget::bounded(8, 10, 8000),
+            approval_mode: axiomrunner_core::RunApprovalMode::Never,
         };
         let template = GoalFileTemplate {
             path: String::from("GOAL.json"),
@@ -677,34 +677,34 @@ mod tests {
 
     #[test]
     fn planner_builds_multi_step_goal_queue() {
-        let goal = axonrunner_core::RunGoal {
+        let goal = axiomrunner_core::RunGoal {
             summary: String::from("Ship one bounded goal package"),
             workspace_root: String::from("/workspace"),
             constraints: Vec::new(),
             done_conditions: vec![
-                axonrunner_core::DoneCondition {
+                axiomrunner_core::DoneCondition {
                     label: String::from("report"),
                     evidence: String::from("report artifact exists"),
                 },
-                axonrunner_core::DoneCondition {
+                axiomrunner_core::DoneCondition {
                     label: String::from("tests"),
                     evidence: String::from("test suite passes"),
                 },
             ],
             verification_checks: vec![
-                axonrunner_core::VerificationCheck {
+                axiomrunner_core::VerificationCheck {
                     label: String::from("release gate"),
                     detail: String::from(
-                        "cargo test -p axonrunner_apps --test release_security_gate",
+                        "cargo test -p axiomrunner_apps --test release_security_gate",
                     ),
                 },
-                axonrunner_core::VerificationCheck {
+                axiomrunner_core::VerificationCheck {
                     label: String::from("unit"),
-                    detail: String::from("cargo test -p axonrunner_apps"),
+                    detail: String::from("cargo test -p axiomrunner_apps"),
                 },
             ],
-            budget: axonrunner_core::RunBudget::bounded(8, 10, 8000),
-            approval_mode: axonrunner_core::RunApprovalMode::Never,
+            budget: axiomrunner_core::RunBudget::bounded(8, 10, 8000),
+            approval_mode: axiomrunner_core::RunApprovalMode::Never,
         };
         let template = GoalFileTemplate {
             path: String::from("GOAL.json"),
@@ -728,24 +728,24 @@ mod tests {
 
     #[test]
     fn planner_compacts_large_goal_queue_to_bounded_size() {
-        let goal = axonrunner_core::RunGoal {
+        let goal = axiomrunner_core::RunGoal {
             summary: String::from("Compact a large goal queue"),
             workspace_root: String::from("/workspace"),
             constraints: Vec::new(),
             done_conditions: (0..6)
-                .map(|index| axonrunner_core::DoneCondition {
+                .map(|index| axiomrunner_core::DoneCondition {
                     label: format!("done-{index}"),
                     evidence: format!("evidence-{index}"),
                 })
                 .collect(),
             verification_checks: (0..6)
-                .map(|index| axonrunner_core::VerificationCheck {
+                .map(|index| axiomrunner_core::VerificationCheck {
                     label: format!("verify-{index}"),
                     detail: format!("echo verify-{index}"),
                 })
                 .collect(),
-            budget: axonrunner_core::RunBudget::bounded(20, 10, 8000),
-            approval_mode: axonrunner_core::RunApprovalMode::Never,
+            budget: axiomrunner_core::RunBudget::bounded(20, 10, 8000),
+            approval_mode: axiomrunner_core::RunApprovalMode::Never,
         };
         let template = GoalFileTemplate {
             path: String::from("GOAL.json"),

@@ -11,7 +11,7 @@ pub(super) fn write_report(
         return Ok(Vec::new());
     };
 
-    let base = format!(".axonrunner/artifacts/{}", input.intent_id);
+    let base = format!(".axiomrunner/artifacts/{}", input.intent_id);
     let verification_checks = render_string_list(&run.verification.checks);
     let verifier_evidence = render_string_list(&execution.tool_outputs);
     let step_journal = render_step_journal(&run.step_journal);
@@ -177,11 +177,11 @@ pub(super) fn write_checkpoint_metadata(
         return Ok(None);
     };
 
-    let path = format!(".axonrunner/artifacts/{intent_id}.checkpoint.json");
+    let path = format!(".axiomrunner/artifacts/{intent_id}.checkpoint.json");
     let contents = format!(
         concat!(
             "{{\n",
-            "  \"schema\": \"axonrunner.checkpoint.v1\",\n",
+            "  \"schema\": \"axiomrunner.checkpoint.v1\",\n",
             "  \"run_id\": \"{}\",\n",
             "  \"intent_id\": \"{}\",\n",
             "  \"reason\": \"{}\",\n",
@@ -234,11 +234,11 @@ pub(super) fn write_rollback_metadata(
         return Ok(None);
     };
 
-    let path = format!(".axonrunner/artifacts/{intent_id}.rollback.json");
+    let path = format!(".axiomrunner/artifacts/{intent_id}.rollback.json");
     let contents = format!(
         concat!(
             "{{\n",
-            "  \"schema\": \"axonrunner.rollback.v1\",\n",
+            "  \"schema\": \"axiomrunner.rollback.v1\",\n",
             "  \"run_id\": \"{}\",\n",
             "  \"intent_id\": \"{}\",\n",
             "  \"reason\": \"{}\",\n",

@@ -1,7 +1,7 @@
-use axonrunner_core::{
+use axiomrunner_core::{
     DoneCondition, RunApprovalMode, RunBudget, RunConstraint, RunGoal, VerificationCheck,
 };
-use axonrunner_adapters::WorkflowPackContract;
+use axiomrunner_adapters::WorkflowPackContract;
 use serde::Deserialize;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -161,7 +161,7 @@ mod tests {
             .expect("clock should be after epoch")
             .as_nanos();
         std::env::temp_dir().join(format!(
-            "axonrunner-goal-file-{label}-{}-{tick}.{ext}",
+            "axiomrunner-goal-file-{label}-{}-{tick}.{ext}",
             std::process::id()
         ))
     }

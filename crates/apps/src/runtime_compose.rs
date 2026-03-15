@@ -3,13 +3,13 @@ use crate::cli_command::RunTemplate;
 use crate::config_loader::AppConfig;
 use crate::display::outcome_name;
 use crate::env_util::read_env_trimmed;
-use axonrunner_adapters::{
+use axiomrunner_adapters::{
     FileMutationEvidence, FileWriteOutput, MemoryAdapter, MemoryTier, ProviderAdapter,
     ProviderRequest, RunCommandOutput, ToolAdapter, ToolPolicy, ToolRequest, ToolResult,
     WorkspaceTool, build_contract_memory, build_contract_provider, provider_registry,
     resolve_provider_id, tiered_memory_key,
 };
-use axonrunner_core::DecisionOutcome;
+use axiomrunner_core::DecisionOutcome;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -25,15 +25,15 @@ use self::plan::{
     build_runtime_compose_plan, build_runtime_run_plan, goal_verifier_tool_plan,
 };
 
-const ENV_RUNTIME_MEMORY_PATH: &str = "AXONRUNNER_RUNTIME_MEMORY_PATH";
-const ENV_RUNTIME_TOOL_WORKSPACE: &str = "AXONRUNNER_RUNTIME_TOOL_WORKSPACE";
-const ENV_RUNTIME_ARTIFACT_WORKSPACE: &str = "AXONRUNNER_RUNTIME_ARTIFACT_WORKSPACE";
-const ENV_RUNTIME_GIT_WORKTREE_ISOLATION: &str = "AXONRUNNER_RUNTIME_GIT_WORKTREE_ISOLATION";
-const ENV_RUNTIME_TOOL_LOG_PATH: &str = "AXONRUNNER_RUNTIME_TOOL_LOG_PATH";
-const ENV_RUNTIME_PROVIDER: &str = "AXONRUNNER_RUNTIME_PROVIDER";
-const ENV_RUNTIME_PROVIDER_MODEL: &str = "AXONRUNNER_RUNTIME_PROVIDER_MODEL";
-const ENV_RUNTIME_MAX_TOKENS: &str = "AXONRUNNER_RUNTIME_MAX_TOKENS";
-const ENV_RUNTIME_COMMAND_ALLOWLIST: &str = "AXONRUNNER_RUNTIME_COMMAND_ALLOWLIST";
+const ENV_RUNTIME_MEMORY_PATH: &str = "AXIOMRUNNER_RUNTIME_MEMORY_PATH";
+const ENV_RUNTIME_TOOL_WORKSPACE: &str = "AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE";
+const ENV_RUNTIME_ARTIFACT_WORKSPACE: &str = "AXIOMRUNNER_RUNTIME_ARTIFACT_WORKSPACE";
+const ENV_RUNTIME_GIT_WORKTREE_ISOLATION: &str = "AXIOMRUNNER_RUNTIME_GIT_WORKTREE_ISOLATION";
+const ENV_RUNTIME_TOOL_LOG_PATH: &str = "AXIOMRUNNER_RUNTIME_TOOL_LOG_PATH";
+const ENV_RUNTIME_PROVIDER: &str = "AXIOMRUNNER_RUNTIME_PROVIDER";
+const ENV_RUNTIME_PROVIDER_MODEL: &str = "AXIOMRUNNER_RUNTIME_PROVIDER_MODEL";
+const ENV_RUNTIME_MAX_TOKENS: &str = "AXIOMRUNNER_RUNTIME_MAX_TOKENS";
+const ENV_RUNTIME_COMMAND_ALLOWLIST: &str = "AXIOMRUNNER_RUNTIME_COMMAND_ALLOWLIST";
 
 const DEFAULT_TOOL_LOG_PATH: &str = "runtime.log";
 const DEFAULT_MAX_TOKENS: usize = 4096;
@@ -263,7 +263,7 @@ impl RuntimeComposeConfig {
         let memory_path = env_path(ENV_RUNTIME_MEMORY_PATH).or_else(|| {
             std::env::var("HOME")
                 .ok()
-                .map(|home| PathBuf::from(home).join(".axonrunner").join("memory.db"))
+                .map(|home| PathBuf::from(home).join(".axiomrunner").join("memory.db"))
         });
         let tool_workspace =
             env_path(ENV_RUNTIME_TOOL_WORKSPACE).or_else(|| config.workspace.clone());
@@ -370,7 +370,7 @@ impl RuntimeComposeState {
                 .collect::<Vec<_>>()
                 .join(", ");
             format!(
-                "unknown runtime provider '{}'. set AXONRUNNER_RUNTIME_PROVIDER to one of: {supported}",
+                "unknown runtime provider '{}'. set AXIOMRUNNER_RUNTIME_PROVIDER to one of: {supported}",
                 config.provider_id.trim()
             )
         })?;
@@ -378,7 +378,7 @@ impl RuntimeComposeState {
 
         if config.tool_workspace.is_none() {
             return Err(String::from(
-                "runtime tool workspace is not configured. set --workspace or AXONRUNNER_RUNTIME_TOOL_WORKSPACE",
+                "runtime tool workspace is not configured. set --workspace or AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE",
             ));
         }
 
@@ -943,8 +943,8 @@ fn isolated_worktree_root(
 ) -> PathBuf {
     let parent = artifact_workspace
         .filter(|path| !path.starts_with(repo_root))
-        .map(|path| path.join(".axonrunner").join("worktrees"))
-        .unwrap_or_else(|| std::env::temp_dir().join("axonrunner-worktrees"));
+        .map(|path| path.join(".axiomrunner").join("worktrees"))
+        .unwrap_or_else(|| std::env::temp_dir().join("axiomrunner-worktrees"));
     parent.join(sanitize_worktree_segment(run_id))
 }
 
@@ -1075,7 +1075,7 @@ fn artifact_aware_hot_context_head(
         format!("outcome={}", run_outcome_name(run.outcome)),
         format!("reason={}", run.reason),
         format!(
-            "artifacts=plan=.axonrunner/artifacts/{intent_id}.plan.md,verify=.axonrunner/artifacts/{intent_id}.verify.md,report=.axonrunner/artifacts/{intent_id}.report.md"
+            "artifacts=plan=.axiomrunner/artifacts/{intent_id}.plan.md,verify=.axiomrunner/artifacts/{intent_id}.verify.md,report=.axiomrunner/artifacts/{intent_id}.report.md"
         ),
         format!(
             "changed_paths={}",
@@ -1356,8 +1356,8 @@ mod tests {
     };
     use crate::cli_command::GoalFileTemplate;
     use crate::config_loader::AppConfig;
-    use axonrunner_adapters::{ToolAdapter, ToolRequest};
-    use axonrunner_core::{DecisionOutcome, DoneCondition, RunApprovalMode, RunBudget, RunGoal, VerificationCheck};
+    use axiomrunner_adapters::{ToolAdapter, ToolRequest};
+    use axiomrunner_core::{DecisionOutcome, DoneCondition, RunApprovalMode, RunBudget, RunGoal, VerificationCheck};
     use std::fs;
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -1367,7 +1367,7 @@ mod tests {
             .unwrap_or(Duration::from_secs(0))
             .as_nanos();
         std::env::temp_dir().join(format!(
-            "axonrunner-runtime-compose-test-{label}-{}-{tick}",
+            "axiomrunner-runtime-compose-test-{label}-{}-{tick}",
             std::process::id()
         ))
     }
@@ -1627,7 +1627,7 @@ mod tests {
             &[
                 String::from("run_id=run-1"),
                 String::from(
-                    "artifacts=plan=.axonrunner/artifacts/cli-1.plan.md,verify=.axonrunner/artifacts/cli-1.verify.md,report=.axonrunner/artifacts/cli-1.report.md",
+                    "artifacts=plan=.axiomrunner/artifacts/cli-1.plan.md,verify=.axiomrunner/artifacts/cli-1.verify.md,report=.axiomrunner/artifacts/cli-1.report.md",
                 ),
                 String::from("changed_paths=src/lib.rs,src/main.rs,+4more"),
             ],

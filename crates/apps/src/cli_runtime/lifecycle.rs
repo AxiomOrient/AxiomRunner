@@ -483,10 +483,10 @@ fn blocked_policy_outcome(applied: &AppliedIntent) -> (RuntimeRunPhase, RuntimeR
     )
 }
 
-fn goal_requires_pre_execution_approval(goal: &axonrunner_core::RunGoal) -> bool {
+fn goal_requires_pre_execution_approval(goal: &axiomrunner_core::RunGoal) -> bool {
     matches!(
         goal.approval_mode,
-        axonrunner_core::RunApprovalMode::Always | axonrunner_core::RunApprovalMode::OnRisk
+        axiomrunner_core::RunApprovalMode::Always | axiomrunner_core::RunApprovalMode::OnRisk
     )
 }
 

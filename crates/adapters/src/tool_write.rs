@@ -151,7 +151,7 @@ pub(crate) struct PatchArtifact<'a> {
 }
 
 pub(crate) fn write_patch_artifact(artifact: PatchArtifact<'_>) -> Result<PathBuf, io::Error> {
-    let patch_dir = artifact.workspace_root.join(".axonrunner").join("patches");
+    let patch_dir = artifact.workspace_root.join(".axiomrunner").join("patches");
     fs::create_dir_all(&patch_dir)?;
     let artifact_path = patch_dir.join(unique_patch_filename(artifact.target_path));
     let relative_target = artifact
@@ -161,7 +161,7 @@ pub(crate) fn write_patch_artifact(artifact: PatchArtifact<'_>) -> Result<PathBu
         .display()
         .to_string();
     let payload = json!({
-        "schema": "axonrunner.patch.v2",
+        "schema": "axiomrunner.patch.v2",
         "timestamp_ms": now_millis(),
         "operation": artifact.operation,
         "target_path": relative_target,
@@ -191,7 +191,7 @@ pub(crate) struct CommandArtifact<'a> {
 }
 
 pub(crate) fn write_command_artifact(artifact: CommandArtifact<'_>) -> Result<PathBuf, io::Error> {
-    let command_dir = artifact.workspace_root.join(".axonrunner").join("commands");
+    let command_dir = artifact.workspace_root.join(".axiomrunner").join("commands");
     fs::create_dir_all(&command_dir)?;
     let artifact_path = command_dir.join(format!(
         "{}-{}-{}.json",
@@ -200,7 +200,7 @@ pub(crate) fn write_command_artifact(artifact: CommandArtifact<'_>) -> Result<Pa
         now_millis()
     ));
     let payload = json!({
-        "schema": "axonrunner.command.v1",
+        "schema": "axiomrunner.command.v1",
         "timestamp_ms": now_millis(),
         "program": artifact.program,
         "args": artifact.args,
@@ -308,7 +308,7 @@ mod tests {
             .unwrap_or(Duration::from_secs(0))
             .as_nanos();
         std::env::temp_dir().join(format!(
-            "axonrunner-tool-write-test-{label}-{}-{tick}",
+            "axiomrunner-tool-write-test-{label}-{}-{tick}",
             std::process::id()
         ))
     }

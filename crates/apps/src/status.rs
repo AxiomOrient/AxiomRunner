@@ -1,6 +1,6 @@
 use crate::state_store::PendingRunSnapshot;
 use crate::trace_store::TraceRunSummary;
-use axonrunner_core::ExecutionMode;
+use axiomrunner_core::ExecutionMode;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StateStatusInput {

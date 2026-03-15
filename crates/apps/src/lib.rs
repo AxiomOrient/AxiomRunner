@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-extern crate self as axonrunner_apps;
+extern crate self as axiomrunner_apps;
 
 mod cli_args;
 mod cli_runtime;

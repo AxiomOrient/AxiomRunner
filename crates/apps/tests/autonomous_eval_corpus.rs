@@ -11,7 +11,7 @@ fn unique_path(label: &str, extension: &str) -> PathBuf {
         .expect("clock should be after epoch")
         .as_nanos();
     std::env::temp_dir().join(format!(
-        "axonrunner-eval-{label}-{}-{tick}.{extension}",
+        "axiomrunner-eval-{label}-{}-{tick}.{extension}",
         std::process::id()
     ))
 }
@@ -51,14 +51,14 @@ fn assert_representative_goal_run(
             fixture_goal_path(fixture_name).to_str().expect("utf8 path"),
         ],
         &[(
-            "AXONRUNNER_RUNTIME_TOOL_WORKSPACE",
+            "AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE",
             workspace.to_str().expect("utf8 path"),
         )],
     );
     let replay = run_cli_with_env(
         &["replay", "run-1"],
         &[(
-            "AXONRUNNER_RUNTIME_TOOL_WORKSPACE",
+            "AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE",
             workspace.to_str().expect("utf8 path"),
         )],
     );
@@ -68,7 +68,7 @@ fn assert_representative_goal_run(
     assert!(stdout_of(&run).contains("phase=completed outcome=success"));
     assert!(stdout_of(&replay).contains("replay step id="));
 
-    let plan = fs::read_to_string(workspace.join(".axonrunner/artifacts/cli-1.plan.md"))
+    let plan = fs::read_to_string(workspace.join(".axiomrunner/artifacts/cli-1.plan.md"))
         .expect("plan artifact should exist");
     assert!(plan.contains(&format!("verifier_flow={expected_flow}")));
     assert!(plan.contains(&format!(
@@ -116,14 +116,14 @@ fn autonomous_eval_corpus_representative_runs_remain_green() {
                     .expect("utf8 path"),
             ],
             &[(
-                "AXONRUNNER_RUNTIME_TOOL_WORKSPACE",
+                "AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE",
                 workspace.to_str().expect("utf8 path"),
             )],
         );
         let replay = run_cli_with_env(
             &["replay", "run-1"],
             &[(
-                "AXONRUNNER_RUNTIME_TOOL_WORKSPACE",
+                "AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE",
                 workspace.to_str().expect("utf8 path"),
             )],
         );
@@ -147,11 +147,11 @@ fn autonomous_eval_corpus_representative_runs_remain_green() {
             ],
             &[
                 (
-                    "AXONRUNNER_RUNTIME_TOOL_WORKSPACE",
+                    "AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE",
                     workspace.to_str().expect("utf8 path"),
                 ),
                 (
-                    "AXONRUNNER_RUNTIME_STATE_PATH",
+                    "AXIOMRUNNER_RUNTIME_STATE_PATH",
                     state_path.to_str().expect("utf8 path"),
                 ),
             ],
@@ -160,11 +160,11 @@ fn autonomous_eval_corpus_representative_runs_remain_green() {
             &["resume", "run-1"],
             &[
                 (
-                    "AXONRUNNER_RUNTIME_TOOL_WORKSPACE",
+                    "AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE",
                     workspace.to_str().expect("utf8 path"),
                 ),
                 (
-                    "AXONRUNNER_RUNTIME_STATE_PATH",
+                    "AXIOMRUNNER_RUNTIME_STATE_PATH",
                     state_path.to_str().expect("utf8 path"),
                 ),
             ],
@@ -188,14 +188,14 @@ fn autonomous_eval_corpus_representative_runs_remain_green() {
                     .expect("utf8 path"),
             ],
             &[(
-                "AXONRUNNER_RUNTIME_TOOL_WORKSPACE",
+                "AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE",
                 workspace.to_str().expect("utf8 path"),
             )],
         );
         let replay = run_cli_with_env(
             &["replay", "run-1"],
             &[(
-                "AXONRUNNER_RUNTIME_TOOL_WORKSPACE",
+                "AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE",
                 workspace.to_str().expect("utf8 path"),
             )],
         );
@@ -219,11 +219,11 @@ fn autonomous_eval_corpus_representative_runs_remain_green() {
             ],
             &[
                 (
-                    "AXONRUNNER_RUNTIME_TOOL_WORKSPACE",
+                    "AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE",
                     workspace.to_str().expect("utf8 path"),
                 ),
                 (
-                    "AXONRUNNER_RUNTIME_STATE_PATH",
+                    "AXIOMRUNNER_RUNTIME_STATE_PATH",
                     state_path.to_str().expect("utf8 path"),
                 ),
             ],
@@ -232,11 +232,11 @@ fn autonomous_eval_corpus_representative_runs_remain_green() {
             &["resume", "run-1"],
             &[
                 (
-                    "AXONRUNNER_RUNTIME_TOOL_WORKSPACE",
+                    "AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE",
                     workspace.to_str().expect("utf8 path"),
                 ),
                 (
-                    "AXONRUNNER_RUNTIME_STATE_PATH",
+                    "AXIOMRUNNER_RUNTIME_STATE_PATH",
                     state_path.to_str().expect("utf8 path"),
                 ),
             ],
@@ -252,9 +252,9 @@ fn autonomous_eval_corpus_representative_runs_remain_green() {
 
     {
         let workspace = unique_path("eval-lock-workspace", "dir");
-        fs::create_dir_all(workspace.join(".axonrunner")).expect("lock dir should exist");
+        fs::create_dir_all(workspace.join(".axiomrunner")).expect("lock dir should exist");
         fs::write(
-            workspace.join(".axonrunner/runtime.lock"),
+            workspace.join(".axiomrunner/runtime.lock"),
             format!("pid={} command=run\n", std::process::id()),
         )
         .expect("lock file should exist");
@@ -266,14 +266,14 @@ fn autonomous_eval_corpus_representative_runs_remain_green() {
                     .expect("utf8 path"),
             ],
             &[(
-                "AXONRUNNER_RUNTIME_TOOL_WORKSPACE",
+                "AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE",
                 workspace.to_str().expect("utf8 path"),
             )],
         );
         let status = run_cli_with_env(
             &["status"],
             &[(
-                "AXONRUNNER_RUNTIME_TOOL_WORKSPACE",
+                "AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE",
                 workspace.to_str().expect("utf8 path"),
             )],
         );
@@ -292,11 +292,11 @@ fn autonomous_eval_corpus_representative_runs_remain_green() {
             &["doctor", "--json"],
             &[
                 (
-                    "AXONRUNNER_RUNTIME_TOOL_WORKSPACE",
+                    "AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE",
                     workspace.to_str().expect("utf8 path"),
                 ),
-                ("AXONRUNNER_RUNTIME_PROVIDER", "codek"),
-                ("AXONRUNNER_CODEX_BIN", missing_bin.to_str().expect("utf8 path")),
+                ("AXIOMRUNNER_RUNTIME_PROVIDER", "codek"),
+                ("AXIOMRUNNER_CODEX_BIN", missing_bin.to_str().expect("utf8 path")),
             ],
         );
         assert!(doctor.status.success(), "stderr:\n{}", stderr_of(&doctor));

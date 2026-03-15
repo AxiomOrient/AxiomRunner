@@ -4,15 +4,15 @@ use std::process::{Command, Output};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const SANITIZED_ENV_KEYS: &[&str] = &[
-    "AXONRUNNER_PROFILE",
-    "AXONRUNNER_RUNTIME_PROVIDER",
-    "AXONRUNNER_RUNTIME_PROVIDER_MODEL",
-    "AXONRUNNER_RUNTIME_MAX_TOKENS",
-    "AXONRUNNER_RUNTIME_MEMORY_PATH",
-    "AXONRUNNER_RUNTIME_TOOL_WORKSPACE",
-    "AXONRUNNER_RUNTIME_ARTIFACT_WORKSPACE",
-    "AXONRUNNER_RUNTIME_GIT_WORKTREE_ISOLATION",
-    "AXONRUNNER_RUNTIME_TOOL_LOG_PATH",
+    "AXIOMRUNNER_PROFILE",
+    "AXIOMRUNNER_RUNTIME_PROVIDER",
+    "AXIOMRUNNER_RUNTIME_PROVIDER_MODEL",
+    "AXIOMRUNNER_RUNTIME_MAX_TOKENS",
+    "AXIOMRUNNER_RUNTIME_MEMORY_PATH",
+    "AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE",
+    "AXIOMRUNNER_RUNTIME_ARTIFACT_WORKSPACE",
+    "AXIOMRUNNER_RUNTIME_GIT_WORKTREE_ISOLATION",
+    "AXIOMRUNNER_RUNTIME_TOOL_LOG_PATH",
     "OPENAI_API_KEY",
 ];
 
@@ -23,7 +23,7 @@ fn isolated_cli_home(label: &str) -> std::path::PathBuf {
         .expect("clock should be after epoch")
         .as_nanos();
     path.push(format!(
-        "axonrunner_apps_test_home_{}_{}_{}",
+        "axiomrunner_apps_test_home_{}_{}_{}",
         label,
         std::process::id(),
         nonce
@@ -34,38 +34,38 @@ fn isolated_cli_home(label: &str) -> std::path::PathBuf {
 
 fn run_with_isolated_env(args: &[&str], env: &[(&str, &str)], label: &str) -> Output {
     let home = isolated_cli_home(label);
-    let tool_workspace = home.join(".axonrunner").join("workspace");
+    let tool_workspace = home.join(".axiomrunner").join("workspace");
     let artifact_workspace = env
         .iter()
         .find_map(|(key, value)| {
-            (*key == "AXONRUNNER_RUNTIME_ARTIFACT_WORKSPACE")
+            (*key == "AXIOMRUNNER_RUNTIME_ARTIFACT_WORKSPACE")
                 .then(|| std::path::PathBuf::from(*value))
         })
         .unwrap_or_else(|| tool_workspace.clone());
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_axonrunner_apps"));
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_axiomrunner_apps"));
     cmd.env("HOME", &home).args(args);
     for key in SANITIZED_ENV_KEYS {
         cmd.env_remove(key);
     }
     if !env
         .iter()
-        .any(|(key, _)| *key == "AXONRUNNER_RUNTIME_TOOL_WORKSPACE")
+        .any(|(key, _)| *key == "AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE")
     {
-        cmd.env("AXONRUNNER_RUNTIME_TOOL_WORKSPACE", &tool_workspace);
+        cmd.env("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", &tool_workspace);
     }
     if !env
         .iter()
-        .any(|(key, _)| *key == "AXONRUNNER_RUNTIME_TOOL_LOG_PATH")
+        .any(|(key, _)| *key == "AXIOMRUNNER_RUNTIME_TOOL_LOG_PATH")
     {
         cmd.env(
-            "AXONRUNNER_RUNTIME_TOOL_LOG_PATH",
+            "AXIOMRUNNER_RUNTIME_TOOL_LOG_PATH",
             artifact_workspace.join("runtime.log"),
         );
     }
     for (key, value) in env {
         cmd.env(key, value);
     }
-    let output = cmd.output().expect("axonrunner_apps binary should run");
+    let output = cmd.output().expect("axiomrunner_apps binary should run");
     let _ = std::fs::remove_dir_all(&home);
     output
 }
@@ -93,7 +93,7 @@ pub fn write_temp_config(label: &str, contents: &str) -> std::path::PathBuf {
         .expect("clock should be after epoch")
         .as_nanos();
     path.push(format!(
-        "axonrunner_apps_{}_{}_{}.cfg",
+        "axiomrunner_apps_{}_{}_{}.cfg",
         label,
         std::process::id(),
         nonce

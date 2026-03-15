@@ -13,7 +13,7 @@ use crate::status::{
 };
 use crate::trace_store::{TraceEventInput, TraceStore};
 use crate::workspace_lock::WorkspaceLock;
-use axonrunner_core::{AgentState, DecisionOutcome, PolicyCode};
+use axiomrunner_core::{AgentState, DecisionOutcome, PolicyCode};
 use std::time::Instant;
 
 mod lifecycle;
@@ -738,7 +738,7 @@ fn print_doctor(runtime: &CliRuntime, config: &AppConfig, json: bool) -> Result<
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axonrunner_core::{DoneCondition, RunApprovalMode, RunBudget, RunGoal, VerificationCheck};
+    use axiomrunner_core::{DoneCondition, RunApprovalMode, RunBudget, RunGoal, VerificationCheck};
 
     fn sample_goal_template(minutes: u64) -> RunTemplate {
         crate::cli_command::GoalFileTemplate {

@@ -2,12 +2,12 @@
 
 ## Purpose
 
-이 문서는 workflow pack과 adapter가 AxonRunner 안에 들어올 때 지켜야 할
+이 문서는 workflow pack과 adapter가 AxiomRunner 안에 들어올 때 지켜야 할
 현재 계약을 고정한다.
 
 핵심 원칙:
 
-- AxonRunner가 `goal`, `run`, `resume`, `abort`, `trace`, `report`, `done`의 뜻을 소유한다.
+- AxiomRunner가 `goal`, `run`, `resume`, `abort`, `trace`, `report`, `done`의 뜻을 소유한다.
 - workflow pack은 planner 힌트, 허용 도구, verifier 규칙만 제공한다.
 - workflow pack은 새 run phase, terminal outcome, replay schema를 마음대로 만들 수 없다.
 
@@ -26,7 +26,7 @@ workflow pack manifest는 아래 필드를 가져야 한다.
 - `risk_policy`
 
 goal file은 선택적으로 `workflow_pack` 경로를 가질 수 있다.
-경로가 주어지면 AxonRunner는 그 manifest를 먼저 읽고 검증한다.
+경로가 주어지면 AxiomRunner는 그 manifest를 먼저 읽고 검증한다.
 manifest가 깨졌으면 fail-closed 로 멈춘다.
 
 ## Allowed Tools
@@ -82,7 +82,7 @@ manifest가 깨졌으면 fail-closed 로 멈춘다.
 
 ## Risk Policy
 
-workflow pack은 위험도 힌트를 줄 수 있지만, 최종 승인은 AxonRunner가 판단한다.
+workflow pack은 위험도 힌트를 줄 수 있지만, 최종 승인은 AxiomRunner가 판단한다.
 
 `risk_policy`는 아래를 가진다.
 
@@ -124,7 +124,7 @@ adapter가 소유하지 않는 것:
 - verify-before-done rule
 - workflow pack manifest schema
 
-즉 adapter는 AxonRunner 본체 semantics를 구현하는 것이 아니라,
+즉 adapter는 AxiomRunner 본체 semantics를 구현하는 것이 아니라,
 이미 잠긴 semantics를 실행 가능한 backend로 연결하는 역할만 한다.
 
 ## Example

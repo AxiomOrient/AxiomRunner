@@ -1,8 +1,8 @@
-# AxonRunner Charter
+# AxiomRunner Charter
 
 ## Purpose
 
-AxonRunner is a goal-file oriented CLI agent runtime.
+AxiomRunner is a goal-file oriented CLI agent runtime.
 
 ## Transition Target
 
