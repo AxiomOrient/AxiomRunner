@@ -3,8 +3,8 @@ tests/fixtures/llm/
 
 # Rust
 target/
-packages/apps/axonrunner/src-tauri/binaries/axonrunner-cli*
-!packages/apps/axonrunner/src-tauri/binaries/README.md
+packages/apps/axiomrunner/src-tauri/binaries/axiomrunner-cli*
+!packages/apps/axiomrunner/src-tauri/binaries/README.md
 
 # Node
 node_modules/
@@ -14,7 +14,7 @@ dist/
 
 # Local config/secrets
 .env
-.axonrunner/
+.axiomrunner/
 
 # Editor/OS noise
 .DS_Store
@@ -37,4 +37,4 @@ var/
 # Tool-specific local state
 .claude/
 .serena/
-.axonrunner-sessions/
+.axiomrunner-sessions/

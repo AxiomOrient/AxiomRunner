@@ -333,7 +333,5 @@ pub fn render_replay_lines(
         "replay summary failed_intents={} false_success_intents={} false_done_intents={}",
         summary.failed_intents, summary.false_success_intents, summary.false_done_intents
     ));
-
     lines
 }
-

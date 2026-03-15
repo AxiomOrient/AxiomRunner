@@ -79,7 +79,7 @@ fn run_cli_internal(
         .clone()
         .unwrap_or_else(|| tool_workspace.clone());
 
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_axiomrunner_apps"));
+    let mut cmd = Command::new(resolve_cli_bin());
     cmd.env("HOME", &canonical_home).args(args);
     for key in SANITIZED_ENV_KEYS {
         cmd.env_remove(key);
@@ -104,6 +104,25 @@ fn run_cli_internal(
     let output = cmd.output().expect("axiomrunner_apps binary should run");
     let _ = fs::remove_dir_all(&canonical_home);
     output
+}
+
+fn resolve_cli_bin() -> PathBuf {
+    let compiled = PathBuf::from(env!("CARGO_BIN_EXE_axiomrunner_apps"));
+    if compiled.is_file() {
+        return compiled;
+    }
+
+    fallback_cli_bin_from_current_exe().unwrap_or(compiled)
+}
+
+fn fallback_cli_bin_from_current_exe() -> Option<PathBuf> {
+    let current = std::env::current_exe().ok()?;
+    current
+        .ancestors()
+        .find(|path| path.file_name().is_some_and(|name| name == "deps"))
+        .and_then(Path::parent)
+        .map(|dir| dir.join(format!("axiomrunner_apps{}", std::env::consts::EXE_SUFFIX)))
+        .filter(|path| path.is_file())
 }
 
 fn stdout_of(output: &Output) -> String {
@@ -1921,9 +1940,7 @@ fn e2e_cli_status_and_replay_render_aborted_outcome_from_trace() {
     assert!(
         stdout_of(&replay).contains("replay run run_id=run-abort phase=aborted outcome=aborted")
     );
-    assert!(
-        stdout_of(&replay).contains("next_action=decide whether to restart with a new run")
-    );
+    assert!(stdout_of(&replay).contains("next_action=decide whether to restart with a new run"));
 
     let _ = fs::remove_dir_all(workspace);
 }

@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -32,6 +33,25 @@ fn isolated_cli_home(label: &str) -> std::path::PathBuf {
     path
 }
 
+fn resolve_cli_bin() -> PathBuf {
+    let compiled = PathBuf::from(env!("CARGO_BIN_EXE_axiomrunner_apps"));
+    if compiled.is_file() {
+        return compiled;
+    }
+
+    fallback_cli_bin_from_current_exe().unwrap_or(compiled)
+}
+
+fn fallback_cli_bin_from_current_exe() -> Option<PathBuf> {
+    let current = std::env::current_exe().ok()?;
+    current
+        .ancestors()
+        .find(|path| path.file_name().is_some_and(|name| name == "deps"))
+        .and_then(Path::parent)
+        .map(|dir| dir.join(format!("axiomrunner_apps{}", std::env::consts::EXE_SUFFIX)))
+        .filter(|path| path.is_file())
+}
+
 fn run_with_isolated_env(args: &[&str], env: &[(&str, &str)], label: &str) -> Output {
     let home = isolated_cli_home(label);
     let tool_workspace = home.join(".axiomrunner").join("workspace");
@@ -42,7 +62,7 @@ fn run_with_isolated_env(args: &[&str], env: &[(&str, &str)], label: &str) -> Ou
                 .then(|| std::path::PathBuf::from(*value))
         })
         .unwrap_or_else(|| tool_workspace.clone());
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_axiomrunner_apps"));
+    let mut cmd = Command::new(resolve_cli_bin());
     cmd.env("HOME", &home).args(args);
     for key in SANITIZED_ENV_KEYS {
         cmd.env_remove(key);

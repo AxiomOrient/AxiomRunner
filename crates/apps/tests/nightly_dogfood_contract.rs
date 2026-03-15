@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -16,17 +16,13 @@ fn unique_path(label: &str, extension: &str) -> std::path::PathBuf {
 
 #[test]
 fn nightly_dogfood_script_writes_log_bundle_for_one_fixture() {
-    let repo_root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let script = repo_root.join("../../scripts/nightly_dogfood.sh");
+    let script = resolve_nightly_script();
     let log_root = unique_path("logs", "dir");
     let timestamp = "20260314T000000Z";
 
     let output = Command::new("sh")
         .arg(&script)
-        .env(
-            "AXIOMRUNNER_NIGHTLY_BIN",
-            env!("CARGO_BIN_EXE_axiomrunner_apps"),
-        )
+        .env("AXIOMRUNNER_NIGHTLY_BIN", resolve_cli_bin())
         .env("AXIOMRUNNER_NIGHTLY_SKIP_BUILD", "1")
         .env("AXIOMRUNNER_NIGHTLY_FIXTURES", "rust_service.json")
         .env("AXIOMRUNNER_NIGHTLY_LOG_ROOT", &log_root)
@@ -64,4 +60,35 @@ fn nightly_dogfood_script_writes_log_bundle_for_one_fixture() {
     assert!(run_root.join("logs/rust_service.doctor.json").exists());
 
     let _ = fs::remove_dir_all(log_root);
+}
+
+fn resolve_cli_bin() -> PathBuf {
+    let compiled = PathBuf::from(env!("CARGO_BIN_EXE_axiomrunner_apps"));
+    if compiled.is_file() {
+        return compiled;
+    }
+
+    let current = std::env::current_exe().expect("test executable path should exist");
+    current
+        .ancestors()
+        .find(|path| path.file_name().is_some_and(|name| name == "deps"))
+        .and_then(Path::parent)
+        .map(|dir| dir.join(format!("axiomrunner_apps{}", std::env::consts::EXE_SUFFIX)))
+        .filter(|path| path.is_file())
+        .unwrap_or(compiled)
+}
+
+fn resolve_nightly_script() -> PathBuf {
+    let manifest_root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let compiled = manifest_root.join("../../scripts/nightly_dogfood.sh");
+    if compiled.is_file() {
+        return compiled;
+    }
+
+    let current = std::env::current_exe().expect("test executable path should exist");
+    current
+        .ancestors()
+        .find(|path| path.join("scripts/nightly_dogfood.sh").is_file())
+        .map(|path| path.join("scripts/nightly_dogfood.sh"))
+        .unwrap_or(compiled)
 }
