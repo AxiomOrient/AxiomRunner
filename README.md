@@ -2,9 +2,17 @@
 
 AxiomRunner는 로컬 워크스페이스 자동화를 위한 goal-file 중심 CLI agent runtime이다.
 
+공식 identity:
+
+- 제품 이름: `AxiomRunner`
+- 바이너리 이름: `axiomrunner_apps`
+- 환경 변수 prefix: `AXIOMRUNNER_`
+
 제품 표면은 의도적으로 좁다. 지금 정식으로 노출하는 것은 `run`, `status`, `replay`, `resume`, `abort`, `doctor`, `health`, `help`다.
 
 ## 현재 제품면
+
+retained CLI surface: `run/status/replay/resume/abort/doctor/health/help`
 
 정식 명령:
 
@@ -50,7 +58,8 @@ EOF
   run GOAL.json
 ```
 
-대기 중인 run을 다시 진행:
+`resume`은 generic restart가 아니다. `waiting_approval` 상태의 pending run을 승인 후 재개할 때만 쓴다.
+`abort`도 rerun이 아니다. 현재 pending run을 terminal outcome으로 닫을 때만 쓴다:
 
 ```bash
 ./target/debug/axiomrunner_apps \
@@ -103,7 +112,7 @@ representative verifier examples:
 developer automation milestone:
 
 - `v0.1`: honest autonomous runtime lock
-- `v0.2`: representative app/server automation packs + safer workspace execution
+- `v0.2`: representative app/server example assets + safer workspace execution
 
 ## 설정 표면
 
@@ -130,6 +139,7 @@ env-only runtime knobs:
 - `AXIOMRUNNER_RUNTIME_MEMORY_PATH`
 - `AXIOMRUNNER_RUNTIME_TOOL_LOG_PATH`
 - `AXIOMRUNNER_RUNTIME_MAX_TOKENS`
+- `AXIOMRUNNER_RUNTIME_GIT_WORKTREE_ISOLATION`
 - `AXIOMRUNNER_CODEX_BIN`
 - `AXIOMRUNNER_EXPERIMENTAL_OPENAI`
 - `OPENAI_API_KEY`
@@ -145,8 +155,9 @@ env-only runtime knobs:
 ## 실행 의미
 
 - `run <goal-file>`은 run id, step journal, verify/report artifact를 남긴다.
-- `resume`은 `waiting_approval` 상태의 goal-file pending run 전용이다.
-- `abort`는 pending run control state를 기준으로 동작하는 terminal control이다.
+- `resume`은 generic restart가 아니라 `waiting_approval` 상태의 goal-file pending run 승인 후 재개 전용이다.
+- `abort`는 rerun이 아니라 pending goal-file control state를 terminal outcome으로 닫는 control이다.
+- git workspace에서는 `AXIOMRUNNER_RUNTIME_GIT_WORKTREE_ISOLATION=1` 로 opt-in isolated worktree 실행을 지원한다.
 - default goal path는 verification detail에서 command를 직접 파생한다.
 - detail에서 안전한 strong verifier를 만들 수 없으면 `verification_weak`, `verification_unresolved`, `pack_required` 로 드러나며 `success`로 숨기지 않는다.
 - provider/tool/memory 단계 실패는 성공 종료로 숨기지 않고 process failure로 승격된다.

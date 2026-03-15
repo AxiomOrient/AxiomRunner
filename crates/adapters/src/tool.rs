@@ -40,6 +40,46 @@ impl ToolRiskTier {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RunCommandClass {
+    WorkspaceLocal,
+    Destructive,
+    External,
+}
+
+pub fn classify_run_command_class(program: &str) -> RunCommandClass {
+    if matches!(program, "rm" | "mv") {
+        return RunCommandClass::Destructive;
+    }
+
+    if matches!(
+        program,
+        "pwd"
+            | "git"
+            | "cargo"
+            | "npm"
+            | "node"
+            | "python"
+            | "python3"
+            | "pytest"
+            | "rg"
+            | "ls"
+            | "cat"
+            | "sh"
+            | "bash"
+            | "pnpm"
+            | "yarn"
+            | "uv"
+            | "make"
+    ) || program.starts_with("./")
+        || program.starts_with("../")
+    {
+        RunCommandClass::WorkspaceLocal
+    } else {
+        RunCommandClass::External
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct WorkspaceTool {
     workspace_root: PathBuf,

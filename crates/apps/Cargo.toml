@@ -2,6 +2,12 @@
 name = "axiomrunner_apps"
 version.workspace = true
 edition.workspace = true
+default-run = "axiomrunner_apps"
+description = "AxiomRunner CLI runtime"
+
+[[bin]]
+name = "axiomrunner_apps"
+path = "src/main.rs"
 
 [lints]
 workspace = true

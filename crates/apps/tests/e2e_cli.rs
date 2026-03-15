@@ -351,7 +351,6 @@ fn e2e_cli_failed_isolated_run_writes_rollback_metadata() {
     let _ = fs::remove_file(goal_file);
 }
 
-
 #[test]
 fn e2e_cli_goal_file_run_persists_run_id_and_supports_status_and_replay_by_run_id() {
     let workspace = unique_path("goal-file-workspace", "dir");
@@ -404,11 +403,14 @@ fn e2e_cli_goal_file_run_persists_run_id_and_supports_status_and_replay_by_run_i
     assert!(status.status.success());
     assert!(replay.status.success());
     assert!(stdout_of(&status).contains("status run run_id=run-1 phase=completed outcome=success"));
+    assert!(stdout_of(&status).contains("approval_state=not_required"));
+    assert!(stdout_of(&status).contains("artifact_summary="));
     assert!(stdout_of(&replay).contains("replay run run_id=run-1 phase=completed outcome=success"));
     assert!(
         stdout_of(&replay)
             .contains("replay verification status=passed summary=goal_done_conditions_verified")
     );
+    assert!(stdout_of(&replay).contains("replay health failed_intents=0 false_success_intents=0 false_done_intents=0 latest_failure=none"));
     assert!(
         stdout_of(&replay).contains("replay stages provider=skipped memory=skipped tool=applied")
     );
@@ -566,16 +568,25 @@ fn e2e_cli_goal_file_approval_can_resume_from_pending_run() {
         "run intent_id=cli-1 phase=waiting_approval outcome=approval_required reason=approval_required_before_execution"
     ));
     assert!(stdout_of(&pending_status).contains("status pending_run run_id=run-1"));
-    assert!(stdout_of(&pending_status).contains("approval_state=required verifier_state=skipped"));
+    assert!(
+        stdout_of(&pending_status)
+            .contains("approval_state=required verifier_state=skipped verifier_strength=skipped")
+    );
     assert!(stdout_of(&pending_doctor).contains("doctor pending_run run_id=run-1"));
-    assert!(stdout_of(&pending_doctor).contains("approval_state=required verifier_state=skipped"));
+    assert!(
+        stdout_of(&pending_doctor)
+            .contains("approval_state=required verifier_state=skipped verifier_strength=skipped")
+    );
     let pending_replay = run_cli_with_env(
         &["replay", "run-1"],
         &[("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
         "goal-file-approval-pending-replay",
     );
     assert!(pending_replay.status.success());
-    assert!(stdout_of(&pending_replay).contains("approval_state=required verifier_state=skipped"));
+    assert!(
+        stdout_of(&pending_replay)
+            .contains("approval_state=required verifier_state=skipped verifier_strength=skipped")
+    );
 
     let resume = run_cli_with_env(
         &["resume", "run-1"],
@@ -654,6 +665,14 @@ fn e2e_cli_goal_file_pending_run_can_abort_cleanly() {
         ],
         "goal-file-abort-command",
     );
+    let second_abort = run_cli_with_env(
+        &["abort", "run-1"],
+        &[
+            ("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace)),
+            ("AXIOMRUNNER_RUNTIME_STATE_PATH", path_str(&state_path)),
+        ],
+        "goal-file-abort-command-again",
+    );
     let status = run_cli_with_env(
         &["status", "run-1"],
         &[
@@ -681,6 +700,10 @@ fn e2e_cli_goal_file_pending_run_can_abort_cleanly() {
         stdout_of(&abort)
             .contains("abort run_id=run-1 phase=aborted outcome=aborted reason=operator_abort")
     );
+    assert!(!second_abort.status.success());
+    assert!(stderr_of(&second_abort).contains(
+        "abort only supports pending goal-file control runs; no pending control run is available"
+    ));
     assert!(status.status.success());
     assert!(stdout_of(&status).contains("status run run_id=run-1 phase=aborted outcome=aborted"));
     assert!(replay.status.success());
@@ -974,9 +997,10 @@ fn e2e_cli_workspace_lock_blocks_mutating_commands_but_allows_status_reads() {
     assert_eq!(run.status.code(), Some(6));
     assert!(stderr_of(&run).contains("workspace lock is active"));
     assert!(status.status.success());
-    assert!(stdout_of(&status).contains(
-        "status revision=0 mode=active last_intent=- last_decision=- last_policy=-"
-    ));
+    assert!(
+        stdout_of(&status)
+            .contains("status revision=0 mode=active last_intent=- last_decision=- last_policy=-")
+    );
 
     let _ = fs::remove_dir_all(workspace);
     let _ = fs::remove_file(goal_file);
@@ -1044,6 +1068,70 @@ fn e2e_cli_resume_rejects_non_pending_state_with_clear_error() {
 
     let _ = fs::remove_dir_all(workspace);
     let _ = fs::remove_file(state_path);
+}
+
+#[test]
+fn e2e_cli_resume_rejects_after_pending_run_was_already_completed() {
+    let workspace = unique_path("resume-after-complete-workspace", "dir");
+    let state_path = unique_path("resume-after-complete-state", "snapshot");
+    let goal_file = unique_path("resume-after-complete-goal", "json");
+    fs::write(
+        &goal_file,
+        r#"{
+  "summary": "Resume only applies to waiting approval pending runs",
+  "workspace_root": "/workspace",
+  "constraints": [],
+  "done_conditions": [
+    { "label": "report", "evidence": "report artifact exists" }
+  ],
+  "verification_checks": [
+    { "label": "workspace files", "detail": "ls ." }
+  ],
+  "budget": { "max_steps": 5, "max_minutes": 10, "max_tokens": 8000 },
+  "approval_mode": "always"
+}"#,
+    )
+    .expect("goal file should be written");
+
+    let run = run_cli_with_env(
+        &["run", path_str(&goal_file)],
+        &[
+            ("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace)),
+            ("AXIOMRUNNER_RUNTIME_STATE_PATH", path_str(&state_path)),
+        ],
+        "resume-after-complete-run",
+    );
+    let first_resume = run_cli_with_env(
+        &["resume", "latest"],
+        &[
+            ("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace)),
+            ("AXIOMRUNNER_RUNTIME_STATE_PATH", path_str(&state_path)),
+        ],
+        "resume-after-complete-first-resume",
+    );
+    let second_resume = run_cli_with_env(
+        &["resume", "latest"],
+        &[
+            ("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace)),
+            ("AXIOMRUNNER_RUNTIME_STATE_PATH", path_str(&state_path)),
+        ],
+        "resume-after-complete-second-resume",
+    );
+
+    assert!(run.status.success(), "stderr:\n{}", stderr_of(&run));
+    assert!(
+        first_resume.status.success(),
+        "stderr:\n{}",
+        stderr_of(&first_resume)
+    );
+    assert!(!second_resume.status.success());
+    assert!(stderr_of(&second_resume).contains(
+        "resume only supports pending goal-file approval runs; no pending approval run is available"
+    ));
+
+    let _ = fs::remove_dir_all(workspace);
+    let _ = fs::remove_file(state_path);
+    let _ = fs::remove_file(goal_file);
 }
 
 #[test]
@@ -1194,15 +1282,371 @@ fn e2e_cli_default_goal_pack_blocks_when_verification_is_pack_required() {
     assert!(stdout_of(&run).contains("reason=pack_required:domain verification"));
     assert!(stdout_of(&replay).contains("replay verification status=pack_required"));
     assert!(stdout_of(&replay).contains("\"strength\":\"pack_required\""));
+    assert!(stdout_of(&replay).contains("verifier_strength=pack_required"));
     assert!(verify.contains("verifier_evidence="));
     assert!(verify.contains("\"command\":\"ls .\""));
+    assert!(verify.contains("\"artifact_path\":\""));
+    assert!(verify.contains("\"stdout_summary\":\""));
     assert!(report.contains("verifier_evidence="));
+    assert!(report.contains("verifier_strength=pack_required"));
+    assert!(report.contains("verifier_summary=pack_required:domain verification"));
+    assert!(report.contains("verifier_non_executed_reason=pack_required:domain verification"));
+    assert!(report.contains("summary=phase=blocked outcome=blocked"));
+    assert!(report.contains("risk=blocked"));
+    assert!(report.contains("next_action=inspect verifier summary and unblock the run"));
     assert!(report.contains(
         "\"expectation\":\"pack_required fallback probe for verifier `domain verification`\""
     ));
 
     let _ = fs::remove_dir_all(workspace);
     let _ = fs::remove_file(goal_file);
+}
+
+#[test]
+fn e2e_cli_default_goal_pack_blocks_when_verification_is_weak() {
+    let workspace = unique_path("goal-pack-weak-workspace", "dir");
+    let goal_file = unique_path("goal-pack-weak-goal", "json");
+    fs::create_dir_all(&workspace).expect("workspace should exist");
+    fs::write(
+        &goal_file,
+        r#"{
+  "summary": "Need honest weak verification visibility",
+  "workspace_root": "/workspace",
+  "constraints": [],
+  "done_conditions": [
+    { "label": "report", "evidence": "report artifact exists" }
+  ],
+  "verification_checks": [
+    { "label": "workspace consistency", "detail": "workspace consistency review" }
+  ],
+  "budget": { "max_steps": 5, "max_minutes": 10, "max_tokens": 8000 },
+  "approval_mode": "never"
+}"#,
+    )
+    .expect("goal file should be written");
+
+    let run = run_cli_with_env(
+        &["run", path_str(&goal_file)],
+        &[("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
+        "goal-pack-weak-run",
+    );
+    let replay = run_cli_with_env(
+        &["replay", "run-1"],
+        &[("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
+        "goal-pack-weak-replay",
+    );
+    let report = fs::read_to_string(workspace.join(".axiomrunner/artifacts/cli-1.report.md"))
+        .expect("report artifact should exist");
+
+    assert!(run.status.success(), "stderr:\n{}", stderr_of(&run));
+    assert!(replay.status.success(), "stderr:\n{}", stderr_of(&replay));
+    assert!(stdout_of(&run).contains("phase=blocked outcome=blocked"));
+    assert!(stdout_of(&run).contains("reason=verification_weak:workspace consistency"));
+    assert!(stdout_of(&replay).contains("replay verification status=verification_weak"));
+    assert!(stdout_of(&replay).contains("verifier_strength=verification_weak"));
+    assert!(report.contains("verifier_strength=verification_weak"));
+    assert!(report.contains("verifier_summary=verification_weak:workspace consistency"));
+    assert!(
+        report.contains("verifier_non_executed_reason=verification_weak:workspace consistency")
+    );
+
+    let _ = fs::remove_dir_all(workspace);
+    let _ = fs::remove_file(goal_file);
+}
+
+#[test]
+fn e2e_cli_constraints_block_external_verifier_commands() {
+    let workspace = unique_path("constraint-external-workspace", "dir");
+    let goal_file = unique_path("constraint-external-goal", "json");
+    let pack_file = unique_path("constraint-external-pack", "json");
+    fs::create_dir_all(&workspace).expect("workspace should exist");
+    fs::write(
+        &pack_file,
+        r#"{
+  "pack_id": "external-check-pack",
+  "version": "1",
+  "description": "uses an external verifier command",
+  "entry_goal": "goal",
+  "planner_hints": [],
+  "recommended_verifier_flow": ["generic"],
+  "allowed_tools": [{"operation": "run_command", "scope": "workspace"}],
+  "verifier_rules": [
+    {
+      "label": "external-check",
+      "profile": "generic",
+      "command_example": "curl https://example.com",
+      "artifact_expectation": "external command should not run",
+      "required": true
+    }
+  ],
+  "risk_policy": {"approval_mode": "never", "max_mutating_steps": 5}
+}"#,
+    )
+    .expect("pack file should be written");
+    fs::write(
+        &goal_file,
+        format!(
+            r#"{{
+  "summary": "Block external verifier command by constraint",
+  "workspace_root": "/workspace",
+  "constraints": [
+    {{ "label": "external_commands", "detail": "deny" }}
+  ],
+  "done_conditions": [
+    {{ "label": "report", "evidence": "report artifact exists" }}
+  ],
+  "verification_checks": [
+    {{ "label": "placeholder", "detail": "ls ." }}
+  ],
+  "budget": {{ "max_steps": 5, "max_minutes": 10, "max_tokens": 8000 }},
+  "approval_mode": "never",
+  "workflow_pack": "{}"
+}}"#,
+            pack_file.display()
+        ),
+    )
+    .expect("goal file should be written");
+
+    let run = run_cli_with_env(
+        &["run", path_str(&goal_file)],
+        &[("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
+        "constraint-external-run",
+    );
+    let replay = run_cli_with_env(
+        &["replay", "run-1"],
+        &[("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
+        "constraint-external-replay",
+    );
+
+    assert!(run.status.success(), "stderr:\n{}", stderr_of(&run));
+    assert!(replay.status.success(), "stderr:\n{}", stderr_of(&replay));
+    assert!(stdout_of(&run).contains("phase=blocked outcome=blocked"));
+    assert!(stdout_of(&run).contains("reason=policy=constraint_external_commands"));
+    assert!(stdout_of(&replay).contains("policy=constraint_external_commands"));
+
+    let _ = fs::remove_dir_all(workspace);
+    let _ = fs::remove_file(goal_file);
+    let _ = fs::remove_file(pack_file);
+}
+
+#[test]
+fn e2e_cli_constraints_block_destructive_verifier_commands() {
+    let workspace = unique_path("constraint-destructive-workspace", "dir");
+    let goal_file = unique_path("constraint-destructive-goal", "json");
+    let pack_file = unique_path("constraint-destructive-pack", "json");
+    fs::create_dir_all(&workspace).expect("workspace should exist");
+    fs::write(
+        &pack_file,
+        r#"{
+  "pack_id": "destructive-check-pack",
+  "version": "1",
+  "description": "uses a destructive verifier command",
+  "entry_goal": "goal",
+  "planner_hints": [],
+  "recommended_verifier_flow": ["generic"],
+  "allowed_tools": [{"operation": "run_command", "scope": "workspace"}],
+  "verifier_rules": [
+    {
+      "label": "destructive-check",
+      "profile": "generic",
+      "command_example": "rm build-cache",
+      "artifact_expectation": "destructive command should not run",
+      "required": true
+    }
+  ],
+  "risk_policy": {"approval_mode": "never", "max_mutating_steps": 5}
+}"#,
+    )
+    .expect("pack file should be written");
+    fs::write(
+        &goal_file,
+        format!(
+            r#"{{
+  "summary": "Block destructive verifier command by constraint",
+  "workspace_root": "/workspace",
+  "constraints": [
+    {{ "label": "destructive_commands", "detail": "deny" }}
+  ],
+  "done_conditions": [
+    {{ "label": "report", "evidence": "report artifact exists" }}
+  ],
+  "verification_checks": [
+    {{ "label": "placeholder", "detail": "ls ." }}
+  ],
+  "budget": {{ "max_steps": 5, "max_minutes": 10, "max_tokens": 8000 }},
+  "approval_mode": "never",
+  "workflow_pack": "{}"
+}}"#,
+            pack_file.display()
+        ),
+    )
+    .expect("goal file should be written");
+
+    let run = run_cli_with_env(
+        &["run", path_str(&goal_file)],
+        &[("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
+        "constraint-destructive-run",
+    );
+
+    assert!(run.status.success(), "stderr:\n{}", stderr_of(&run));
+    assert!(stdout_of(&run).contains("phase=blocked outcome=blocked"));
+    assert!(stdout_of(&run).contains("reason=policy=constraint_destructive_commands"));
+
+    let _ = fs::remove_dir_all(workspace);
+    let _ = fs::remove_file(goal_file);
+    let _ = fs::remove_file(pack_file);
+}
+
+#[test]
+fn e2e_cli_constraints_block_verifier_path_outside_scope() {
+    let workspace = unique_path("constraint-path-workspace", "dir");
+    let goal_file = unique_path("constraint-path-goal", "json");
+    let pack_file = unique_path("constraint-path-pack", "json");
+    fs::create_dir_all(&workspace).expect("workspace should exist");
+    fs::write(
+        &pack_file,
+        r#"{
+  "pack_id": "path-scope-pack",
+  "version": "1",
+  "description": "uses a scoped verifier command",
+  "entry_goal": "goal",
+  "planner_hints": [],
+  "recommended_verifier_flow": ["generic"],
+  "allowed_tools": [{"operation": "run_command", "scope": "workspace"}],
+  "verifier_rules": [
+    {
+      "label": "scope-check",
+      "profile": "generic",
+      "command_example": "ls src",
+      "artifact_expectation": "scope command should stay inside tests",
+      "required": true
+    }
+  ],
+  "risk_policy": {"approval_mode": "never", "max_mutating_steps": 5}
+}"#,
+    )
+    .expect("pack file should be written");
+    fs::write(
+        &goal_file,
+        format!(
+            r#"{{
+  "summary": "Block verifier path outside allowed scope",
+  "workspace_root": "/workspace",
+  "constraints": [
+    {{ "label": "path_scope", "detail": "tests" }}
+  ],
+  "done_conditions": [
+    {{ "label": "report", "evidence": "report artifact exists" }}
+  ],
+  "verification_checks": [
+    {{ "label": "placeholder", "detail": "ls ." }}
+  ],
+  "budget": {{ "max_steps": 5, "max_minutes": 10, "max_tokens": 8000 }},
+  "approval_mode": "never",
+  "workflow_pack": "{}"
+}}"#,
+            pack_file.display()
+        ),
+    )
+    .expect("goal file should be written");
+
+    let run = run_cli_with_env(
+        &["run", path_str(&goal_file)],
+        &[("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
+        "constraint-path-run",
+    );
+
+    assert!(run.status.success(), "stderr:\n{}", stderr_of(&run));
+    assert!(stdout_of(&run).contains("phase=blocked outcome=blocked"));
+    assert!(stdout_of(&run).contains("reason=policy=constraint_path_scope"));
+
+    let _ = fs::remove_dir_all(workspace);
+    let _ = fs::remove_file(goal_file);
+    let _ = fs::remove_file(pack_file);
+}
+
+#[test]
+fn e2e_cli_constraints_escalate_high_risk_verifier_to_pending_approval() {
+    let workspace = unique_path("constraint-approval-workspace", "dir");
+    let state_path = unique_path("constraint-approval-state", "snapshot");
+    let goal_file = unique_path("constraint-approval-goal", "json");
+    let pack_file = unique_path("constraint-approval-pack", "json");
+    init_git_repo(&workspace);
+    fs::write(
+        &pack_file,
+        r#"{
+  "pack_id": "approval-escalation-pack",
+  "version": "1",
+  "description": "uses a high-risk verifier command",
+  "entry_goal": "goal",
+  "planner_hints": [],
+  "recommended_verifier_flow": ["generic"],
+  "allowed_tools": [{"operation": "run_command", "scope": "workspace"}],
+  "verifier_rules": [
+    {
+      "label": "git-status",
+      "profile": "generic",
+      "command_example": "git status --short",
+      "artifact_expectation": "git status should run only after approval",
+      "required": true
+    }
+  ],
+  "risk_policy": {"approval_mode": "never", "max_mutating_steps": 5}
+}"#,
+    )
+    .expect("pack file should be written");
+    fs::write(
+        &goal_file,
+        format!(
+            r#"{{
+  "summary": "Escalate high-risk verifier command to approval",
+  "workspace_root": "/workspace",
+  "constraints": [
+    {{ "label": "approval_escalation", "detail": "required" }}
+  ],
+  "done_conditions": [
+    {{ "label": "report", "evidence": "report artifact exists" }}
+  ],
+  "verification_checks": [
+    {{ "label": "placeholder", "detail": "ls ." }}
+  ],
+  "budget": {{ "max_steps": 5, "max_minutes": 10, "max_tokens": 8000 }},
+  "approval_mode": "never",
+  "workflow_pack": "{}"
+}}"#,
+            pack_file.display()
+        ),
+    )
+    .expect("goal file should be written");
+
+    let run = run_cli_with_env(
+        &["run", path_str(&goal_file)],
+        &[
+            ("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace)),
+            ("AXIOMRUNNER_RUNTIME_STATE_PATH", path_str(&state_path)),
+        ],
+        "constraint-approval-run",
+    );
+    let status = run_cli_with_env(
+        &["status", "run-1"],
+        &[
+            ("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace)),
+            ("AXIOMRUNNER_RUNTIME_STATE_PATH", path_str(&state_path)),
+        ],
+        "constraint-approval-status",
+    );
+
+    assert!(run.status.success(), "stderr:\n{}", stderr_of(&run));
+    assert!(status.status.success(), "stderr:\n{}", stderr_of(&status));
+    assert!(stdout_of(&run).contains(
+        "phase=waiting_approval outcome=approval_required reason=approval_required_before_execution"
+    ));
+    assert!(stdout_of(&status).contains("approval_state=required"));
+
+    let _ = fs::remove_dir_all(workspace);
+    let _ = fs::remove_file(state_path);
+    let _ = fs::remove_file(goal_file);
+    let _ = fs::remove_file(pack_file);
 }
 
 #[test]
@@ -1247,6 +1691,9 @@ fn e2e_cli_doctor_reports_blocked_codek_binary_and_paths() {
     assert!(stdout.contains("provider_state=blocked"));
     assert!(stdout.contains("reason=binary_not_found"));
     assert!(stdout.contains("doctor paths"));
+    assert!(stdout.contains("lock_state="));
+    assert!(stdout.contains("command_allowlist="));
+    assert!(stdout.contains("constraint_enforcement="));
     assert!(stdout.contains("doctor check name=provider_probe state=fail"));
 
     let _ = fs::remove_dir_all(workspace);
@@ -1301,6 +1748,9 @@ fn e2e_cli_doctor_json_is_machine_readable() {
     assert_eq!(json["provider_id"], "mock-local");
     assert_eq!(json["runtime"]["provider_state"], "ready");
     assert!(json["runtime"]["async_host_detail"].as_str().is_some());
+    assert!(json["runtime"]["lock_state"].as_str().is_some());
+    assert!(json["runtime"]["latest_pack"].as_str().is_some());
+    assert!(json["runtime"]["constraint_enforcement"].as_str().is_some());
     assert_eq!(json["checks"][0]["name"], "workspace_dir");
     assert!(json["paths"]["trace_events_path"].as_str().is_some());
 
@@ -1597,7 +2047,6 @@ fn e2e_cli_health_reports_missing_api_key_after_openai_experimental_opt_in() {
     assert!(stdout.contains("provider_state=blocked"));
     assert!(stdout.contains("reason=missing_openai_api_key"));
 }
-
 
 #[test]
 fn e2e_cli_unknown_command_stderr_stable() {

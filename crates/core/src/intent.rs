@@ -48,6 +48,20 @@ pub struct RunConstraint {
     pub detail: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RunConstraintPolicyKey {
+    PathScope,
+    DestructiveCommandClass,
+    ExternalCommandClass,
+    ApprovalEscalation,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RunConstraintMode {
+    Advisory,
+    EnforcedSubset,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DoneCondition {
     pub label: String,
@@ -64,10 +78,13 @@ pub struct VerificationCheck {
 pub struct RunGoal {
     pub summary: String,
     pub workspace_root: String,
-    /// Advisory constraints for this goal run (e.g., "do not modify production configs").
-    /// Constraints are validated (non-empty labels/details) and recorded in the plan
-    /// artifact, but are **not enforced at runtime**. A future release will evaluate
-    /// constraints against the tool allowlist and operator policy.
+    /// Goal-level constraints for this run. The current runtime distinguishes:
+    /// - enforced subset labels: `path_scope`, `destructive_commands`,
+    ///   `external_commands`, `approval_escalation`
+    /// - all other labels: advisory-only
+    ///
+    /// CP-001 defines the subset and vocabulary. CP-002/CP-003 connect those labels
+    /// to actual policy and approval behavior.
     pub constraints: Vec<RunConstraint>,
     pub done_conditions: Vec<DoneCondition>,
     pub verification_checks: Vec<VerificationCheck>,
@@ -142,5 +159,68 @@ impl RunGoal {
         self.budget.validate()?;
 
         Ok(())
+    }
+}
+
+impl RunConstraint {
+    pub fn policy_key(&self) -> Option<RunConstraintPolicyKey> {
+        match self.label.trim().to_ascii_lowercase().as_str() {
+            "path_scope" => Some(RunConstraintPolicyKey::PathScope),
+            "destructive_commands" => Some(RunConstraintPolicyKey::DestructiveCommandClass),
+            "external_commands" => Some(RunConstraintPolicyKey::ExternalCommandClass),
+            "approval_escalation" => Some(RunConstraintPolicyKey::ApprovalEscalation),
+            _ => None,
+        }
+    }
+
+    pub fn mode(&self) -> RunConstraintMode {
+        match self.policy_key() {
+            Some(_) => RunConstraintMode::EnforcedSubset,
+            None => RunConstraintMode::Advisory,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{RunConstraint, RunConstraintMode, RunConstraintPolicyKey};
+
+    #[test]
+    fn run_constraint_recognizes_enforced_subset_labels() {
+        let cases = [
+            ("path_scope", RunConstraintPolicyKey::PathScope),
+            (
+                "destructive_commands",
+                RunConstraintPolicyKey::DestructiveCommandClass,
+            ),
+            (
+                "external_commands",
+                RunConstraintPolicyKey::ExternalCommandClass,
+            ),
+            (
+                "approval_escalation",
+                RunConstraintPolicyKey::ApprovalEscalation,
+            ),
+        ];
+
+        for (label, expected) in cases {
+            let constraint = RunConstraint {
+                label: label.to_owned(),
+                detail: String::from("value"),
+            };
+            assert_eq!(constraint.policy_key(), Some(expected));
+            assert_eq!(constraint.mode(), RunConstraintMode::EnforcedSubset);
+        }
+    }
+
+    #[test]
+    fn run_constraint_keeps_unknown_labels_advisory() {
+        let constraint = RunConstraint {
+            label: String::from("do_not_touch_prod"),
+            detail: String::from("configs"),
+        };
+
+        assert_eq!(constraint.policy_key(), None);
+        assert_eq!(constraint.mode(), RunConstraintMode::Advisory);
     }
 }

@@ -1,6 +1,6 @@
 use crate::display::mode_name;
 use crate::doctor::DoctorReport;
-use crate::runtime_compose::{run_reason_code, run_reason_detail};
+use crate::runtime_compose::{run_reason_code, run_reason_detail, verifier_strength_label};
 use crate::status::StatusSnapshot;
 use crate::trace_store::{ReplaySummary, TraceArtifactIndex, TraceIntentEvent};
 
@@ -27,28 +27,44 @@ pub fn render_status_lines(snapshot: &StatusSnapshot) -> Vec<String> {
         ),
     ];
     if let Some(run) = &snapshot.runtime.latest_run {
+        let artifact_summary = snapshot
+            .runtime
+            .latest_artifact
+            .as_ref()
+            .map(|artifact| {
+                format!(
+                    "report={},patches={}",
+                    artifact.report,
+                    artifact.patch_artifacts.len()
+                )
+            })
+            .unwrap_or_else(|| String::from("none"));
         lines.push(format!(
-            "status run run_id={} phase={} outcome={} reason={} execution_workspace={} verifier_state={} verifier_summary={} planned_steps={} step_count={}",
+            "status run run_id={} phase={} outcome={} reason={} approval_state={} execution_workspace={} verifier_state={} verifier_strength={} verifier_summary={} planned_steps={} step_count={} artifact_summary={}",
             run.run_id,
             run.phase,
             run.outcome,
             run.reason,
+            run.approval_state,
             run.execution_workspace,
             run.verifier_state,
+            verifier_strength_label(&run.verifier_state),
             run.verifier_summary,
             run.planned_steps,
-            run.step_ids.len()
+            run.step_ids.len(),
+            artifact_summary
         ));
     }
     if let Some(pending) = &snapshot.runtime.pending_run {
         lines.push(format!(
-            "status pending_run run_id={} goal_file_path={} phase={} reason={} approval_state={} verifier_state={}",
+            "status pending_run run_id={} goal_file_path={} phase={} reason={} approval_state={} verifier_state={} verifier_strength={}",
             pending.run_id,
             pending.goal_file_path,
             pending.phase,
             pending.reason,
             pending.approval_state,
-            pending.verifier_state
+            pending.verifier_state,
+            verifier_strength_label(&pending.verifier_state)
         ));
     }
     lines
@@ -74,14 +90,22 @@ pub fn render_doctor_lines(report: &DoctorReport) -> Vec<String> {
             option_value(report.state.last_policy_code.as_deref())
         ),
         format!(
-            "doctor runtime provider_state={} memory_state={} tool_state={}",
-            report.runtime.provider_state, report.runtime.memory_state, report.runtime.tool_state
+            "doctor runtime provider_state={} memory_state={} tool_state={} lock_state={} lock_path={}",
+            report.runtime.provider_state,
+            report.runtime.memory_state,
+            report.runtime.tool_state,
+            report.runtime.lock_state,
+            report.runtime.lock_path
         ),
         format!(
-            "doctor detail provider_detail={} memory_detail={} tool_detail={}",
+            "doctor detail provider_detail={} memory_detail={} tool_detail={} latest_pack={} worktree_isolation={} command_allowlist={} constraint_enforcement={}",
             report.runtime.provider_detail,
             report.runtime.memory_detail,
-            report.runtime.tool_detail
+            report.runtime.tool_detail,
+            report.runtime.latest_pack,
+            report.runtime.worktree_isolation,
+            report.runtime.command_allowlist,
+            report.runtime.constraint_enforcement
         ),
         format!(
             "doctor async_host detail={}",
@@ -98,14 +122,15 @@ pub fn render_doctor_lines(report: &DoctorReport) -> Vec<String> {
 
     if let Some(pending) = &report.pending_run {
         lines.push(format!(
-            "doctor pending_run run_id={} intent_id={} goal_file_path={} phase={} reason={} approval_state={} verifier_state={}",
+            "doctor pending_run run_id={} intent_id={} goal_file_path={} phase={} reason={} approval_state={} verifier_state={} verifier_strength={}",
             pending.run_id,
             pending.intent_id,
             pending.goal_file_path,
             pending.phase,
             pending.reason,
             pending.approval_state,
-            pending.verifier_state
+            pending.verifier_state,
+            verifier_strength_label(&pending.verifier_state)
         ));
     }
 
@@ -147,11 +172,22 @@ pub fn render_replay_lines(
             "replay verification status={} summary={}",
             latest.verification.status, latest.verification.summary,
         ),
+        format!(
+            "replay health failed_intents={} false_success_intents={} false_done_intents={} latest_failure={}",
+            summary.failed_intents,
+            summary.false_success_intents,
+            summary.false_done_intents,
+            summary
+                .latest_failure
+                .as_ref()
+                .map(|failure| format!("{}:{}", failure.stage, failure.message))
+                .unwrap_or_else(|| String::from("none"))
+        ),
     ];
 
     if let Some(run) = &latest.run {
         lines.push(format!(
-            "replay run run_id={} phase={} outcome={} reason={} reason_code={} reason_detail={} approval_state={} verifier_state={} elapsed_ms={} planned_steps={} summary={}",
+            "replay run run_id={} phase={} outcome={} reason={} reason_code={} reason_detail={} approval_state={} verifier_state={} verifier_strength={} elapsed_ms={} planned_steps={} summary={}",
             run.run_id,
             run.phase,
             run.outcome,
@@ -160,6 +196,7 @@ pub fn render_replay_lines(
             run_reason_detail(&run.reason),
             run.approval_state,
             run.verifier_state,
+            verifier_strength_label(&run.verifier_state),
             run.elapsed_ms,
             run.planned_steps,
             run.plan_summary

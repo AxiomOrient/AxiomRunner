@@ -19,7 +19,7 @@ mod parse_util;
 
 mod common;
 
-use cli_command::USAGE;
+use cli_command::{RETAINED_COMMANDS, RETAINED_SURFACE, USAGE};
 use common::*;
 use config_loader::AppConfig;
 use dev_guard::{GuardError, enforce_current_build, enforce_release_gate};
@@ -102,9 +102,11 @@ fn release_security_gate_cli_build_profile_boundary_is_enforced() {
             output.status.success(),
             "stdout:\n{stdout}\n\nstderr:\n{stderr}"
         );
-        assert!(stdout.contains(
-            "status revision=0 mode=active last_intent=- last_decision=- last_policy=-"
-        ));
+        assert!(
+            stdout.contains(
+                "status revision=0 mode=active last_intent=- last_decision=- last_policy=-"
+            )
+        );
     } else {
         assert_eq!(
             output.status.code(),
@@ -140,9 +142,11 @@ fn release_security_gate_legacy_env_bypass_signal_does_not_allow_release_startup
             output.status.success(),
             "stdout:\n{stdout}\n\nstderr:\n{stderr}"
         );
-        assert!(stdout.contains(
-            "status revision=0 mode=active last_intent=- last_decision=- last_policy=-"
-        ));
+        assert!(
+            stdout.contains(
+                "status revision=0 mode=active last_intent=- last_decision=- last_policy=-"
+            )
+        );
     } else {
         assert_eq!(
             output.status.code(),
@@ -180,9 +184,7 @@ fn release_security_gate_truth_surface_docs_match_retained_commands() {
     let charter = include_str!("../../../docs/project-charter.md");
     let changelog = include_str!("../../../CHANGELOG.md");
 
-    for command in [
-        "run", "status", "replay", "resume", "abort", "doctor", "health", "help",
-    ] {
+    for command in *RETAINED_COMMANDS {
         assert!(
             USAGE.contains(command),
             "cli usage missing command: {command}"
@@ -209,6 +211,72 @@ fn release_security_gate_truth_surface_docs_match_retained_commands() {
         );
     }
 
+    for doc in [readme, runbook] {
+        assert!(
+            doc.contains(RETAINED_SURFACE),
+            "surface doc missing canonical retained surface string"
+        );
+        assert!(
+            !doc.contains("`batch`"),
+            "surface doc must not reintroduce legacy batch command"
+        );
+    }
+}
+
+#[test]
+fn release_security_gate_identity_surface_is_locked() {
+    let workspace_manifest = include_str!("../../../Cargo.toml");
+    let apps_manifest = include_str!("../Cargo.toml");
+    let core_manifest = include_str!("../../../crates/core/Cargo.toml");
+    let adapters_manifest = include_str!("../../../crates/adapters/Cargo.toml");
+    let readme = include_str!("../../../README.md");
+    let runbook = include_str!("../../../docs/RUNBOOK.md");
+    let charter = include_str!("../../../docs/project-charter.md");
+    let changelog = include_str!("../../../CHANGELOG.md");
+    let nightly = include_str!("../../../scripts/nightly_dogfood.sh");
+
+    for token in [
+        "product_name = \"AxiomRunner\"",
+        "binary_name = \"axiomrunner_apps\"",
+        "env_prefix = \"AXIOMRUNNER\"",
+    ] {
+        assert!(
+            workspace_manifest.contains(token),
+            "workspace identity metadata missing token: {token}"
+        );
+    }
+
+    for manifest in [apps_manifest, core_manifest, adapters_manifest] {
+        assert!(
+            manifest.contains("description = \"AxiomRunner"),
+            "crate manifest missing AxiomRunner description"
+        );
+    }
+
+    for doc in [readme, runbook, charter, changelog] {
+        assert!(
+            doc.contains("AxiomRunner"),
+            "identity doc missing product name"
+        );
+        assert!(
+            doc.contains("axiomrunner_apps") || doc.contains("AXIOMRUNNER_"),
+            "identity doc missing binary or env prefix"
+        );
+    }
+
+    assert!(
+        nightly.contains("axiomrunner_apps") && nightly.contains("AXIOMRUNNER_"),
+        "nightly script must keep the canonical binary and env prefix"
+    );
+
+    for legacy in ["AxonRunner", "AXONRUNNER_", "axonrunner_apps"] {
+        for source in [readme, runbook, charter, changelog, nightly] {
+            assert!(
+                !source.contains(legacy),
+                "identity surface must reject legacy token: {legacy}"
+            );
+        }
+    }
 }
 
 #[test]
@@ -272,6 +340,99 @@ fn release_security_gate_bridge_docs_lock_autonomous_target_contract() {
             "workflow pack contract missing token: {token}"
         );
     }
+}
+
+#[test]
+fn release_security_gate_keeps_single_workflow_pack_contract_source() {
+    let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .canonicalize()
+        .expect("repo root should resolve");
+    let docs_guide = include_str!("../../../docs/README.md");
+    let workflow_pack = repo_root.join("docs/WORKFLOW_PACK_CONTRACT.md");
+
+    assert!(
+        workflow_pack.is_file(),
+        "workflow pack contract doc must exist"
+    );
+    assert!(
+        docs_guide.contains("docs/WORKFLOW_PACK_CONTRACT.md"),
+        "docs guide must point to the authoritative workflow pack contract"
+    );
+    assert!(
+        docs_guide.contains("transition mirror는 두지 않는다."),
+        "docs guide must state that transition mirror docs are not authoritative"
+    );
+    assert!(
+        !repo_root.join("docs/transition").exists(),
+        "legacy docs/transition tree must not reappear"
+    );
+
+    let mut contract_headers = Vec::new();
+    let mut pack_schema_tokens = Vec::new();
+    for path in markdown_files_under(&repo_root.join("docs")) {
+        let contents = std::fs::read_to_string(&path).expect("doc should be readable");
+        if contents.contains("# Workflow Pack Contract") {
+            contract_headers.push(path.clone());
+        }
+        if contents.contains("recommended_verifier_flow[]") && contents.contains("verifier_rules[]")
+        {
+            pack_schema_tokens.push(path);
+        }
+    }
+
+    assert_eq!(
+        contract_headers,
+        vec![workflow_pack.clone()],
+        "workflow pack contract header must live in exactly one docs file"
+    );
+    assert_eq!(
+        pack_schema_tokens,
+        vec![workflow_pack],
+        "workflow pack schema tokens must live in exactly one docs file"
+    );
+}
+
+#[test]
+fn release_security_gate_forbidden_legacy_tokens_reject_injected_fixture() {
+    let fixture = "AxiomRunner replaced batch mode, but AxonRunner gateway docs remain with AXONRUNNER_ prefix";
+    let hits = forbidden_legacy_tokens(fixture);
+
+    assert!(hits.contains(&"AxonRunner"));
+    assert!(hits.contains(&"AXONRUNNER_"));
+}
+
+#[test]
+fn release_security_gate_naming_truth_rejects_injected_fixture() {
+    let fixture = "product=AxiomRunner binary=axionrunner_apps env=AXIOMRUNNER_";
+    let issues = naming_truth_issues(fixture);
+
+    assert!(issues.iter().any(|issue| issue.contains("binary_name")));
+}
+
+#[test]
+fn release_security_gate_placeholder_verifier_rejects_injected_fixture_and_examples_stay_clean() {
+    let fixture = r#"{"command_example":"pwd"}"#;
+    assert!(contains_placeholder_verifier(fixture));
+
+    for contents in [
+        include_str!("../../../examples/rust_service/pack.json"),
+        include_str!("../../../examples/node_api/pack.json"),
+        include_str!("../../../examples/nextjs_app/pack.json"),
+        include_str!("../../../examples/python_fastapi/pack.json"),
+        include_str!("../../../docs/WORKFLOW_PACK_CONTRACT.md"),
+    ] {
+        assert!(
+            !contains_placeholder_verifier(contents),
+            "release surface must not keep placeholder verifier commands"
+        );
+    }
+}
+
+#[test]
+fn release_security_gate_false_success_heuristic_rejects_injected_summary() {
+    let summary = "ok fixture=x run_rc=0 replay_rc=0 doctor_rc=0 failed_intents=0 false_success_intents=1 false_done_intents=0 weak_verifications=0 unresolved_verifications=0 pack_required_verifications=0";
+    assert!(nightly_summary_has_untrusted_green(summary));
 }
 
 #[test]
@@ -434,6 +595,9 @@ fn release_security_gate_nightly_summary_keeps_quality_metrics() {
     assert!(summary.contains("failed_intents=0"));
     assert!(summary.contains("false_success_intents=0"));
     assert!(summary.contains("false_done_intents=0"));
+    assert!(summary.contains("weak_verifications=0"));
+    assert!(summary.contains("unresolved_verifications=0"));
+    assert!(summary.contains("pack_required_verifications=0"));
 
     let _ = std::fs::remove_dir_all(log_root);
 }
@@ -560,4 +724,71 @@ fn is_repo_relative_path(value: &str) -> bool {
 
 fn repo_relative_path_exists(repo_root: &Path, relative: &str) -> bool {
     repo_root.join(relative).exists()
+}
+
+fn markdown_files_under(root: &Path) -> Vec<PathBuf> {
+    let mut files = Vec::new();
+    if !root.exists() {
+        return files;
+    }
+
+    let mut pending = vec![root.to_path_buf()];
+    while let Some(path) = pending.pop() {
+        let entries = std::fs::read_dir(&path).expect("directory should be readable");
+        for entry in entries {
+            let entry = entry.expect("directory entry should be readable");
+            let entry_path = entry.path();
+            if entry_path.is_dir() {
+                pending.push(entry_path);
+                continue;
+            }
+            if entry_path.extension().and_then(|value| value.to_str()) == Some("md") {
+                files.push(entry_path);
+            }
+        }
+    }
+
+    files.sort();
+    files
+}
+
+fn forbidden_legacy_tokens(contents: &str) -> Vec<&'static str> {
+    let tokens = ["AxonRunner", "AXONRUNNER_", "`batch`", "docs/transition/"];
+    tokens
+        .into_iter()
+        .filter(|token| contents.contains(token))
+        .collect()
+}
+
+fn naming_truth_issues(contents: &str) -> Vec<String> {
+    let mut issues = Vec::new();
+    if contents.contains("AxiomRunner") && !contents.contains("axiomrunner_apps") {
+        issues.push(String::from("binary_name missing axiomrunner_apps"));
+    }
+    if contents.contains("AxiomRunner") && !contents.contains("AXIOMRUNNER_") {
+        issues.push(String::from("env_prefix missing AXIOMRUNNER_"));
+    }
+    if contents.contains("axionrunner_apps") {
+        issues.push(String::from("binary_name typo axionrunner_apps"));
+    }
+    issues
+}
+
+fn contains_placeholder_verifier(contents: &str) -> bool {
+    contents.contains("\"command_example\":\"pwd\"")
+        || contents.contains("\"command_example\": \"pwd\"")
+        || contents.contains("command_example = \"pwd\"")
+}
+
+fn nightly_summary_has_untrusted_green(contents: &str) -> bool {
+    summary_metric(contents, "false_success_intents").is_some_and(|value| value > 0)
+        || summary_metric(contents, "false_done_intents").is_some_and(|value| value > 0)
+}
+
+fn summary_metric(contents: &str, key: &str) -> Option<u64> {
+    let prefix = format!("{key}=");
+    contents
+        .split_whitespace()
+        .find_map(|part| part.strip_prefix(&prefix))
+        .and_then(|raw| raw.parse::<u64>().ok())
 }

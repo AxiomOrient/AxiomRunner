@@ -1,162 +1,120 @@
 # Project Structure
 
-AxiomRunner 저장소는 크게 3개 실행 크레이트와 몇 개 보조 폴더로 나뉜다.
+AxiomRunner 저장소는 `core`, `adapters`, `apps` 3개 크레이트를 중심으로 돌아간다.
+현재 제품은 `goal-file` 중심 CLI runtime이므로, 구조 설명도 그 계약을 기준으로 읽는 게 맞다.
 
 ## 한눈에 보기
 
-- `crates/core` — 제품의 규칙과 상태를 가진다.
-- `crates/adapters` — provider, tool, memory처럼 바깥 세계와 붙는 부분을 가진다.
-- `crates/apps` — CLI, run loop, replay, doctor 같은 실제 실행 경로를 가진다.
-- `docs` — 제품 설명과 운영 문서를 둔다.
-- `examples` — goal/pack 연결을 보여주는 representative verifier 예제를 둔다.
-- `packs` — workflow pack 관련 참고 문서를 둔다.
-- `scripts` — 반복 실행용 스크립트를 둔다.
-- `target` — 빌드 결과물이다. 생성 파일이므로 읽기 대상이 아니다.
+- `crates/core` — goal/run 계약과 상태 primitive
+- `crates/adapters` — provider/tool/memory substrate
+- `crates/apps` — CLI entrypoint와 실제 run orchestration
+- `docs` — 현재 제품 계약과 운영 문서
+- `examples` — representative verifier examples
+- `scripts` — 반복 실행 보조
+- `plans` — review/plan/task 같은 작업 산출물
+- `target` — 빌드 결과물
 
-## 폴더별 설명
+## crates/core
 
-- `crates/core` — owns: 상태, 이벤트, 정책, 검증 규칙
-  interacts with: `crates/apps`, `crates/adapters`
-  주요 파일:
-  - `intent.rs` — goal와 budget 같은 입력 규칙
-  - `state.rs` — run 상태
-  - `reducer.rs` — 상태 전이
-  - `policy*.rs` — 허용/차단 이유 코드
+현재 `core`는 작은 계약 층이다. 예전 event/reducer 모델을 설명하는 문서는 더 이상 맞지 않는다.
 
-- `crates/adapters` — owns: provider/tool/memory 계약과 실제 연결
-  interacts with: `crates/apps`, `crates/core`
-  주요 파일:
-  - `contracts.rs` — workflow pack, tool, provider 계약
-  - `provider_codex_runtime.rs` — codek provider
-  - `provider_openai.rs` — opt-in openai provider
-  - `tool.rs` — 파일/명령 실행
-  - `memory_sqlite.rs`, `memory_markdown.rs` — memory backend
+주요 파일:
 
-- `crates/apps` — owns: CLI 진입점과 실제 run orchestration
-  interacts with: `crates/core`, `crates/adapters`
-  주요 파일:
-  - `main.rs` — 실행 시작점
-  - `cli_command.rs` — 명령 파싱
-  - `cli_runtime.rs` — run / resume / abort 흐름
-  - `runtime_compose.rs` — plan/apply/verify/report 조립
-  - `replay.rs`, `status.rs`, `doctor.rs` — 운영자 확인 경로
-  - `trace_store.rs`, `state_store.rs`, `workspace_lock.rs` — 증거, 상태, lock
+- `intent.rs` — `RunGoal`, `RunBudget`, `DoneCondition`, `VerificationCheck`
+- `decision.rs` — `DecisionOutcome`
+- `policy_codes.rs` — policy code enum
+- `state.rs` — `AgentState`, `ExecutionMode`
+- `validation.rs` — 입력 검증 helper
+- `lib.rs` — public re-export
 
-## `crates/apps`를 더 자세히 보면
+핵심 역할:
 
-`crates/apps`는 아래 5개 층으로 나뉜다.
+- goal/run 입력 계약 정의
+- 상태 primitive 정의
+- apps/adapters가 공유하는 최소 타입 제공
 
-- 시작층 — 프로그램을 시작하고 종료 코드를 정한다.
-  파일:
-  - `main.rs`
-  - `lib.rs`
+## crates/adapters
 
-- 입력층 — 명령과 설정을 읽고 goal file 경로를 해석한다.
-  파일:
-  - `cli_args.rs`
-  - `cli_command.rs`
-  - `config_loader.rs`
-  - `goal_file.rs`
-  - `parse_util.rs`
+`adapters`는 바깥 세계와 붙는 substrate다.
 
-- 실행층 — 실제 `run / resume / abort / health` 흐름을 움직인다.
-  파일:
-  - `cli_runtime.rs`
-  - `runtime_compose.rs`
-  - `runtime_compose/plan.rs`
+주요 파일:
 
-- 저장층 — 상태, trace, lock을 파일로 남긴다.
-  파일:
-  - `state_store.rs`
-  - `trace_store.rs`
-  - `workspace_lock.rs`
+- `contracts.rs` — workflow pack, tool, provider 계약
+- `provider_codex_runtime.rs` — primary `codek` provider
+- `provider_openai.rs` — experimental opt-in provider
+- `provider_registry.rs` — provider 등록/해석
+- `tool.rs` — 파일/명령 실행 표면
+- `tool_write.rs` — patch artifact / command artifact evidence
+- `tool_workspace.rs` — workspace boundary helper
+- `memory.rs`, `memory_markdown.rs`, `memory_sqlite.rs` — memory backend
 
-- 조회층 — 운영자가 현재 상태를 읽는 출력 경로다.
-  파일:
-  - `status.rs`
-  - `replay.rs`
-  - `doctor.rs`
-  - `display.rs`
+핵심 역할:
 
-### `crates/apps` 내부 흐름
+- provider health와 request execution
+- tool boundary / allowlist / evidence
+- workflow pack contract shared types
 
-1. `main.rs`가 `lib.rs`의 CLI entrypoint를 부른다.
-2. `cli_args.rs`와 `cli_command.rs`가 입력을 해석한다.
-3. `config_loader.rs`가 설정을 합친다.
-4. `cli_runtime.rs`가 명령 종류에 따라 실행을 나눈다.
-5. 실제 plan/apply/verify/report는 `runtime_compose.rs`가 조립한다.
-6. 실행 결과는 `state_store.rs`와 `trace_store.rs`에 저장된다.
-7. 운영자는 `status.rs`, `replay.rs`, `doctor.rs`로 다시 읽는다.
+## crates/apps
 
-### 왜 이렇게 나뉘는가
+`apps`는 실제 제품 surface를 가진다.
 
-- 입력 해석과 실제 실행을 분리해야 명령 규칙을 바꾸기 쉽다.
-- 실행과 저장을 분리해야 replay와 doctor가 같은 근거를 다시 읽을 수 있다.
-- 조회 경로를 따로 두어야 operator output을 짧게 유지할 수 있다.
+주요 파일:
 
-- `docs` — owns: 제품 문서
-  interacts with: README와 operator flow
-  주요 파일:
-  - `README.md` — 문서 입구
-  - `project-charter.md` — 제품이 무엇인지
-  - `CAPABILITY_MATRIX.md` — 무엇을 공식 지원하는지
-  - `CODEK_RUNTIME_CONTRACT.md` — codek runtime 규칙
-  - `RUNBOOK.md` — 실제 실행 방법
-  - `VERSIONING.md` — 버전 정책
+- `main.rs`, `lib.rs` — entrypoint와 exit code
+- `cli_args.rs`, `cli_command.rs` — CLI parsing
+- `config_loader.rs` — file/env/cli config merge
+- `goal_file.rs` — goal file load + workflow pack manifest binding
+- `cli_runtime.rs` — `run / resume / abort / status / doctor / health`
+- `cli_runtime/lifecycle.rs` — verification / repair / finalize helper
+- `runtime_compose.rs` — provider/memory/tool orchestration
+- `runtime_compose/plan.rs` — default verifier derivation / run plan assembly
+- `runtime_compose/artifacts.rs` — plan/apply/verify/report/checkpoint/rollback artifact write
+- `state_store.rs` — runtime state snapshot persistence
+- `trace_store.rs` — append-only trace and replay summary
+- `workspace_lock.rs` — single-writer lock
+- `status.rs`, `replay.rs`, `doctor.rs`, `operator_render.rs`, `display.rs` — operator-facing output
+- `async_runtime_host.rs` — async host setup
 
-- `examples` — owns: representative verifier 예제
-  interacts with: `README.md`, `docs/RUNBOOK.md`
-  구성:
-  - `rust_service`
-  - `node_api`
-  - `nextjs_app`
-  - `python_fastapi`
-  - `README.md`
+### apps 내부 흐름
 
-- `packs/docs` — owns: workflow pack 참고 설명
-  interacts with: planning/verifier flow 이해
+1. `main.rs` / `lib.rs`가 CLI entrypoint를 연다.
+2. `cli_args.rs`와 `cli_command.rs`가 명령을 파싱한다.
+3. `config_loader.rs`가 config를 합친다.
+4. `goal_file.rs`가 goal/workflow pack 입력을 고정한다.
+5. `cli_runtime.rs`가 명령별 실행 경로를 선택한다.
+6. `runtime_compose.rs`가 provider/memory/tool 실행과 artifact 생성을 조립한다.
+7. `state_store.rs`, `trace_store.rs`, `workspace_lock.rs`가 상태/증거/lock을 남긴다.
+8. `status`, `replay`, `doctor` 경로가 같은 증거를 다시 읽어 보여준다.
 
-- `scripts` — owns: 반복 실행 보조
-  interacts with: local operator flow
-  주요 파일:
-  - `nightly_dogfood.sh`
+## docs / examples / scripts / plans
 
-## 어떻게 연결되는가
+- `docs` — 현재 제품 truth
+  - `project-charter.md`
+  - `CAPABILITY_MATRIX.md`
+  - `RUNBOOK.md`
+  - `CODEK_RUNTIME_CONTRACT.md`
+  - `WORKFLOW_PACK_CONTRACT.md`
+  - `VERSIONING.md`
+  - `PROJECT_STRUCTURE.md`
+- `examples` — representative app/server verifier examples
+- `scripts` — `nightly_dogfood.sh` 같은 반복 실행 보조
+- `plans` — review bundle, implementation plan, task ledger 같은 작업 산출물
 
-- 사용자는 `crates/apps`의 CLI로 시작한다.
-- `crates/apps`는 `crates/core`의 규칙을 읽어 run 상태를 만든다.
-- 실제 파일/명령/provider 호출은 `crates/adapters`가 맡는다.
-- 결과는 다시 `crates/apps`의 report, replay, doctor, status로 보인다.
+중요:
 
-즉, 흐름은 보통 아래 순서다.
+- `docs/`와 루트 `README.md`가 현재 shipped truth를 소유한다.
+- `plans/`는 작업에 도움을 주는 산출물이지, 기본 제품 truth가 아니다.
 
-1. `apps`가 입력을 받는다.
-2. `core`가 규칙을 확인한다.
-3. `adapters`가 바깥 작업을 수행한다.
-4. `apps`가 증거와 결과를 보여준다.
+## 구조를 읽는 순서
 
-## docs 폴더 점검
+1. `README.md`
+2. `docs/project-charter.md`
+3. `docs/RUNBOOK.md`
+4. `docs/CAPABILITY_MATRIX.md`
+5. `crates/apps/src/cli_command.rs`
+6. `crates/apps/src/cli_runtime.rs`
+7. `crates/apps/src/runtime_compose.rs`
+8. `crates/apps/src/state_store.rs`
+9. `crates/apps/src/trace_store.rs`
 
-지금 `docs/`에는 핵심 문서만 남아 있는 편이다.
-
-매일 읽는 핵심 문서:
-
-- `docs/README.md`
-- `docs/project-charter.md`
-- `docs/CAPABILITY_MATRIX.md`
-- `docs/CODEK_RUNTIME_CONTRACT.md`
-- `docs/WORKFLOW_PACK_CONTRACT.md`
-- `docs/RUNBOOK.md`
-- `docs/VERSIONING.md`
-- `docs/PROJECT_STRUCTURE.md`
-
-필요할 때만 보는 보조 문서:
-
-- `docs/AUTONOMOUS_AGENT_TARGET.md`
-- `docs/AUTONOMOUS_AGENT_SPEC.md`
-
-판단:
-
-- 불필요한 옛 분석 문서가 `docs/`에 많이 남아 있지는 않다.
-- 문서 표면은 현재 제품 문서와 bridge 문서로 충분히 좁혀졌다.
-- 지금 필요한 것은 삭제보다 문서 입구를 더 쉽게 만드는 일이다.
+이 순서로 보면 제품 표면 → 실행 경로 → 상태/증거 저장 순서가 자연스럽게 이어진다.

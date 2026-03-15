@@ -26,6 +26,13 @@ cargo run -q -p axiomrunner_apps -- \
 
 이 예제는 framework starter repo가 아니라 verifier flow와 goal/pack 연결 예시다.
 
+## generic run vs pack-backed run
+
+- generic run은 goal file의 `verification_checks` detail만으로 verifier를 추론한다.
+- detail이 약하거나 도메인 pack이 필요하면 `verification_weak`, `verification_unresolved`, `pack_required` 로 정직하게 드러난다.
+- pack-backed run은 `pack.json`이 verifier 순서, command example, allowed tool 경계를 명시한다.
+- app/server 자동화처럼 build/test/lint/typecheck 의미가 중요하면 pack-backed run이 기준이다.
+
 ## v0.2 Developer Automation Milestone
 
 아래 4개 예제가 모두 유지 대상이다.

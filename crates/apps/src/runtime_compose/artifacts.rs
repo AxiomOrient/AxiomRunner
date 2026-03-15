@@ -17,6 +17,7 @@ pub(super) fn write_report(
     let step_journal = render_step_journal(&run.step_journal);
     let tool_outputs = render_string_list(&execution.tool_outputs);
     let changed_paths = render_patch_targets(&execution.patch_artifacts);
+    let patch_artifacts = render_patch_artifact_paths(&execution.patch_artifacts);
     let evidence = render_patch_evidence(&execution.patch_artifacts);
     let health = state.health();
     let checkpoint_summary = run
@@ -45,6 +46,19 @@ pub(super) fn write_report(
             )
         })
         .unwrap_or_else(|| String::from("none"));
+    let verifier_non_executed_reason = if run.verification.status == "passed" {
+        String::from("none")
+    } else {
+        run.verification.summary.clone()
+    };
+    let report_summary = format!(
+        "phase={} outcome={} reason={}",
+        run_phase_name(run.phase),
+        run_outcome_name(run.outcome),
+        run.reason
+    );
+    let risk_summary = report_risk_summary(run);
+    let next_action = report_next_action(run);
     let files = [
         (
             format!("{base}.plan.md"),
@@ -104,17 +118,23 @@ pub(super) fn write_report(
         (
             format!("{base}.report.md"),
             format!(
-                "# Report\n\nintent_id={}\nkind={}\noutcome={}\npolicy={}\nrun_phase={}\nrun_outcome={}\nrun_reason={}\nrun_reason_code={}\nrun_reason_detail={}\nrun_elapsed_ms={}\ncheckpoint={}\nrollback={}\nprovider_health_state={}\nprovider_health_detail={}\nprovider={}\nprovider_cwd={}\nmemory={}\ntool={}\noutputs={}\nverifier_evidence={}\nchanged_paths={}\nevidence={}\n",
+                "# Report\n\nintent_id={}\nkind={}\noutcome={}\npolicy={}\nsummary={}\nrisk={}\nnext_action={}\nrun_phase={}\nrun_outcome={}\nrun_reason={}\nrun_reason_code={}\nrun_reason_detail={}\nrun_elapsed_ms={}\nverifier_strength={}\nverifier_summary={}\nverifier_non_executed_reason={}\ncheckpoint={}\nrollback={}\nprovider_health_state={}\nprovider_health_detail={}\nprovider={}\nprovider_cwd={}\nmemory={}\ntool={}\noutputs={}\nverifier_evidence={}\nchanged_paths={}\nchanged_files={}\npatch_artifacts={}\nevidence={}\n",
                 input.intent_id,
                 template_kind(template),
                 outcome_name(input.outcome),
                 input.policy_code,
+                report_summary,
+                risk_summary,
+                next_action,
                 run_phase_name(run.phase),
                 run_outcome_name(run.outcome),
                 run.reason,
                 run_reason_code(&run.reason),
                 run_reason_detail(&run.reason),
                 run.elapsed_ms,
+                verifier_strength_label(&run.verification.status),
+                run.verification.summary,
+                verifier_non_executed_reason,
                 checkpoint_summary,
                 rollback_summary,
                 health.provider.state,
@@ -126,6 +146,8 @@ pub(super) fn write_report(
                 tool_outputs,
                 verifier_evidence,
                 changed_paths,
+                changed_paths,
+                patch_artifacts,
                 evidence,
             ),
         ),
@@ -332,6 +354,40 @@ fn render_patch_targets(artifacts: &[RuntimeComposePatchArtifact]) -> String {
         .map(|artifact| artifact.target_path.as_str())
         .collect::<Vec<_>>()
         .join(" | ")
+}
+
+fn render_patch_artifact_paths(artifacts: &[RuntimeComposePatchArtifact]) -> String {
+    if artifacts.is_empty() {
+        return String::from("none");
+    }
+
+    artifacts
+        .iter()
+        .map(|artifact| artifact.artifact_path.as_str())
+        .collect::<Vec<_>>()
+        .join(" | ")
+}
+
+fn report_risk_summary(run: &RuntimeRunRecord) -> &'static str {
+    match run.outcome {
+        RuntimeRunOutcome::Success => "low",
+        RuntimeRunOutcome::ApprovalRequired => "needs_approval",
+        RuntimeRunOutcome::BudgetExhausted => "budget_blocked",
+        RuntimeRunOutcome::Blocked => "blocked",
+        RuntimeRunOutcome::Failed => "failed",
+        RuntimeRunOutcome::Aborted => "operator_aborted",
+    }
+}
+
+fn report_next_action(run: &RuntimeRunRecord) -> &'static str {
+    match run.outcome {
+        RuntimeRunOutcome::Success => "review report and replay evidence",
+        RuntimeRunOutcome::ApprovalRequired => "approve and resume the pending run",
+        RuntimeRunOutcome::BudgetExhausted => "raise budget or reduce planned scope",
+        RuntimeRunOutcome::Blocked => "inspect verifier summary and unblock the run",
+        RuntimeRunOutcome::Failed => "inspect failure boundary and repair before retry",
+        RuntimeRunOutcome::Aborted => "decide whether to restart with a new run",
+    }
 }
 
 fn render_patch_evidence(artifacts: &[RuntimeComposePatchArtifact]) -> String {

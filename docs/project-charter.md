@@ -3,6 +3,7 @@
 ## Purpose
 
 AxiomRunner is a goal-file oriented CLI agent runtime.
+Its retained operator identity is `AxiomRunner` / `axiomrunner_apps` / `AXIOMRUNNER_*`.
 
 ## Transition Target
 

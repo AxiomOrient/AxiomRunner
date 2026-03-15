@@ -3,9 +3,10 @@ use crate::config_loader::AppConfig;
 use crate::display::{mode_name, outcome_name};
 use crate::doctor::{build_doctor_report, render_doctor_lines};
 use crate::runtime_compose::{
-    ReportWriteInput, RuntimeComposeConfig, RuntimeComposeExecution, RuntimeComposeState,
-    RuntimeRunOutcome, RuntimeRunPhase, RuntimeRunRecord, RuntimeRunRepair, RuntimeRunStepRecord,
-    RuntimeRunVerification, run_outcome_name, run_phase_name,
+    APPROVAL_STATE_REQUIRED, RUN_REASON_OPERATOR_ABORT, ReportWriteInput, RuntimeComposeConfig,
+    RuntimeComposeExecution, RuntimeComposeState, RuntimeRunOutcome, RuntimeRunPhase,
+    RuntimeRunRecord, RuntimeRunRepair, RuntimeRunStepRecord, RuntimeRunVerification,
+    run_outcome_name, run_phase_name,
 };
 use crate::state_store::{PendingRunSnapshot, RuntimeStateSnapshot, StateStore};
 use crate::status::{
@@ -17,6 +18,9 @@ use axiomrunner_core::{AgentState, DecisionOutcome, PolicyCode};
 use std::time::Instant;
 
 mod lifecycle;
+
+const RESUME_PENDING_APPROVAL_ONLY: &str = "resume only supports pending goal-file approval runs";
+const ABORT_PENDING_CONTROL_ONLY: &str = "abort only supports pending goal-file control runs";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct AppliedIntent {
@@ -102,18 +106,23 @@ impl CliRuntime {
             .goal
             .validate()
             .map_err(|error| format!("goal file validation failed: {error:?}"))?;
+        let policy_violation = self.compose_state.constraint_policy_violation(template);
         let intent_id = self.next_intent_id();
+        let (outcome, policy_code) = match policy_violation {
+            Some(violation) => (DecisionOutcome::Rejected, violation.code),
+            None => (DecisionOutcome::Accepted, PolicyCode::Allowed),
+        };
         self.state = self.state.record_intent(
             intent_id.clone(),
             self.actor_id.clone(),
-            DecisionOutcome::Accepted,
-            PolicyCode::Allowed,
+            outcome,
+            policy_code,
         );
         Ok(AppliedIntent {
             intent_id,
             kind: "goal",
-            outcome: DecisionOutcome::Accepted,
-            policy_code: PolicyCode::Allowed,
+            outcome,
+            policy_code,
             effect_count: 0,
         })
     }
@@ -123,8 +132,7 @@ impl CliRuntime {
         template: &RunTemplate,
         applied: &AppliedIntent,
     ) -> crate::runtime_compose::RuntimeComposeExecution {
-        self.compose_state
-            .apply_template(template, applied.outcome)
+        self.compose_state.apply_template(template, applied.outcome)
     }
 
     fn next_intent_id(&mut self) -> String {
@@ -224,10 +232,9 @@ fn execute_intent(runtime: &mut CliRuntime, intent: &RunTemplate) -> Result<(), 
     let started_at = Instant::now();
     let run_id = runtime.next_run_id();
     let applied = runtime.apply_template(intent)?;
-    let plan =
-        runtime
-            .compose_state
-            .plan_template(intent, &run_id, &applied.intent_id);
+    let plan = runtime
+        .compose_state
+        .plan_template(intent, &run_id, &applied.intent_id);
     let pre_execution_guard =
         lifecycle::goal_pre_execution_guard(intent, &plan, runtime.compose_state.max_tokens()).map(
             |summary| {
@@ -392,11 +399,9 @@ fn execute_resume(runtime: &mut CliRuntime, target: &str) -> Result<(), String> 
         .compose_state
         .write_checkpoint_metadata(&pending.intent_id, &pending.run_id)?;
     let template = load_pending_goal_template(&pending.goal_file_path)?;
-    let plan = runtime.compose_state.plan_template(
-        &template,
-        &pending.run_id,
-        &pending.intent_id,
-    );
+    let plan = runtime
+        .compose_state
+        .plan_template(&template, &pending.run_id, &pending.intent_id);
     let execution = runtime
         .compose_state
         .apply_template(&template, DecisionOutcome::Accepted);
@@ -488,17 +493,15 @@ fn execute_resume(runtime: &mut CliRuntime, target: &str) -> Result<(), String> 
 
 fn execute_abort(runtime: &mut CliRuntime, target: &str) -> Result<(), String> {
     let started_at = Instant::now();
-    let pending = pending_run_for_target(runtime, target)?.clone();
+    let pending = pending_abort_for_target(runtime, target)?.clone();
     let template = load_pending_goal_template(&pending.goal_file_path)?;
-    let plan = runtime.compose_state.plan_template(
-        &template,
-        &pending.run_id,
-        &pending.intent_id,
-    );
+    let plan = runtime
+        .compose_state
+        .plan_template(&template, &pending.run_id, &pending.intent_id);
     let execution = runtime.compose_state.idle_execution();
     let verification = RuntimeRunVerification {
         status: "passed",
-        summary: String::from("operator_abort"),
+        summary: String::from(RUN_REASON_OPERATOR_ABORT),
         checks: vec![String::from("abort=operator_requested")],
     };
     let repair = RuntimeRunRepair::skipped("abort");
@@ -507,9 +510,9 @@ fn execute_abort(runtime: &mut CliRuntime, target: &str) -> Result<(), String> {
         step_journal: vec![RuntimeRunStepRecord {
             id: format!("{}/step-abort", pending.run_id),
             label: String::from("abort pending run"),
-            phase: String::from("aborted"),
-            status: String::from("aborted"),
-            evidence: String::from("operator_abort"),
+            phase: run_phase_name(RuntimeRunPhase::Aborted).to_owned(),
+            status: run_phase_name(RuntimeRunPhase::Aborted).to_owned(),
+            evidence: String::from(RUN_REASON_OPERATOR_ABORT),
             failure: None,
         }],
         verification,
@@ -519,7 +522,7 @@ fn execute_abort(runtime: &mut CliRuntime, target: &str) -> Result<(), String> {
         elapsed_ms: lifecycle::elapsed_ms(started_at),
         phase: RuntimeRunPhase::Aborted,
         outcome: RuntimeRunOutcome::Aborted,
-        reason: String::from("operator_abort"),
+        reason: String::from(RUN_REASON_OPERATOR_ABORT),
     };
     let abort_applied = accepted_goal_applied(&pending.intent_id);
     let patch_artifacts = runtime.compose_state.write_report(
@@ -572,13 +575,31 @@ fn pending_resume_for_target<'a>(
     target: &str,
 ) -> Result<&'a PendingRunSnapshot, String> {
     let pending = pending_run_for_target(runtime, target).map_err(|_| {
-        String::from(
-            "resume only supports pending goal-file approval runs; no pending approval run is available",
-        )
+        format!("{RESUME_PENDING_APPROVAL_ONLY}; no pending approval run is available")
     })?;
-    if pending.phase != "waiting_approval" || pending.approval_state != "required" {
+    if pending.phase != run_phase_name(RuntimeRunPhase::WaitingApproval)
+        || pending.approval_state != APPROVAL_STATE_REQUIRED
+    {
         return Err(format!(
-            "resume only supports pending goal-file approval runs; found phase={} approval_state={}",
+            "{RESUME_PENDING_APPROVAL_ONLY}; found phase={} approval_state={}",
+            pending.phase, pending.approval_state
+        ));
+    }
+    Ok(pending)
+}
+
+fn pending_abort_for_target<'a>(
+    runtime: &'a CliRuntime,
+    target: &str,
+) -> Result<&'a PendingRunSnapshot, String> {
+    let pending = pending_run_for_target(runtime, target).map_err(|_| {
+        format!("{ABORT_PENDING_CONTROL_ONLY}; no pending control run is available")
+    })?;
+    if pending.phase != run_phase_name(RuntimeRunPhase::WaitingApproval)
+        || pending.approval_state != APPROVAL_STATE_REQUIRED
+    {
+        return Err(format!(
+            "{ABORT_PENDING_CONTROL_ONLY}; found phase={} approval_state={}",
             pending.phase, pending.approval_state
         ));
     }
@@ -599,7 +620,7 @@ fn pending_run_snapshot(
         goal_file_path: intent.path.clone(),
         phase: run_phase_name(record.phase).to_owned(),
         reason: record.reason.clone(),
-        approval_state: String::from("required"),
+        approval_state: String::from(APPROVAL_STATE_REQUIRED),
         verifier_state: record.verification.status.to_owned(),
     })
 }
@@ -660,27 +681,40 @@ fn print_status(runtime: &CliRuntime, target: Option<&str>) {
             .and_then(|event| event.run),
     };
     let snapshot = StatusSnapshot::from(StatusInput {
+        runtime: {
+            let latest_artifact = latest_run.as_ref().and_then(|run| {
+                runtime
+                    .trace_store
+                    .artifact_index_for_run(&run.run_id)
+                    .ok()
+                    .flatten()
+            });
+            RuntimeStatusInput {
+                provider_id: compose.provider_id,
+                provider_model: compose.provider_model,
+                provider_state: compose.provider.state.to_string(),
+                provider_detail: compose.provider.detail,
+                memory_enabled: compose.memory.enabled,
+                memory_state: compose.memory.state.to_string(),
+                tool_enabled: compose.tool.enabled,
+                tool_state: compose.tool.state.to_string(),
+                latest_run,
+                latest_artifact,
+                pending_run: runtime.pending_run.clone(),
+            }
+        },
         state: StateStatusInput {
             revision: runtime.state.revision,
             mode: runtime.state.mode,
             last_intent_id: runtime.state.last_intent_id.clone(),
-            last_decision: runtime.state.last_decision.map(|value| value.as_str().to_owned()),
+            last_decision: runtime
+                .state
+                .last_decision
+                .map(|value| value.as_str().to_owned()),
             last_policy_code: runtime
                 .state
                 .last_policy_code
                 .map(|value| value.as_str().to_owned()),
-        },
-        runtime: RuntimeStatusInput {
-            provider_id: compose.provider_id,
-            provider_model: compose.provider_model,
-            provider_state: compose.provider.state.to_string(),
-            provider_detail: compose.provider.detail,
-            memory_enabled: compose.memory.enabled,
-            memory_state: compose.memory.state.to_string(),
-            tool_enabled: compose.tool.enabled,
-            tool_state: compose.tool.state.to_string(),
-            latest_run,
-            pending_run: runtime.pending_run.clone(),
         },
     });
 
@@ -793,6 +827,10 @@ mod tests {
 
         assert_eq!(record.phase, RuntimeRunPhase::Blocked);
         assert_eq!(record.outcome, RuntimeRunOutcome::BudgetExhausted);
-        assert!(record.reason.starts_with("budget_exhausted_elapsed_minutes:"));
+        assert!(
+            record
+                .reason
+                .starts_with("budget_exhausted_elapsed_minutes:")
+        );
     }
 }

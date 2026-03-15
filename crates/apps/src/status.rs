@@ -1,5 +1,5 @@
 use crate::state_store::PendingRunSnapshot;
-use crate::trace_store::TraceRunSummary;
+use crate::trace_store::{TraceArtifactEntry, TraceRunSummary};
 use axiomrunner_core::ExecutionMode;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -22,6 +22,7 @@ pub struct RuntimeStatusInput {
     pub tool_enabled: bool,
     pub tool_state: String,
     pub latest_run: Option<TraceRunSummary>,
+    pub latest_artifact: Option<TraceArtifactEntry>,
     pub pending_run: Option<PendingRunSnapshot>,
 }
 
@@ -57,6 +58,7 @@ pub struct RuntimeSnapshot {
     pub tool_enabled: bool,
     pub tool_state: String,
     pub latest_run: Option<TraceRunSummary>,
+    pub latest_artifact: Option<TraceArtifactEntry>,
     pub pending_run: Option<PendingRunSnapshot>,
 }
 
@@ -80,6 +82,7 @@ impl From<StatusInput> for StatusSnapshot {
                 tool_enabled: input.runtime.tool_enabled,
                 tool_state: input.runtime.tool_state,
                 latest_run: input.runtime.latest_run,
+                latest_artifact: input.runtime.latest_artifact,
                 pending_run: input.runtime.pending_run,
             },
         }

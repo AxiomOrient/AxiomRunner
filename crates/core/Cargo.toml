@@ -2,6 +2,7 @@
 name = "axiomrunner_core"
 version.workspace = true
 edition.workspace = true
+description = "AxiomRunner core contracts"
 
 [lints]
 workspace = true

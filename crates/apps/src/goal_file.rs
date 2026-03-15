@@ -1,7 +1,7 @@
+use axiomrunner_adapters::WorkflowPackContract;
 use axiomrunner_core::{
     DoneCondition, RunApprovalMode, RunBudget, RunConstraint, RunGoal, VerificationCheck,
 };
-use axiomrunner_adapters::WorkflowPackContract;
 use serde::Deserialize;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -45,7 +45,9 @@ struct BudgetInput {
     max_tokens: u64,
 }
 
-pub fn parse_goal_file_template(path: &str) -> Result<crate::cli_command::GoalFileTemplate, String> {
+pub fn parse_goal_file_template(
+    path: &str,
+) -> Result<crate::cli_command::GoalFileTemplate, String> {
     let raw = fs::read_to_string(path)
         .map_err(|error| format!("read goal file '{path}' failed: {error}"))?;
     let input: GoalFileInput = serde_json::from_str(&raw)
@@ -112,7 +114,10 @@ pub fn parse_goal_file_template(path: &str) -> Result<crate::cli_command::GoalFi
     })
 }
 
-fn load_workflow_pack(goal_file_path: &str, pack_path: &str) -> Result<WorkflowPackContract, String> {
+fn load_workflow_pack(
+    goal_file_path: &str,
+    pack_path: &str,
+) -> Result<WorkflowPackContract, String> {
     let resolved = resolve_pack_path(goal_file_path, pack_path);
     let raw = fs::read_to_string(&resolved).map_err(|error| {
         format!(
@@ -212,7 +217,10 @@ mod tests {
         let parsed = parse_goal_file_template(goal_path.to_str().expect("utf8 path"))
             .expect("goal file should parse");
         assert_eq!(
-            parsed.workflow_pack.as_ref().map(|pack| pack.pack_id.as_str()),
+            parsed
+                .workflow_pack
+                .as_ref()
+                .map(|pack| pack.pack_id.as_str()),
             Some("rust-service-basic")
         );
 

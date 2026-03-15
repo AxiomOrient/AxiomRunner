@@ -50,6 +50,9 @@ fn nightly_dogfood_script_writes_log_bundle_for_one_fixture() {
     assert!(summary.contains("failed_intents=0"));
     assert!(summary.contains("false_success_intents=0"));
     assert!(summary.contains("false_done_intents=0"));
+    assert!(summary.contains("weak_verifications=0"));
+    assert!(summary.contains("unresolved_verifications=0"));
+    assert!(summary.contains("pack_required_verifications=0"));
     assert!(summary.contains("failures=0"));
 
     assert!(run_root.join("logs/rust_service.run.stdout.log").exists());

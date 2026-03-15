@@ -272,7 +272,9 @@ fn classify_goal_verifier_strength(
         if matching.peek().is_none() {
             continue;
         }
-        let labels = matching.map(|entry| entry.label.as_str()).collect::<Vec<_>>();
+        let labels = matching
+            .map(|entry| entry.label.as_str())
+            .collect::<Vec<_>>();
         return Some((status, format!("{status}:{}", labels.join(","))));
     }
     None
@@ -429,7 +431,7 @@ fn finalize_goal_run(
             RuntimeRunOutcome::BudgetExhausted,
             reason,
         )
-    } else if goal_requires_pre_execution_approval(&goal_file.goal) && !approval_granted {
+    } else if goal_requires_pre_execution_approval(goal_file) && !approval_granted {
         (
             RuntimeRunPhase::WaitingApproval,
             RuntimeRunOutcome::ApprovalRequired,
@@ -483,11 +485,11 @@ fn blocked_policy_outcome(applied: &AppliedIntent) -> (RuntimeRunPhase, RuntimeR
     )
 }
 
-fn goal_requires_pre_execution_approval(goal: &axiomrunner_core::RunGoal) -> bool {
+fn goal_requires_pre_execution_approval(goal_file: &crate::cli_command::GoalFileTemplate) -> bool {
     matches!(
-        goal.approval_mode,
+        goal_file.goal.approval_mode,
         axiomrunner_core::RunApprovalMode::Always | axiomrunner_core::RunApprovalMode::OnRisk
-    )
+    ) || crate::runtime_compose::constraint_requires_pre_execution_approval(goal_file)
 }
 
 fn goal_budget_guard_reason(
@@ -515,7 +517,7 @@ pub(super) fn goal_pre_execution_guard(
     if let Some(reason) = goal_budget_guard_reason(goal_file, plan_ref, requested_max_tokens) {
         return Some(reason);
     }
-    if goal_requires_pre_execution_approval(&goal_file.goal) {
+    if goal_requires_pre_execution_approval(goal_file) {
         return Some(String::from("approval_required_before_execution"));
     }
     None

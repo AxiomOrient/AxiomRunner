@@ -2,6 +2,7 @@
 name = "axiomrunner_adapters"
 version.workspace = true
 edition.workspace = true
+description = "AxiomRunner provider, tool, and memory adapters"
 
 [lib]
 name = "axiomrunner_adapters"

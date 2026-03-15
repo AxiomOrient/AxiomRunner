@@ -1,8 +1,8 @@
 use crate::display::{mode_name, outcome_name};
 use crate::runtime_compose::{
-    RuntimeComposeExecution, RuntimeComposePatchArtifact, RuntimeRunCheckpointMetadata,
-    RuntimeRunRecord, RuntimeRunRollbackMetadata, RuntimeRunStepRecord, run_outcome_name,
-    run_phase_name,
+    APPROVAL_STATE_NOT_REQUIRED, APPROVAL_STATE_REQUIRED, RuntimeComposeExecution,
+    RuntimeComposePatchArtifact, RuntimeRunCheckpointMetadata, RuntimeRunRecord,
+    RuntimeRunRollbackMetadata, RuntimeRunStepRecord, run_outcome_name, run_phase_name,
 };
 use axiomrunner_core::{AgentState, DecisionOutcome};
 use serde::{Deserialize, Serialize};
@@ -535,8 +535,8 @@ fn verification_summary(
 
 fn trace_approval_state(run: &RuntimeRunRecord) -> &'static str {
     match run.outcome {
-        crate::runtime_compose::RuntimeRunOutcome::ApprovalRequired => "required",
-        _ => "not_required",
+        crate::runtime_compose::RuntimeRunOutcome::ApprovalRequired => APPROVAL_STATE_REQUIRED,
+        _ => APPROVAL_STATE_NOT_REQUIRED,
     }
 }
 

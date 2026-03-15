@@ -1,9 +1,10 @@
-use crate::state_store::PendingRunSnapshot;
 use crate::async_runtime_host::global_async_runtime_host_status;
 use crate::config_loader::AppConfig;
 use crate::display::mode_name;
 use crate::runtime_compose::{RuntimeComposeConfig, RuntimeComposeHealth};
+use crate::state_store::PendingRunSnapshot;
 use crate::trace_store::TraceStore;
+use crate::workspace_lock::lock_path;
 use axiomrunner_adapters::provider_registry;
 use axiomrunner_core::AgentState;
 use serde::Serialize;
@@ -42,6 +43,12 @@ pub struct DoctorRuntime {
     pub tool_state: String,
     pub tool_detail: String,
     pub async_host_detail: String,
+    pub lock_state: String,
+    pub lock_path: String,
+    pub worktree_isolation: bool,
+    pub command_allowlist: String,
+    pub constraint_enforcement: String,
+    pub latest_pack: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -80,6 +87,16 @@ pub fn build_doctor_report(
 ) -> DoctorReport {
     let compose_config = RuntimeComposeConfig::from_app_config(config);
     let async_host = global_async_runtime_host_status();
+    let latest_pack = trace_store
+        .latest_event()
+        .ok()
+        .flatten()
+        .and_then(|event| {
+            event
+                .run
+                .map(|run| extract_plan_summary_value(&run.plan_summary, "workflow_pack"))
+        })
+        .unwrap_or_else(|| String::from("none"));
     let workspace = compose_config.tool_workspace.unwrap_or_else(|| {
         std::env::current_dir().unwrap_or_else(|_| Path::new(".").to_path_buf())
     });
@@ -114,7 +131,9 @@ pub fn build_doctor_report(
             last_intent_id: state.last_intent_id.clone(),
             last_actor_id: state.last_actor_id.clone(),
             last_decision: state.last_decision.map(|value| value.as_str().to_owned()),
-            last_policy_code: state.last_policy_code.map(|value| value.as_str().to_owned()),
+            last_policy_code: state
+                .last_policy_code
+                .map(|value| value.as_str().to_owned()),
         },
         runtime: DoctorRuntime {
             provider_state: compose.provider.state.to_owned(),
@@ -124,6 +143,18 @@ pub fn build_doctor_report(
             tool_state: compose.tool.state.to_owned(),
             tool_detail: compose.tool.detail.clone(),
             async_host_detail: format_async_host_detail(&async_host),
+            lock_state: workspace_lock_state(&workspace),
+            lock_path: lock_path(&workspace).display().to_string(),
+            worktree_isolation: compose_config.git_worktree_isolation,
+            command_allowlist: compose_config
+                .command_allowlist
+                .clone()
+                .map(|values| values.join(","))
+                .unwrap_or_else(|| String::from("default")),
+            constraint_enforcement: String::from(
+                "path_scope,destructive_commands,external_commands,approval_escalation",
+            ),
+            latest_pack,
         },
         paths: DoctorPaths {
             workspace: workspace_display,
@@ -252,6 +283,27 @@ fn provider_check(compose: &RuntimeComposeHealth) -> DoctorCheck {
         state: state.to_owned(),
         detail: compose.provider.detail.clone(),
     }
+}
+
+fn workspace_lock_state(workspace: &Path) -> String {
+    let path = lock_path(workspace);
+    if !path.exists() {
+        return String::from("unlocked");
+    }
+    match std::fs::read_to_string(&path) {
+        Ok(raw) if raw.trim().is_empty() => String::from("locked_unknown_holder"),
+        Ok(raw) => format!("locked:{}", raw.trim()),
+        Err(error) => format!("locked_unreadable:{error}"),
+    }
+}
+
+fn extract_plan_summary_value(summary: &str, key: &str) -> String {
+    let prefix = format!("{key}=");
+    summary
+        .split_whitespace()
+        .find_map(|segment| segment.strip_prefix(&prefix))
+        .unwrap_or("none")
+        .to_owned()
 }
 
 #[cfg(test)]

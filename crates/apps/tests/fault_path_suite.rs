@@ -48,7 +48,7 @@ fn fake_cli_script(label: &str, stdout: &str) -> PathBuf {
 #[test]
 fn fault_path_suite_covers_provider_tool_and_workspace_substrates() {
     let mut passed = 0usize;
-    let total = 4usize;
+    let total = 6usize;
 
     {
         let workspace = unique_path("provider-blocked-workspace", "dir");
@@ -166,6 +166,69 @@ fn fault_path_suite_covers_provider_tool_and_workspace_substrates() {
         assert!(stdout_of(&run).contains("phase=completed outcome=success"));
         passed += 1;
         let _ = fs::remove_dir_all(workspace);
+    }
+
+    {
+        let workspace = unique_path("state-persist-workspace", "dir");
+        let state_parent_blocker = unique_path("state-parent-blocker", "file");
+        fs::create_dir_all(&workspace).expect("workspace should exist");
+        fs::write(&state_parent_blocker, "block").expect("state parent blocker should exist");
+        let state_path = state_parent_blocker.join("state.snapshot");
+
+        let run = run_cli_with_env(
+            &[
+                "run",
+                fixture_goal_path("intake.json")
+                    .to_str()
+                    .expect("utf8 path"),
+            ],
+            &[
+                ("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace)),
+                ("AXIOMRUNNER_RUNTIME_STATE_PATH", path_str(&state_path)),
+            ],
+        );
+
+        assert_eq!(run.status.code(), Some(6), "stderr:\n{}", stderr_of(&run));
+        assert!(stderr_of(&run).contains("runtime execution error:"));
+        assert!(stderr_of(&run).contains("runtime state persistence failed"));
+        passed += 1;
+
+        let _ = fs::remove_dir_all(workspace);
+        let _ = fs::remove_file(state_parent_blocker);
+    }
+
+    {
+        let workspace = unique_path("trace-persist-workspace", "dir");
+        let artifact_workspace = unique_path("trace-persist-artifacts", "dir");
+        fs::create_dir_all(workspace.join(".axiomrunner")).expect("workspace should exist");
+        fs::create_dir_all(artifact_workspace.join(".axiomrunner"))
+            .expect("artifact axiomrunner dir should exist");
+        fs::write(artifact_workspace.join(".axiomrunner/trace"), "block")
+            .expect("trace blocker should exist");
+
+        let run = run_cli_with_env(
+            &[
+                "run",
+                fixture_goal_path("intake.json")
+                    .to_str()
+                    .expect("utf8 path"),
+            ],
+            &[
+                ("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace)),
+                (
+                    "AXIOMRUNNER_RUNTIME_ARTIFACT_WORKSPACE",
+                    path_str(&artifact_workspace),
+                ),
+            ],
+        );
+
+        assert_eq!(run.status.code(), Some(6), "stderr:\n{}", stderr_of(&run));
+        assert!(stderr_of(&run).contains("runtime execution error:"));
+        assert!(stderr_of(&run).contains("runtime trace error:"));
+        passed += 1;
+
+        let _ = fs::remove_dir_all(workspace);
+        let _ = fs::remove_dir_all(artifact_workspace);
     }
 
     assert_eq!(

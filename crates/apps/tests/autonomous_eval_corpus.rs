@@ -104,7 +104,7 @@ fn copy_dir_all(from: &Path, to: &Path) -> std::io::Result<()> {
 #[test]
 fn autonomous_eval_corpus_representative_runs_remain_green() {
     let mut passed = 0usize;
-    let total = 10usize;
+    let total = 12usize;
 
     {
         let workspace = unique_path("eval-intake-workspace", "dir");
@@ -296,7 +296,10 @@ fn autonomous_eval_corpus_representative_runs_remain_green() {
                     workspace.to_str().expect("utf8 path"),
                 ),
                 ("AXIOMRUNNER_RUNTIME_PROVIDER", "codek"),
-                ("AXIOMRUNNER_CODEX_BIN", missing_bin.to_str().expect("utf8 path")),
+                (
+                    "AXIOMRUNNER_CODEX_BIN",
+                    missing_bin.to_str().expect("utf8 path"),
+                ),
             ],
         );
         assert!(doctor.status.success(), "stderr:\n{}", stderr_of(&doctor));
@@ -305,6 +308,94 @@ fn autonomous_eval_corpus_representative_runs_remain_green() {
         assert_eq!(doctor_json["runtime"]["provider_state"], "blocked");
         passed += 1;
         let _ = fs::remove_dir_all(workspace);
+    }
+
+    {
+        let workspace = unique_path("eval-weak-verifier-workspace", "dir");
+        let goal_file = unique_path("eval-weak-verifier-goal", "json");
+        fs::write(
+            &goal_file,
+            r#"{
+  "summary": "Surface weak default verifier honestly",
+  "workspace_root": "/workspace",
+  "constraints": [],
+  "done_conditions": [
+    { "label": "report", "evidence": "report artifact exists" }
+  ],
+  "verification_checks": [
+    { "label": "workspace consistency", "detail": "workspace consistency review" }
+  ],
+  "budget": { "max_steps": 5, "max_minutes": 10, "max_tokens": 8000 },
+  "approval_mode": "never"
+}"#,
+        )
+        .expect("weak verifier goal should exist");
+        let run = run_cli_with_env(
+            &["run", goal_file.to_str().expect("utf8 path")],
+            &[(
+                "AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE",
+                workspace.to_str().expect("utf8 path"),
+            )],
+        );
+        let replay = run_cli_with_env(
+            &["replay", "run-1"],
+            &[(
+                "AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE",
+                workspace.to_str().expect("utf8 path"),
+            )],
+        );
+        assert!(run.status.success(), "stderr:\n{}", stderr_of(&run));
+        assert!(replay.status.success(), "stderr:\n{}", stderr_of(&replay));
+        assert!(stdout_of(&run).contains("phase=blocked outcome=blocked"));
+        assert!(stdout_of(&run).contains("reason=verification_weak:workspace consistency"));
+        assert!(stdout_of(&replay).contains("replay verification status=verification_weak"));
+        passed += 1;
+        let _ = fs::remove_dir_all(workspace);
+        let _ = fs::remove_file(goal_file);
+    }
+
+    {
+        let workspace = unique_path("eval-pack-required-workspace", "dir");
+        let goal_file = unique_path("eval-pack-required-goal", "json");
+        fs::write(
+            &goal_file,
+            r#"{
+  "summary": "Surface pack required verifier honestly",
+  "workspace_root": "/workspace",
+  "constraints": [],
+  "done_conditions": [
+    { "label": "report", "evidence": "report artifact exists" }
+  ],
+  "verification_checks": [
+    { "label": "domain verification", "detail": "representative domain path" }
+  ],
+  "budget": { "max_steps": 5, "max_minutes": 10, "max_tokens": 8000 },
+  "approval_mode": "never"
+}"#,
+        )
+        .expect("pack required goal should exist");
+        let run = run_cli_with_env(
+            &["run", goal_file.to_str().expect("utf8 path")],
+            &[(
+                "AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE",
+                workspace.to_str().expect("utf8 path"),
+            )],
+        );
+        let replay = run_cli_with_env(
+            &["replay", "run-1"],
+            &[(
+                "AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE",
+                workspace.to_str().expect("utf8 path"),
+            )],
+        );
+        assert!(run.status.success(), "stderr:\n{}", stderr_of(&run));
+        assert!(replay.status.success(), "stderr:\n{}", stderr_of(&replay));
+        assert!(stdout_of(&run).contains("phase=blocked outcome=blocked"));
+        assert!(stdout_of(&run).contains("reason=pack_required:domain verification"));
+        assert!(stdout_of(&replay).contains("replay verification status=pack_required"));
+        passed += 1;
+        let _ = fs::remove_dir_all(workspace);
+        let _ = fs::remove_file(goal_file);
     }
 
     assert_representative_goal_run("rust_service.json", "build>test>lint", 2, 3);

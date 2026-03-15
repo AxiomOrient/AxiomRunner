@@ -10,6 +10,11 @@ resolver = "3"
 version = "0.0.1"
 edition = "2024"
 
+[workspace.metadata.axiomrunner_identity]
+product_name = "AxiomRunner"
+binary_name = "axiomrunner_apps"
+env_prefix = "AXIOMRUNNER"
+
 [workspace.lints.rust]
 unsafe_code = "forbid"
 

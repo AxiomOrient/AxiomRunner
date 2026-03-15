@@ -10,6 +10,15 @@ pub const ENV_RUNTIME_STATE_PATH: &str = "AXIOMRUNNER_RUNTIME_STATE_PATH";
 
 const FORMAT_VERSION: &str = "axiomrunner-state-v2";
 const NONE_SENTINEL: &str = "-";
+const PENDING_RUN_REQUIRED_FIELDS: [&str; 7] = [
+    "run_id",
+    "intent_id",
+    "goal_file_path",
+    "phase",
+    "reason",
+    "approval_state",
+    "verifier_state",
+];
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct RuntimeStateSnapshot {
@@ -159,11 +168,19 @@ fn serialize_snapshot(snapshot: &RuntimeStateSnapshot) -> String {
         ),
         format!(
             "last_decision={}",
-            snapshot.state.last_decision.map(|d| d.as_str()).unwrap_or(NONE_SENTINEL)
+            snapshot
+                .state
+                .last_decision
+                .map(|d| d.as_str())
+                .unwrap_or(NONE_SENTINEL)
         ),
         format!(
             "last_policy_code={}",
-            snapshot.state.last_policy_code.map(|c| c.as_str()).unwrap_or(NONE_SENTINEL)
+            snapshot
+                .state
+                .last_policy_code
+                .map(|c| c.as_str())
+                .unwrap_or(NONE_SENTINEL)
         ),
     ];
 
@@ -254,7 +271,7 @@ fn parse_snapshot(raw: &str) -> Result<RuntimeStateSnapshot, String> {
             "version" => {
                 if value != FORMAT_VERSION {
                     return Err(format!(
-                        "unsupported state snapshot version '{value}' on line {}",
+                        "unsupported state snapshot version '{value}' on line {}; no legacy migration path is supported",
                         index + 1
                     ));
                 }
@@ -289,24 +306,33 @@ fn parse_snapshot(raw: &str) -> Result<RuntimeStateSnapshot, String> {
     }
 
     if saw_pending_run {
-        for (field, empty) in [
-            ("run_id", pending_run.run_id.is_empty()),
-            ("intent_id", pending_run.intent_id.is_empty()),
-            ("goal_file_path", pending_run.goal_file_path.is_empty()),
-            ("phase", pending_run.phase.is_empty()),
-            ("reason", pending_run.reason.is_empty()),
-            ("approval_state", pending_run.approval_state.is_empty()),
-            ("verifier_state", pending_run.verifier_state.is_empty()),
-        ] {
-            if empty {
-                return Err(format!(
-                    "pending run snapshot missing required field '{field}' on load"
-                ));
-            }
+        if let Some(field) = missing_pending_run_field(&pending_run) {
+            return Err(format!(
+                "pending run snapshot missing required field '{field}' on load"
+            ));
         }
         snapshot.pending_run = Some(pending_run);
     }
     Ok(snapshot)
+}
+
+fn missing_pending_run_field(pending_run: &PendingRunSnapshot) -> Option<&'static str> {
+    for field in PENDING_RUN_REQUIRED_FIELDS {
+        let missing = match field {
+            "run_id" => pending_run.run_id.is_empty(),
+            "intent_id" => pending_run.intent_id.is_empty(),
+            "goal_file_path" => pending_run.goal_file_path.is_empty(),
+            "phase" => pending_run.phase.is_empty(),
+            "reason" => pending_run.reason.is_empty(),
+            "approval_state" => pending_run.approval_state.is_empty(),
+            "verifier_state" => pending_run.verifier_state.is_empty(),
+            _ => false,
+        };
+        if missing {
+            return Some(field);
+        }
+    }
+    None
 }
 
 fn parse_u64(raw: &str, field: &str, line: usize) -> Result<u64, String> {
@@ -384,7 +410,9 @@ fn hex_decode(hex: &str) -> Option<Vec<u8>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{PendingRunSnapshot, RuntimeStateSnapshot, StateStore, parse_snapshot, serialize_snapshot};
+    use super::{
+        PendingRunSnapshot, RuntimeStateSnapshot, StateStore, parse_snapshot, serialize_snapshot,
+    };
     use axiomrunner_core::{AgentState, DecisionOutcome, ExecutionMode, PolicyCode};
     use std::fs;
     use std::path::PathBuf;
@@ -420,6 +448,50 @@ mod tests {
         assert!(encoded.contains("mode=active"));
     }
 
+    #[test]
+    fn state_snapshot_rejects_pending_run_missing_required_field() {
+        let raw = "\
+version=axiomrunner-state-v2
+next_intent_seq=1
+next_run_seq=1
+revision=1
+mode=active
+last_intent_id=-
+last_actor_id=-
+last_decision=-
+last_policy_code=-
+pending_run.run_id=72756e2d31
+pending_run.intent_id=636c692d31
+pending_run.goal_file_path=2f746d702f676f616c2e6a736f6e
+pending_run.phase=77616974696e675f617070726f76616c
+pending_run.approval_state=7265717569726564
+pending_run.verifier_state=736b6970706564
+";
+
+        let error =
+            parse_snapshot(raw).expect_err("missing required pending run field should fail");
+        assert!(error.contains("pending run snapshot missing required field 'reason' on load"));
+    }
+
+    #[test]
+    fn state_snapshot_rejects_legacy_version_without_migration() {
+        let raw = "\
+version=axiomrunner-state-v1
+next_intent_seq=1
+next_run_seq=1
+revision=1
+mode=active
+last_intent_id=-
+last_actor_id=-
+last_decision=-
+last_policy_code=-
+";
+
+        let error = parse_snapshot(raw).expect_err("legacy version should fail");
+        assert!(error.contains("unsupported state snapshot version 'axiomrunner-state-v1'"));
+        assert!(error.contains("no legacy migration path is supported"));
+    }
+
     fn unique_snapshot_path(label: &str) -> PathBuf {
         let tick = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -442,7 +514,8 @@ mod tests {
             pending_run: None,
         };
 
-        fs::write(store.temp_path(), serialize_snapshot(&snapshot)).expect("tmp snapshot should exist");
+        fs::write(store.temp_path(), serialize_snapshot(&snapshot))
+            .expect("tmp snapshot should exist");
 
         let loaded = store.load_snapshot().expect("tmp snapshot should load");
         assert_eq!(loaded, snapshot);
@@ -463,7 +536,8 @@ mod tests {
         };
 
         fs::write(&path, "not-a-valid-snapshot").expect("corrupt primary should exist");
-        fs::write(store.temp_path(), serialize_snapshot(&snapshot)).expect("tmp snapshot should exist");
+        fs::write(store.temp_path(), serialize_snapshot(&snapshot))
+            .expect("tmp snapshot should exist");
 
         let loaded = store.load_snapshot().expect("tmp snapshot should load");
         assert_eq!(loaded, snapshot);

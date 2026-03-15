@@ -18,7 +18,10 @@ pub use provider_registry::{
     DEFAULT_PROVIDER_ID, ProviderRegistryEntry, build_contract_provider, provider_registry,
     resolve_provider_id,
 };
-pub use tool::{ToolRiskTier, WorkspaceTool, classify_tool_request_risk};
+pub use tool::{
+    RunCommandClass, ToolRiskTier, WorkspaceTool, classify_run_command_class,
+    classify_tool_request_risk,
+};
 
 #[cfg(test)]
 pub(crate) mod test_util {

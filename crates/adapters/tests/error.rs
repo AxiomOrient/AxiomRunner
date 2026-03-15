@@ -26,10 +26,8 @@ fn adapter_error_classification_is_explicit_and_data_first() {
 
 #[test]
 fn adapter_error_policy_violation_maps_to_policy_denied_retry_class() {
-    let error = AdapterError::policy_violation(
-        PolicyCode::PayloadTooLarge,
-        "payload exceeds limit",
-    );
+    let error =
+        AdapterError::policy_violation(PolicyCode::PayloadTooLarge, "payload exceeds limit");
 
     assert_eq!(error.kind(), AdapterErrorKind::PolicyViolation);
     assert_eq!(error.retry_class(), RetryClass::PolicyDenied);

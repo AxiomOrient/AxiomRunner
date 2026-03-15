@@ -486,7 +486,9 @@ fn plan_step(
 
 #[cfg(test)]
 mod tests {
-    use super::{ToolPlan, build_runtime_compose_plan, build_runtime_run_plan, goal_verifier_tool_plan};
+    use super::{
+        ToolPlan, build_runtime_compose_plan, build_runtime_run_plan, goal_verifier_tool_plan,
+    };
     use crate::cli_command::GoalFileTemplate;
     use axiomrunner_adapters::{RunCommandProfile, WorkflowPackVerifierStrength};
     use axiomrunner_core::DecisionOutcome;
@@ -514,10 +516,7 @@ mod tests {
             workflow_pack: None,
         };
 
-        let plan = build_runtime_compose_plan(
-            &template,
-            DecisionOutcome::Accepted,
-        );
+        let plan = build_runtime_compose_plan(&template, DecisionOutcome::Accepted);
 
         let pack = plan.workflow_pack.expect("workflow pack should exist");
         assert_eq!(pack.pack_id, "goal-default-v1");
@@ -561,10 +560,7 @@ mod tests {
             workflow_pack: None,
         };
 
-        let plan = build_runtime_compose_plan(
-            &template,
-            DecisionOutcome::Accepted,
-        );
+        let plan = build_runtime_compose_plan(&template, DecisionOutcome::Accepted);
 
         let Some(ToolPlan::RunCommands { commands }) = goal_verifier_tool_plan(&plan) else {
             panic!("expected verifier command tool plan");
@@ -606,10 +602,7 @@ mod tests {
             workflow_pack: None,
         };
 
-        let plan = build_runtime_compose_plan(
-            &template,
-            DecisionOutcome::Accepted,
-        );
+        let plan = build_runtime_compose_plan(&template, DecisionOutcome::Accepted);
 
         let pack = plan.workflow_pack.expect("workflow pack should exist");
         assert_eq!(pack.verifier_rules[0].command_example, "ls .");
@@ -622,6 +615,85 @@ mod tests {
                 .artifact_expectation
                 .contains("pack_required fallback probe")
         );
+        assert_ne!(pack.verifier_rules[0].command_example, "pwd");
+    }
+
+    #[test]
+    fn planner_marks_generic_non_command_default_goal_verifier_as_weak_without_pwd_probe() {
+        let goal = axiomrunner_core::RunGoal {
+            summary: String::from("Need generic weak verification"),
+            workspace_root: String::from("/workspace"),
+            constraints: Vec::new(),
+            done_conditions: vec![axiomrunner_core::DoneCondition {
+                label: String::from("report"),
+                evidence: String::from("report artifact exists"),
+            }],
+            verification_checks: vec![axiomrunner_core::VerificationCheck {
+                label: String::from("workspace consistency"),
+                detail: String::from("workspace consistency review"),
+            }],
+            budget: axiomrunner_core::RunBudget::bounded(5, 10, 8000),
+            approval_mode: axiomrunner_core::RunApprovalMode::Never,
+        };
+        let template = GoalFileTemplate {
+            path: String::from("GOAL.json"),
+            goal,
+            workflow_pack: None,
+        };
+
+        let plan = build_runtime_compose_plan(&template, DecisionOutcome::Accepted);
+
+        let pack = plan.workflow_pack.expect("workflow pack should exist");
+        assert_eq!(pack.verifier_rules[0].command_example, "ls .");
+        assert_eq!(
+            pack.verifier_rules[0].strength,
+            WorkflowPackVerifierStrength::Weak
+        );
+        assert!(
+            pack.verifier_rules[0]
+                .artifact_expectation
+                .contains("verification_weak fallback probe")
+        );
+        assert_ne!(pack.verifier_rules[0].command_example, "pwd");
+    }
+
+    #[test]
+    fn planner_marks_empty_default_goal_verifier_as_unresolved_without_pwd_probe() {
+        let goal = axiomrunner_core::RunGoal {
+            summary: String::from("Need unresolved verification visibility"),
+            workspace_root: String::from("/workspace"),
+            constraints: Vec::new(),
+            done_conditions: vec![axiomrunner_core::DoneCondition {
+                label: String::from("report"),
+                evidence: String::from("report artifact exists"),
+            }],
+            verification_checks: vec![axiomrunner_core::VerificationCheck {
+                label: String::from("workspace verification"),
+                detail: String::new(),
+            }],
+            budget: axiomrunner_core::RunBudget::bounded(5, 10, 8000),
+            approval_mode: axiomrunner_core::RunApprovalMode::Never,
+        };
+        let template = GoalFileTemplate {
+            path: String::from("GOAL.json"),
+            goal,
+            workflow_pack: None,
+        };
+
+        let plan = build_runtime_compose_plan(&template, DecisionOutcome::Accepted);
+
+        let pack = plan.workflow_pack.expect("workflow pack should exist");
+        assert_eq!(pack.verifier_rules[0].command_example, "ls .");
+        assert_eq!(
+            pack.verifier_rules[0].strength,
+            WorkflowPackVerifierStrength::Unresolved
+        );
+        assert!(
+            pack.verifier_rules[0]
+                .artifact_expectation
+                .contains("verification_unresolved fallback probe")
+        );
+        assert_ne!(pack.verifier_rules[0].command_example, "pwd");
     }
 
     #[test]

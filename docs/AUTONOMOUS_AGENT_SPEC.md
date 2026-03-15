@@ -18,6 +18,31 @@ A goal-oriented run must answer all of the following:
 - verification plan: which commands, file checks, or assertions prove completion
 - artifact expectations: which trace, report, patch, and summary outputs must exist
 
+## Constraint Labels
+
+The current goal schema accepts free-form `constraints[]`, but only the subset
+below is eligible for enforcement:
+
+- `path_scope` — allowed workspace-relative roots
+- detail format: comma-separated relative paths. `workspace` or `.` means whole workspace.
+- `destructive_commands` — whether destructive command class is denied
+- detail format: `deny`
+- `external_commands` — whether non-local command class is denied
+- detail format: `deny`
+- `approval_escalation` — whether risky work must stop for approval
+- detail format: `required`
+
+Current runtime behavior:
+
+- `approval_mode=always` and `approval_mode=on-risk` still require pre-execution approval
+- `approval_escalation=required` adds the same pre-execution approval requirement when the
+  planned verifier command is classified as high-risk
+
+Any other constraint label remains advisory-only and must be shown as such.
+
+This document defines the subset first. Actual policy wiring follows in the
+runtime/policy layer.
+
 ## Canonical Core Mapping
 
 The current core contract already has a stable goal shape:
@@ -44,6 +69,22 @@ Done conditions must be externally checkable and should use one or more of:
 - changed-path summaries
 - replayable patch evidence
 - operator-readable report summaries
+
+## Verification / Done Relation
+
+`success` is allowed only when both are true:
+
+- verification status is `passed`
+- every declared `done condition` is verified with evidence
+
+The runtime must not lower this bar for default goal runs.
+
+- `verification_weak` => `blocked`
+- `verification_unresolved` => `blocked`
+- `pack_required` => `blocked`
+
+In other words, unresolved verification may be visible, but it must not be
+reported as completed success.
 
 ## Budget Schema
 

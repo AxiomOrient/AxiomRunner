@@ -5,11 +5,12 @@ use crate::display::outcome_name;
 use crate::env_util::read_env_trimmed;
 use axiomrunner_adapters::{
     FileMutationEvidence, FileWriteOutput, MemoryAdapter, MemoryTier, ProviderAdapter,
-    ProviderRequest, RunCommandOutput, ToolAdapter, ToolPolicy, ToolRequest, ToolResult,
-    WorkspaceTool, build_contract_memory, build_contract_provider, provider_registry,
-    resolve_provider_id, tiered_memory_key,
+    ProviderRequest, RunCommandClass, RunCommandOutput, ToolAdapter, ToolPolicy, ToolRequest,
+    ToolResult, ToolRiskTier, WorkspaceTool, build_contract_memory, build_contract_provider,
+    classify_run_command_class, classify_tool_request_risk, provider_registry, resolve_provider_id,
+    tiered_memory_key,
 };
-use axiomrunner_core::DecisionOutcome;
+use axiomrunner_core::{DecisionOutcome, PolicyCode, RunConstraintPolicyKey};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -52,6 +53,10 @@ const REPO_DOC_FILENAMES: [(&str, &str); 4] = [
     ("STATUS", "STATUS.md"),
     ("AGENTS", "AGENTS.md"),
 ];
+
+pub const APPROVAL_STATE_REQUIRED: &str = "required";
+pub const APPROVAL_STATE_NOT_REQUIRED: &str = "not_required";
+pub const RUN_REASON_OPERATOR_ABORT: &str = "operator_abort";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeComposeConfig {
@@ -198,6 +203,12 @@ pub struct ReportWriteInput<'a> {
     pub outcome: DecisionOutcome,
     pub policy_code: &'a str,
     pub effect_count: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConstraintPolicyViolation {
+    pub code: PolicyCode,
+    pub reason: String,
 }
 
 impl RuntimeComposeExecution {
@@ -490,6 +501,13 @@ impl RuntimeComposeState {
         outcome: DecisionOutcome,
     ) -> RuntimeComposeExecution {
         self.apply_plan(build_runtime_compose_plan(template, outcome))
+    }
+
+    pub fn constraint_policy_violation(
+        &self,
+        template: &RunTemplate,
+    ) -> Option<ConstraintPolicyViolation> {
+        constraint_policy_violation(template)
     }
 
     pub fn plan_template(
@@ -866,10 +884,31 @@ fn render_verifier_evidence(command: &ToolCommandPlan, output: &RunCommandOutput
         "command": render_tool_command_line(&command.program, &command.args),
         "artifact_path": output.artifact_path.display().to_string(),
         "expectation": command.expectation,
+        "stdout_summary": compact_verifier_output(&output.stdout),
+        "stderr_summary": compact_verifier_output(&output.stderr),
         "stdout_truncated": output.stdout_truncated,
         "stderr_truncated": output.stderr_truncated,
     })
     .to_string()
+}
+
+fn compact_verifier_output(output: &str) -> String {
+    let normalized = output
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join("\\n");
+    if normalized.is_empty() {
+        return String::from("none");
+    }
+    const MAX_CHARS: usize = 160;
+    if normalized.chars().count() <= MAX_CHARS {
+        return normalized;
+    }
+    let mut compact = normalized.chars().take(MAX_CHARS).collect::<String>();
+    compact.push_str("...");
+    compact
 }
 
 fn render_tool_command_line(program: &str, args: &[String]) -> String {
@@ -909,6 +948,146 @@ fn build_tool_adapter(
         },
     )
     .map_err(|error| format!("tool adapter init failed: {error}"))
+}
+
+fn constraint_policy_violation(template: &RunTemplate) -> Option<ConstraintPolicyViolation> {
+    let plan = build_runtime_compose_plan(template, DecisionOutcome::Accepted);
+    let Some(ToolPlan::RunCommands { commands }) = goal_verifier_tool_plan(&plan) else {
+        return None;
+    };
+
+    for constraint in &template.goal.constraints {
+        let Some(policy_key) = constraint.policy_key() else {
+            continue;
+        };
+        match policy_key {
+            RunConstraintPolicyKey::PathScope => {
+                let allowed = parse_path_scope_constraint(&constraint.detail);
+                for command in &commands {
+                    if !path_scope_allows_command(command, &allowed) {
+                        return Some(ConstraintPolicyViolation {
+                            code: PolicyCode::ConstraintPathScope,
+                            reason: format!(
+                                "path_scope blocks verifier `{}` outside {}",
+                                command.label,
+                                allowed.join(",")
+                            ),
+                        });
+                    }
+                }
+            }
+            RunConstraintPolicyKey::DestructiveCommandClass => {
+                if constraint.detail.trim().eq_ignore_ascii_case("deny") {
+                    for command in &commands {
+                        if classify_run_command_class(&command.program)
+                            == RunCommandClass::Destructive
+                        {
+                            return Some(ConstraintPolicyViolation {
+                                code: PolicyCode::ConstraintDestructiveCommands,
+                                reason: format!(
+                                    "destructive_commands blocks verifier `{}` program `{}`",
+                                    command.label, command.program
+                                ),
+                            });
+                        }
+                    }
+                }
+            }
+            RunConstraintPolicyKey::ExternalCommandClass => {
+                if constraint.detail.trim().eq_ignore_ascii_case("deny") {
+                    for command in &commands {
+                        if classify_run_command_class(&command.program) == RunCommandClass::External
+                        {
+                            return Some(ConstraintPolicyViolation {
+                                code: PolicyCode::ConstraintExternalCommands,
+                                reason: format!(
+                                    "external_commands blocks verifier `{}` program `{}`",
+                                    command.label, command.program
+                                ),
+                            });
+                        }
+                    }
+                }
+            }
+            RunConstraintPolicyKey::ApprovalEscalation => {}
+        }
+    }
+
+    None
+}
+
+pub fn constraint_requires_pre_execution_approval(template: &RunTemplate) -> bool {
+    let plan = build_runtime_compose_plan(template, DecisionOutcome::Accepted);
+    let Some(ToolPlan::RunCommands { commands }) = goal_verifier_tool_plan(&plan) else {
+        return false;
+    };
+    let escalation_required = template.goal.constraints.iter().any(|constraint| {
+        matches!(
+            constraint.policy_key(),
+            Some(RunConstraintPolicyKey::ApprovalEscalation)
+        ) && constraint.detail.trim().eq_ignore_ascii_case("required")
+    });
+    escalation_required
+        && commands.iter().any(|command| {
+            classify_tool_request_risk(&ToolRequest::RunCommand {
+                program: command.program.clone(),
+                args: command.args.clone(),
+            }) == ToolRiskTier::High
+        })
+}
+
+fn parse_path_scope_constraint(detail: &str) -> Vec<String> {
+    let values = detail
+        .split(',')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| {
+            if value == "workspace" {
+                String::from(".")
+            } else {
+                value.trim_matches('/').to_owned()
+            }
+        })
+        .collect::<Vec<_>>();
+    if values.is_empty() {
+        vec![String::from(".")]
+    } else {
+        values
+    }
+}
+
+fn path_scope_allows_command(command: &ToolCommandPlan, allowed: &[String]) -> bool {
+    command_scope_candidates(command)
+        .into_iter()
+        .all(|candidate| {
+            allowed.iter().any(|prefix| {
+                prefix == "."
+                    || candidate == "."
+                    || candidate == *prefix
+                    || candidate.starts_with(&format!("{prefix}/"))
+            })
+        })
+}
+
+fn command_scope_candidates(command: &ToolCommandPlan) -> Vec<String> {
+    let explicit = match command.program.as_str() {
+        "ls" | "cat" | "rg" => command
+            .args
+            .iter()
+            .filter(|arg| !arg.starts_with('-'))
+            .map(|arg| arg.trim_matches('/').to_owned())
+            .collect::<Vec<_>>(),
+        _ if command.program.starts_with("./") || command.program.starts_with("../") => {
+            vec![command.program.trim_matches('/').to_owned()]
+        }
+        _ => Vec::new(),
+    };
+
+    if explicit.is_empty() {
+        vec![String::from(".")]
+    } else {
+        explicit
+    }
 }
 
 fn discover_git_toplevel(workspace: &Path) -> Result<Option<PathBuf>, String> {
@@ -1280,7 +1459,7 @@ pub fn run_reason_code(reason: &str) -> String {
         || reason == "approval_required_before_execution"
         || reason == "budget_exhausted_before_execution"
         || reason.starts_with("budget_exhausted_elapsed_minutes:")
-        || reason == "operator_abort"
+        || reason == RUN_REASON_OPERATOR_ABORT
         || reason == "provider_health_blocked"
         || reason == "goal_execution_missing_verifier_output"
     {
@@ -1308,6 +1487,17 @@ pub fn run_reason_code(reason: &str) -> String {
         return code.to_owned();
     }
     reason.to_owned()
+}
+
+/// Returns the verifier strength label for a given `verification.status` value.
+///
+/// In this runtime `verification.status` encodes both execution outcome and verifier quality
+/// in a single vocabulary ("passed", "verification_weak", "pack_required", …).  The report
+/// artifact and the operator output therefore carry the same value under the `verifier_strength`
+/// key.  This function makes that derivation explicit at every call site so that future
+/// divergence (e.g. mapping "passed" → "strong") can be applied in one place.
+pub fn verifier_strength_label(verification_status: &str) -> &str {
+    verification_status
 }
 
 pub fn run_reason_detail(reason: &str) -> String {
@@ -1357,7 +1547,9 @@ mod tests {
     use crate::cli_command::GoalFileTemplate;
     use crate::config_loader::AppConfig;
     use axiomrunner_adapters::{ToolAdapter, ToolRequest};
-    use axiomrunner_core::{DecisionOutcome, DoneCondition, RunApprovalMode, RunBudget, RunGoal, VerificationCheck};
+    use axiomrunner_core::{
+        DecisionOutcome, DoneCondition, RunApprovalMode, RunBudget, RunGoal, VerificationCheck,
+    };
     use std::fs;
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -1534,10 +1726,7 @@ mod tests {
         })
         .expect("runtime compose state should init");
 
-        let execution = state.apply_template(
-            &sample_goal_template(),
-            DecisionOutcome::Accepted,
-        );
+        let execution = state.apply_template(&sample_goal_template(), DecisionOutcome::Accepted);
 
         assert_eq!(
             execution.provider_cwd,

@@ -3,6 +3,7 @@ set -eu
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
 REPO_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
+# Official nightly entrypoint identity: axiomrunner_apps + AXIOMRUNNER_*.
 BIN_PATH=${AXIOMRUNNER_NIGHTLY_BIN:-"$REPO_ROOT/target/debug/axiomrunner_apps"}
 LOG_ROOT=${AXIOMRUNNER_NIGHTLY_LOG_ROOT:-"$REPO_ROOT/var/nightly_dogfood"}
 FIXTURES=${AXIOMRUNNER_NIGHTLY_FIXTURES:-"intake.json,approval.json,on_risk.json,budget_exhausted.json,rust_service.json,node_api.json,nextjs_app.json,python_fastapi.json"}
@@ -85,6 +86,9 @@ for fixture in "$@"; do
   failed_intents=unknown
   false_success_intents=unknown
   false_done_intents=unknown
+  weak_verifications=0
+  unresolved_verifications=0
+  pack_required_verifications=0
   if [ -f "$replay_stdout" ]; then
     replay_summary=$(grep '^replay summary ' "$replay_stdout" | tail -n 1 || true)
     if [ -n "$replay_summary" ]; then
@@ -95,16 +99,22 @@ for fixture in "$@"; do
       [ -n "$false_success_intents" ] || false_success_intents=unknown
       [ -n "$false_done_intents" ] || false_done_intents=unknown
     fi
+    weak_verifications=$(grep -c 'replay verification status=verification_weak' "$replay_stdout" || true)
+    unresolved_verifications=$(grep -c 'replay verification status=verification_unresolved' "$replay_stdout" || true)
+    pack_required_verifications=$(grep -c 'replay verification status=pack_required' "$replay_stdout" || true)
   fi
 
   status=ok
   if [ "$run_rc" -ne 0 ] || [ "$replay_rc" -ne 0 ] || [ "$doctor_rc" -ne 0 ]; then
     status=failed
     FAILURES=$((FAILURES + 1))
+  elif [ "$false_success_intents" != "0" ] || [ "$false_done_intents" != "0" ]; then
+    status=failed
+    FAILURES=$((FAILURES + 1))
   fi
 
-  printf '%s fixture=%s run_rc=%s replay_rc=%s doctor_rc=%s failed_intents=%s false_success_intents=%s false_done_intents=%s\n' \
-    "$status" "$fixture" "$run_rc" "$replay_rc" "$doctor_rc" "$failed_intents" "$false_success_intents" "$false_done_intents" >>"$SUMMARY_PATH"
+  printf '%s fixture=%s run_rc=%s replay_rc=%s doctor_rc=%s failed_intents=%s false_success_intents=%s false_done_intents=%s weak_verifications=%s unresolved_verifications=%s pack_required_verifications=%s\n' \
+    "$status" "$fixture" "$run_rc" "$replay_rc" "$doctor_rc" "$failed_intents" "$false_success_intents" "$false_done_intents" "$weak_verifications" "$unresolved_verifications" "$pack_required_verifications" >>"$SUMMARY_PATH"
 done
 
 printf 'failures=%s\n' "$FAILURES" >>"$SUMMARY_PATH"

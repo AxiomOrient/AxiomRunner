@@ -2,6 +2,12 @@ use crate::goal_file::parse_goal_file_template;
 use axiomrunner_core::RunGoal;
 use std::path::Path;
 
+pub const RETAINED_COMMANDS: &[&str; 8] = &[
+    "run", "status", "replay", "resume", "abort", "doctor", "health", "help",
+];
+
+pub const RETAINED_SURFACE: &str = "run/status/replay/resume/abort/doctor/health/help";
+
 pub const USAGE: &str = "\
 usage:
   axiomrunner_apps [global-options] <command> [command-args]
@@ -29,21 +35,11 @@ commands:
 #[derive(Debug, Clone, PartialEq)]
 pub enum CliCommand {
     Run(RunTemplate),
-    Replay {
-        target: String,
-    },
-    Resume {
-        target: String,
-    },
-    Abort {
-        target: String,
-    },
-    Doctor {
-        json: bool,
-    },
-    Status {
-        target: Option<String>,
-    },
+    Replay { target: String },
+    Resume { target: String },
+    Abort { target: String },
+    Doctor { json: bool },
+    Status { target: Option<String> },
     Health,
     Help,
 }

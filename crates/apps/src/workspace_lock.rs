@@ -131,7 +131,10 @@ mod tests {
     #[test]
     fn stale_holder_is_detected_from_dead_pid() {
         assert!(lock_holder_is_stale("pid=999999 command=run"));
-        assert!(!lock_holder_is_stale(&format!("pid={} command=run", std::process::id())));
+        assert!(!lock_holder_is_stale(&format!(
+            "pid={} command=run",
+            std::process::id()
+        )));
     }
 
     #[test]

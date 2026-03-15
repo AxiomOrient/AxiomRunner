@@ -14,6 +14,9 @@
 
 현재 shipped truth의 시작점은 `run <goal-file>` 중심 CLI다.
 
+`plans/`는 실행/검토용 작업 산출물이다. 현재 shipped truth는 `docs/`와 루트
+`README.md`가 소유한다.
+
 ## docs 안에서 꼭 필요한 파일
 
 - `docs/project-charter.md` — 제품 정의
@@ -32,6 +35,16 @@
 - `docs/AUTONOMOUS_AGENT_SPEC.md` — goal contract 세부 규칙
 
 이 문서들은 보조 문서다. 기본 흐름을 이해한 뒤에 보면 된다.
+
+## 작업 문서와 제품 문서의 경계
+
+- `docs/` — 현재 제품 계약과 운영 방법
+- `plans/` — review bundle, 실행 계획, 작업 ledger 같은 delivery artifact
+
+둘이 다르면 제품 truth는 `docs/`와 루트 `README.md`가 우선이다.
+
+workflow pack 현재 계약 본문은 `docs/WORKFLOW_PACK_CONTRACT.md` 한 곳만 쓴다.
+transition mirror는 두지 않는다.
 
 ## 지금 상태 판단
 
