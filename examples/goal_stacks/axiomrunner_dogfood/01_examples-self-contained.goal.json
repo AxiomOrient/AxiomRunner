@@ -1,0 +1,37 @@
+{
+  "summary": "Make representative examples self-contained workspaces",
+  "workspace_root": ".",
+  "constraints": [
+    {
+      "label": "path_scope",
+      "detail": "examples,README.md,docs"
+    },
+    {
+      "label": "external_commands",
+      "detail": "deny"
+    }
+  ],
+  "done_conditions": [
+    {
+      "label": "acceptance-1",
+      "evidence": "representative examples contain the minimum files needed by their verifier commands"
+    },
+    {
+      "label": "acceptance-2",
+      "evidence": "example documentation matches the real workspace contents"
+    }
+  ],
+  "verification_checks": [
+    {
+      "label": "examples dogfood",
+      "detail": "cargo test -p axiomrunner_apps --test nightly_dogfood_contract"
+    }
+  ],
+  "budget": {
+    "max_steps": 8,
+    "max_minutes": 15,
+    "max_tokens": 12000
+  },
+  "approval_mode": "never",
+  "workflow_pack": "examples/rust_service/pack.json"
+}

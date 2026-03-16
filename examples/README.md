@@ -14,6 +14,9 @@
 - `pack.json`
 - 최소 verifier workspace 파일
 
+goal을 직접 쪼개서 만들 때는 `examples/goal_stacks/` 와
+`docs/GOAL_STACK_PLAYBOOK.md` 를 같이 본다.
+
 실행 예:
 
 ```bash

@@ -1,0 +1,83 @@
+{
+  "epic": "AxiomRunner dogfood hardening",
+  "workspace_root": ".",
+  "preset": "rust-service",
+  "constraints": [
+    {
+      "label": "external_commands",
+      "detail": "deny"
+    }
+  ],
+  "independence_rules": [
+    "each slice must have a bounded path scope",
+    "each slice must be proven by one verifier bundle",
+    "each slice must be reviewable without reading the whole repo"
+  ],
+  "slices": [
+    {
+      "id": "examples-self-contained",
+      "summary": "Make representative examples self-contained workspaces",
+      "why": "dogfood should fail on product logic, not because example fixtures are missing",
+      "paths": [
+        "examples",
+        "README.md",
+        "docs"
+      ],
+      "acceptance": [
+        "representative examples contain the minimum files needed by their verifier commands",
+        "example documentation matches the real workspace contents"
+      ],
+      "verification_checks": [
+        {
+          "label": "examples dogfood",
+          "detail": "cargo test -p axiomrunner_apps --test nightly_dogfood_contract"
+        }
+      ]
+    },
+    {
+      "id": "spaced-global-options",
+      "summary": "Accept spaced global config options",
+      "why": "the docs already show spaced examples and first-run parsing friction is avoidable",
+      "paths": [
+        "crates/apps/src",
+        "crates/apps/tests",
+        "README.md",
+        "docs"
+      ],
+      "acceptance": [
+        "spaced and equals forms both work for global config options",
+        "CLI coverage catches the supported spellings"
+      ],
+      "verification_checks": [
+        {
+          "label": "config parser",
+          "detail": "cargo test -p axiomrunner_apps --test config_priority"
+        },
+        {
+          "label": "cli e2e",
+          "detail": "cargo test -p axiomrunner_apps --test e2e_cli"
+        }
+      ]
+    },
+    {
+      "id": "goal-stack-playbook",
+      "summary": "Add a brief-to-goal workflow for atomic goal authoring",
+      "why": "operators should edit a smaller brief instead of hand-writing raw goal json",
+      "paths": [
+        "docs",
+        "examples",
+        "scripts"
+      ],
+      "acceptance": [
+        "the repo contains a documented workflow for turning slices into goal files",
+        "the workflow includes a runnable example and generated outputs"
+      ],
+      "verification_checks": [
+        {
+          "label": "python syntax",
+          "detail": "python3 -m py_compile scripts/generate_goal_stack.py"
+        }
+      ]
+    }
+  ]
+}

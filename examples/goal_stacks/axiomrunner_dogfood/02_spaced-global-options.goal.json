@@ -1,0 +1,41 @@
+{
+  "summary": "Accept spaced global config options",
+  "workspace_root": ".",
+  "constraints": [
+    {
+      "label": "path_scope",
+      "detail": "crates/apps/src,crates/apps/tests,README.md,docs"
+    },
+    {
+      "label": "external_commands",
+      "detail": "deny"
+    }
+  ],
+  "done_conditions": [
+    {
+      "label": "acceptance-1",
+      "evidence": "spaced and equals forms both work for global config options"
+    },
+    {
+      "label": "acceptance-2",
+      "evidence": "CLI coverage catches the supported spellings"
+    }
+  ],
+  "verification_checks": [
+    {
+      "label": "config parser",
+      "detail": "cargo test -p axiomrunner_apps --test config_priority"
+    },
+    {
+      "label": "cli e2e",
+      "detail": "cargo test -p axiomrunner_apps --test e2e_cli"
+    }
+  ],
+  "budget": {
+    "max_steps": 8,
+    "max_minutes": 15,
+    "max_tokens": 12000
+  },
+  "approval_mode": "never",
+  "workflow_pack": "examples/rust_service/pack.json"
+}

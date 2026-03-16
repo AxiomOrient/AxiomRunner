@@ -61,6 +61,15 @@ pub fn parse_startup_args(args: Vec<String>) -> Result<StartupArgs, String> {
             continue;
         }
 
+        if let Some(flag) = spaced_config_option(&arg) {
+            let value = iter
+                .next()
+                .ok_or_else(|| format!("{flag} requires a value"))?;
+            let value = parse_non_empty(&value, flag)?;
+            config_args.push(format!("{flag}={value}"));
+            continue;
+        }
+
         if is_config_option(&arg) {
             config_args.push(arg);
             continue;
@@ -88,4 +97,16 @@ pub fn parse_startup_args(args: Vec<String>) -> Result<StartupArgs, String> {
 
 fn is_config_option(arg: &str) -> bool {
     config_loader::parse_cli_config_option(arg).is_some()
+}
+
+fn spaced_config_option(arg: &str) -> Option<&'static str> {
+    match arg {
+        "--profile" => Some("--profile"),
+        "--provider" => Some("--provider"),
+        "--provider-model" => Some("--provider-model"),
+        "--workspace" => Some("--workspace"),
+        "--state-path" => Some("--state-path"),
+        "--command-allowlist" => Some("--command-allowlist"),
+        _ => None,
+    }
 }

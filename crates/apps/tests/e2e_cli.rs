@@ -37,6 +37,7 @@ const SANITIZED_ENV_KEYS: &[&str] = &[
     "AXIOMRUNNER_RUNTIME_PROVIDER",
     "AXIOMRUNNER_RUNTIME_PROVIDER_MODEL",
     "AXIOMRUNNER_RUNTIME_MAX_TOKENS",
+    "AXIOMRUNNER_RUNTIME_COMMAND_TIMEOUT_MS",
     "AXIOMRUNNER_RUNTIME_MEMORY_PATH",
     "AXIOMRUNNER_RUNTIME_STATE_PATH",
     "AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE",
@@ -170,6 +171,23 @@ fn init_git_repo(path: &Path) {
     fs::write(path.join("README.md"), "fixture\n").expect("fixture file should exist");
     run_checked_command("git", &["add", "README.md"], path);
     run_checked_command("git", &["commit", "-m", "init"], path);
+}
+
+#[test]
+fn e2e_cli_accepts_spaced_global_workspace_option() {
+    let workspace = unique_path("spaced-workspace", "dir");
+    fs::create_dir_all(&workspace).expect("workspace should exist");
+
+    let output = run_cli_without_runtime_defaults(
+        &["--workspace", path_str(&workspace), "doctor", "--json"],
+        &[],
+        "spaced-workspace",
+    );
+
+    assert!(output.status.success(), "stderr:\n{}", stderr_of(&output));
+    assert!(stdout_of(&output).contains(path_str(&workspace)));
+
+    let _ = fs::remove_dir_all(workspace);
 }
 
 #[test]

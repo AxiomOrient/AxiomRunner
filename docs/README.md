@@ -12,9 +12,10 @@ bridge 문서는 현재 truth를 보조하지만, 이를 덮어쓰지 않는다.
 4. `docs/CAPABILITY_MATRIX.md` — 지원 범위, constraint 강제 여부, release blocker
 5. `docs/WORKFLOW_PACK_CONTRACT.md` — goal 스키마, pack 계약, verification/done 규칙
 6. `docs/PROJECT_STRUCTURE.md` — 크레이트 구조, 주요 파일, 실행 흐름, codek 계약
-7. `docs/AUTONOMOUS_AGENT_TARGET.md` — bridge target
-8. `docs/AUTONOMOUS_AGENT_SPEC.md` — bridge spec
-9. `docs/VERSIONING.md` — versioning / changelog / release gate 규칙
+7. `docs/GOAL_STACK_PLAYBOOK.md` — brief -> atomic goals 생성 방식
+8. `docs/AUTONOMOUS_AGENT_TARGET.md` — bridge target
+9. `docs/AUTONOMOUS_AGENT_SPEC.md` — bridge spec
+10. `docs/VERSIONING.md` — versioning / changelog / release gate 규칙
 
 ## 규칙
 

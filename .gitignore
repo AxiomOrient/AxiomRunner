@@ -11,6 +11,8 @@ target/
 # Editor / IDE
 .idea/
 .vscode/
+__pycache__/
+*.pyc
 
 # AI tool state
 .claude/
