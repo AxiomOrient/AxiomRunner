@@ -1,3 +1,5 @@
+mod common;
+use common::resolve_cli_bin;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -60,22 +62,6 @@ fn nightly_dogfood_script_writes_log_bundle_for_one_fixture() {
     assert!(run_root.join("logs/rust_service.doctor.json").exists());
 
     let _ = fs::remove_dir_all(log_root);
-}
-
-fn resolve_cli_bin() -> PathBuf {
-    let compiled = PathBuf::from(env!("CARGO_BIN_EXE_axiomrunner_apps"));
-    if compiled.is_file() {
-        return compiled;
-    }
-
-    let current = std::env::current_exe().expect("test executable path should exist");
-    current
-        .ancestors()
-        .find(|path| path.file_name().is_some_and(|name| name == "deps"))
-        .and_then(Path::parent)
-        .map(|dir| dir.join(format!("axiomrunner_apps{}", std::env::consts::EXE_SUFFIX)))
-        .filter(|path| path.is_file())
-        .unwrap_or(compiled)
 }
 
 fn resolve_nightly_script() -> PathBuf {

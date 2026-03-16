@@ -71,6 +71,7 @@ pub struct DoctorPendingRun {
     pub reason: String,
     pub approval_state: String,
     pub verifier_state: String,
+    pub advisory_constraints: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -187,6 +188,7 @@ pub fn build_doctor_report(
             reason: pending.reason.clone(),
             approval_state: pending.approval_state.clone(),
             verifier_state: pending.verifier_state.clone(),
+            advisory_constraints: pending.advisory_constraints.clone(),
         }),
         checks,
     }

@@ -35,14 +35,15 @@ const ENV_RUNTIME_PROVIDER: &str = "AXIOMRUNNER_RUNTIME_PROVIDER";
 const ENV_RUNTIME_PROVIDER_MODEL: &str = "AXIOMRUNNER_RUNTIME_PROVIDER_MODEL";
 const ENV_RUNTIME_MAX_TOKENS: &str = "AXIOMRUNNER_RUNTIME_MAX_TOKENS";
 const ENV_RUNTIME_COMMAND_ALLOWLIST: &str = "AXIOMRUNNER_RUNTIME_COMMAND_ALLOWLIST";
+const ENV_RUNTIME_COMMAND_TIMEOUT_MS: &str = "AXIOMRUNNER_RUNTIME_COMMAND_TIMEOUT_MS";
 
 const DEFAULT_TOOL_LOG_PATH: &str = "runtime.log";
 const DEFAULT_MAX_TOKENS: usize = 4096;
+const DEFAULT_TOOL_COMMAND_TIMEOUT_MS: u64 = 30_000;
 const TOOL_WRITE_LIMIT_BYTES: usize = 16 * 1024;
 const TOOL_READ_LIMIT_BYTES: usize = 64 * 1024;
 const TOOL_MAX_SEARCH_RESULTS: usize = 64;
 const TOOL_MAX_COMMAND_OUTPUT_BYTES: usize = 32 * 1024;
-const TOOL_COMMAND_TIMEOUT_MS: u64 = 5_000;
 const HOT_CONTEXT_MAX_CHARS: usize = 512;
 const HOT_CONTEXT_MAX_PATHS: usize = 4;
 const HOT_CONTEXT_MAX_OUTPUTS: usize = 3;
@@ -68,6 +69,7 @@ pub struct RuntimeComposeConfig {
     pub provider_id: String,
     pub provider_model: String,
     pub max_tokens: usize,
+    pub command_timeout_ms: u64,
     pub command_allowlist: Option<Vec<String>>,
 }
 
@@ -293,6 +295,10 @@ impl RuntimeComposeConfig {
             .and_then(|raw| raw.parse::<usize>().ok())
             .filter(|value| *value > 0)
             .unwrap_or(DEFAULT_MAX_TOKENS);
+        let command_timeout_ms = env_string(ENV_RUNTIME_COMMAND_TIMEOUT_MS)
+            .and_then(|raw| raw.parse::<u64>().ok())
+            .filter(|value| *value > 0)
+            .unwrap_or(DEFAULT_TOOL_COMMAND_TIMEOUT_MS);
         let command_allowlist = env_string(ENV_RUNTIME_COMMAND_ALLOWLIST)
             .and_then(|raw| parse_command_allowlist(&raw))
             .or_else(|| config.command_allowlist.clone());
@@ -305,6 +311,7 @@ impl RuntimeComposeConfig {
             provider_id,
             provider_model,
             max_tokens,
+            command_timeout_ms,
             command_allowlist,
         }
     }
@@ -433,22 +440,29 @@ impl RuntimeComposeState {
         ) {
             (Some(workspace), Some(artifact_workspace)) => {
                 let detail = if workspace == artifact_workspace {
-                    format!("workspace={}", workspace.display())
+                    format!(
+                        "workspace={},command_timeout_ms={}",
+                        workspace.display(),
+                        config.command_timeout_ms
+                    )
                 } else {
                     format!(
-                        "workspace={},artifact_workspace={}",
+                        "workspace={},artifact_workspace={},command_timeout_ms={}",
                         workspace.display(),
-                        artifact_workspace.display()
+                        artifact_workspace.display(),
+                        config.command_timeout_ms
                     )
                 };
                 match build_tool_adapter(
                     workspace,
                     artifact_workspace,
+                    config.command_timeout_ms,
                     config.command_allowlist.clone(),
                 ) {
                     Ok(tool) => match build_tool_adapter(
                         artifact_workspace,
                         artifact_workspace,
+                        config.command_timeout_ms,
                         config.command_allowlist.clone(),
                     ) {
                         Ok(artifact_tool) => (
@@ -839,6 +853,7 @@ impl RuntimeComposeState {
         let tool = build_tool_adapter(
             &workspace,
             &artifact_workspace,
+            self.config.command_timeout_ms,
             self.config.command_allowlist.clone(),
         )?;
         self.config.tool_workspace = Some(workspace);
@@ -924,6 +939,7 @@ fn render_tool_command_line(program: &str, args: &[String]) -> String {
 fn build_tool_adapter(
     workspace: &Path,
     artifact_workspace: &Path,
+    command_timeout_ms: u64,
     command_allowlist: Option<Vec<String>>,
 ) -> Result<WorkspaceTool, String> {
     fs::create_dir_all(workspace)
@@ -943,7 +959,7 @@ fn build_tool_adapter(
             max_file_read_bytes: TOOL_READ_LIMIT_BYTES,
             max_search_results: TOOL_MAX_SEARCH_RESULTS,
             max_command_output_bytes: TOOL_MAX_COMMAND_OUTPUT_BYTES,
-            command_timeout_ms: TOOL_COMMAND_TIMEOUT_MS,
+            command_timeout_ms,
             command_allowlist: command_allowlist.unwrap_or_else(default_command_allowlist),
         },
     )
@@ -1633,8 +1649,13 @@ mod tests {
         let workspace = unique_dir("allowlist");
         fs::create_dir_all(&workspace).expect("workspace should exist");
 
-        let tool = build_tool_adapter(&workspace, &workspace, Some(vec![String::from("pwd")]))
-            .expect("tool adapter should build");
+        let tool = build_tool_adapter(
+            &workspace,
+            &workspace,
+            DEFAULT_TOOL_COMMAND_TIMEOUT_MS,
+            Some(vec![String::from("pwd")]),
+        )
+        .expect("tool adapter should build");
         let pwd = tool.execute(ToolRequest::RunCommand {
             program: String::from("pwd"),
             args: Vec::new(),
@@ -1663,6 +1684,7 @@ mod tests {
             provider_id: String::from("mock-local"),
             provider_model: String::from("mock-local"),
             max_tokens: 256,
+            command_timeout_ms: DEFAULT_TOOL_COMMAND_TIMEOUT_MS,
             command_allowlist: None,
         })
         .expect("runtime compose state should init");
@@ -1705,6 +1727,7 @@ mod tests {
             provider_id: String::from("mock-local"),
             provider_model: String::from("mock-local"),
             max_tokens: 256,
+            command_timeout_ms: DEFAULT_TOOL_COMMAND_TIMEOUT_MS,
             command_allowlist: None,
         })
         .expect("runtime compose state should init");
@@ -1746,6 +1769,7 @@ mod tests {
             provider_id: String::from("mock-local"),
             provider_model: String::from("mock-local"),
             max_tokens: 256,
+            command_timeout_ms: DEFAULT_TOOL_COMMAND_TIMEOUT_MS,
             command_allowlist: None,
         })
         .expect("runtime compose state should init");

@@ -1,5 +1,5 @@
 {
-  "name": "example-node-api",
+  "name": "fixture-node-api",
   "version": "1.0.0",
   "scripts": {
     "build": "node -e \"process.exit(0)\"",

@@ -1,3 +1,5 @@
+mod common;
+use common::resolve_cli_bin;
 use std::fs;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
@@ -35,6 +37,7 @@ const SANITIZED_ENV_KEYS: &[&str] = &[
     "AXIOMRUNNER_RUNTIME_PROVIDER",
     "AXIOMRUNNER_RUNTIME_PROVIDER_MODEL",
     "AXIOMRUNNER_RUNTIME_MAX_TOKENS",
+    "AXIOMRUNNER_RUNTIME_COMMAND_TIMEOUT_MS",
     "AXIOMRUNNER_RUNTIME_MEMORY_PATH",
     "AXIOMRUNNER_RUNTIME_STATE_PATH",
     "AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE",
@@ -106,25 +109,6 @@ fn run_cli_internal(
     output
 }
 
-fn resolve_cli_bin() -> PathBuf {
-    let compiled = PathBuf::from(env!("CARGO_BIN_EXE_axiomrunner_apps"));
-    if compiled.is_file() {
-        return compiled;
-    }
-
-    fallback_cli_bin_from_current_exe().unwrap_or(compiled)
-}
-
-fn fallback_cli_bin_from_current_exe() -> Option<PathBuf> {
-    let current = std::env::current_exe().ok()?;
-    current
-        .ancestors()
-        .find(|path| path.file_name().is_some_and(|name| name == "deps"))
-        .and_then(Path::parent)
-        .map(|dir| dir.join(format!("axiomrunner_apps{}", std::env::consts::EXE_SUFFIX)))
-        .filter(|path| path.is_file())
-}
-
 fn stdout_of(output: &Output) -> String {
     String::from_utf8(output.stdout.clone()).expect("stdout should be UTF-8")
 }
@@ -187,6 +171,23 @@ fn init_git_repo(path: &Path) {
     fs::write(path.join("README.md"), "fixture\n").expect("fixture file should exist");
     run_checked_command("git", &["add", "README.md"], path);
     run_checked_command("git", &["commit", "-m", "init"], path);
+}
+
+#[test]
+fn e2e_cli_accepts_spaced_global_workspace_option() {
+    let workspace = unique_path("spaced-workspace", "dir");
+    fs::create_dir_all(&workspace).expect("workspace should exist");
+
+    let output = run_cli_without_runtime_defaults(
+        &["--workspace", path_str(&workspace), "doctor", "--json"],
+        &[],
+        "spaced-workspace",
+    );
+
+    assert!(output.status.success(), "stderr:\n{}", stderr_of(&output));
+    assert!(stdout_of(&output).contains(path_str(&workspace)));
+
+    let _ = fs::remove_dir_all(workspace);
 }
 
 #[test]
@@ -1887,6 +1888,7 @@ fn e2e_cli_status_and_replay_render_aborted_outcome_from_trace() {
         "run": {
             "run_id": "run-abort",
             "step_ids": ["run-abort/step-1-planning"],
+            "step_journal": [],
             "provider_cwd": "/tmp/aborted-workspace",
             "execution_workspace": "/tmp/aborted-workspace",
             "phase": "aborted",
@@ -1895,13 +1897,17 @@ fn e2e_cli_status_and_replay_render_aborted_outcome_from_trace() {
             "approval_state": "not_required",
             "verifier_state": "passed",
             "verifier_summary": "operator_abort",
+            "elapsed_ms": 0_u64,
             "plan_summary": "intent_id=cli-abort goal outcome=accepted",
             "planned_steps": 4,
             "repair": {
                 "attempted": false,
+                "attempts": 0_u64,
                 "status": "skipped",
                 "summary": "not_needed"
-            }
+            },
+            "checkpoint": serde_json::Value::Null,
+            "rollback": serde_json::Value::Null
         },
         "artifacts": {
             "plan": ".axiomrunner/artifacts/cli-abort.plan.md",
@@ -1973,6 +1979,7 @@ fn e2e_cli_replay_counts_false_done_runs() {
         "run": {
             "run_id": "run-false-done",
             "step_ids": ["run-false-done/step-1-planning"],
+            "step_journal": [],
             "provider_cwd": "/tmp/workspace",
             "execution_workspace": "/tmp/workspace",
             "phase": "failed",
@@ -1981,13 +1988,17 @@ fn e2e_cli_replay_counts_false_done_runs() {
             "approval_state": "not_required",
             "verifier_state": "failed",
             "verifier_summary": "done_condition_missing_report_artifact:report",
+            "elapsed_ms": 0_u64,
             "plan_summary": "intent_id=cli-false-done goal",
             "planned_steps": 4,
             "repair": {
                 "attempted": false,
+                "attempts": 0_u64,
                 "status": "skipped",
                 "summary": "verification_passed"
-            }
+            },
+            "checkpoint": serde_json::Value::Null,
+            "rollback": serde_json::Value::Null
         },
         "artifacts": {
             "plan": ".axiomrunner/artifacts/cli-false-done.plan.md",

@@ -156,6 +156,39 @@ fn startup_and_config_parsers_share_config_option_grammar() {
 }
 
 #[test]
+fn startup_parser_accepts_spaced_global_config_options() {
+    let startup = cli_args::parse_startup_args(vec![
+        String::from("--profile"),
+        String::from("dev"),
+        String::from("--provider"),
+        String::from("openai"),
+        String::from("--provider-model"),
+        String::from("gpt-5"),
+        String::from("--workspace"),
+        String::from("/tmp/work"),
+        String::from("--state-path"),
+        String::from("/tmp/state"),
+        String::from("--command-allowlist"),
+        String::from("git,cargo"),
+        String::from("status"),
+    ])
+    .expect("spaced config options should parse");
+
+    assert_eq!(
+        startup.config_args,
+        vec![
+            String::from("--profile=dev"),
+            String::from("--provider=openai"),
+            String::from("--provider-model=gpt-5"),
+            String::from("--workspace=/tmp/work"),
+            String::from("--state-path=/tmp/state"),
+            String::from("--command-allowlist=git,cargo"),
+        ]
+    );
+    assert_eq!(startup.command_tokens, vec![String::from("status")]);
+}
+
+#[test]
 fn startup_parser_preserves_actor_and_config_file_spellings() {
     let spaced = cli_args::parse_startup_args(vec![
         String::from("--actor"),
@@ -190,19 +223,19 @@ fn startup_parser_preserves_actor_and_config_file_spellings() {
 fn parser_conformance_rejects_invalid_option_spellings() {
     let startup_profile_err = cli_args::parse_startup_args(vec![
         String::from("--profile"),
-        String::from("dev"),
+        String::from(""),
         String::from("status"),
     ])
-    .expect_err("space-separated profile option should be rejected");
-    assert_eq!(startup_profile_err, "unknown option '--profile'");
+    .expect_err("empty spaced profile value should be rejected");
+    assert_eq!(startup_profile_err, "--profile must not be empty");
 
     let startup_provider_err = cli_args::parse_startup_args(vec![
         String::from("--provider"),
-        String::from("openai"),
+        String::from(" "),
         String::from("status"),
     ])
-    .expect_err("space-separated provider option should be rejected");
-    assert_eq!(startup_provider_err, "unknown option '--provider'");
+    .expect_err("blank spaced provider value should be rejected");
+    assert_eq!(startup_provider_err, "--provider must not be empty");
 
     let cli_profile_err = config_loader::parse_cli_config(&[String::from("--profile")])
         .expect_err("bare --profile should be rejected");

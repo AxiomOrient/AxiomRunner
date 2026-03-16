@@ -1,4 +1,5 @@
 use super::*;
+use axiomrunner_core::{RunConstraint, RunConstraintMode};
 
 pub(super) fn write_report(
     state: &RuntimeComposeState,
@@ -59,6 +60,7 @@ pub(super) fn write_report(
     );
     let risk_summary = report_risk_summary(run);
     let next_action = super::run_next_action(run);
+    let constraints = render_constraints(&template.goal.constraints);
     let files = [
         (
             format!("{base}.plan.md"),
@@ -121,7 +123,7 @@ pub(super) fn write_report(
         (
             format!("{base}.report.md"),
             format!(
-                "# Report\n\nintent_id={}\nkind={}\noutcome={}\npolicy={}\nsummary={}\nrisk={}\nnext_action={}\nrun_phase={}\nrun_outcome={}\nrun_reason={}\nrun_reason_code={}\nrun_reason_detail={}\nrun_elapsed_ms={}\nverifier_strength={}\nverifier_summary={}\nverifier_non_executed_reason={}\ncheckpoint={}\nrollback={}\nprovider_health_state={}\nprovider_health_detail={}\nprovider={}\nprovider_cwd={}\nmemory={}\ntool={}\noutputs={}\nverifier_evidence={}\nchanged_paths={}\nchanged_files={}\npatch_artifacts={}\nevidence={}\n",
+                "# Report\n\nintent_id={}\nkind={}\noutcome={}\npolicy={}\nsummary={}\nrisk={}\nnext_action={}\nconstraints={}\nrun_phase={}\nrun_outcome={}\nrun_reason={}\nrun_reason_code={}\nrun_reason_detail={}\nrun_elapsed_ms={}\nverifier_strength={}\nverifier_summary={}\nverifier_non_executed_reason={}\ncheckpoint={}\nrollback={}\nprovider_health_state={}\nprovider_health_detail={}\nprovider={}\nprovider_cwd={}\nmemory={}\ntool={}\noutputs={}\nverifier_evidence={}\nchanged_paths={}\nchanged_files={}\npatch_artifacts={}\nevidence={}\n",
                 input.intent_id,
                 template_kind(template),
                 outcome_name(input.outcome),
@@ -129,6 +131,7 @@ pub(super) fn write_report(
                 report_summary,
                 risk_summary,
                 next_action,
+                constraints,
                 run_phase_name(run.phase),
                 run_outcome_name(run.outcome),
                 run.reason,
@@ -380,6 +383,23 @@ fn report_risk_summary(run: &RuntimeRunRecord) -> &'static str {
         RuntimeRunOutcome::Failed => "failed",
         RuntimeRunOutcome::Aborted => "operator_aborted",
     }
+}
+
+fn render_constraints(constraints: &[RunConstraint]) -> String {
+    if constraints.is_empty() {
+        return String::from("none");
+    }
+    constraints
+        .iter()
+        .map(|c| {
+            let mode = match c.mode() {
+                RunConstraintMode::Advisory => "advisory",
+                RunConstraintMode::EnforcedSubset => "enforced",
+            };
+            format!("{}:{}", c.label, mode)
+        })
+        .collect::<Vec<_>>()
+        .join(" | ")
 }
 
 fn render_patch_evidence(artifacts: &[RuntimeComposePatchArtifact]) -> String {

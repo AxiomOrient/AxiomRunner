@@ -1,5 +1,5 @@
 {
-  "name": "example-nextjs-app",
+  "name": "fixture-nextjs-app",
   "version": "1.0.0",
   "scripts": {
     "build": "node -e \"process.exit(0)\"",

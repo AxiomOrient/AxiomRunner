@@ -9,6 +9,7 @@ const SANITIZED_ENV_KEYS: &[&str] = &[
     "AXIOMRUNNER_RUNTIME_PROVIDER",
     "AXIOMRUNNER_RUNTIME_PROVIDER_MODEL",
     "AXIOMRUNNER_RUNTIME_MAX_TOKENS",
+    "AXIOMRUNNER_RUNTIME_COMMAND_TIMEOUT_MS",
     "AXIOMRUNNER_RUNTIME_MEMORY_PATH",
     "AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE",
     "AXIOMRUNNER_RUNTIME_ARTIFACT_WORKSPACE",
@@ -33,7 +34,7 @@ fn isolated_cli_home(label: &str) -> std::path::PathBuf {
     path
 }
 
-fn resolve_cli_bin() -> PathBuf {
+pub fn resolve_cli_bin() -> PathBuf {
     let compiled = PathBuf::from(env!("CARGO_BIN_EXE_axiomrunner_apps"));
     if compiled.is_file() {
         return compiled;
@@ -42,7 +43,7 @@ fn resolve_cli_bin() -> PathBuf {
     fallback_cli_bin_from_current_exe().unwrap_or(compiled)
 }
 
-fn fallback_cli_bin_from_current_exe() -> Option<PathBuf> {
+pub fn fallback_cli_bin_from_current_exe() -> Option<PathBuf> {
     let current = std::env::current_exe().ok()?;
     current
         .ancestors()
