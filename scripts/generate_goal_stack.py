@@ -99,18 +99,19 @@ def resolve_preset(name: Optional[str]):
     return PRESETS[name]
 
 
+def _first_of(*candidates):
+    return next((c for c in candidates if c), None)
+
+
 def choose_budget(top_level_budget, preset_budget, slice_budget):
-    for candidate in (slice_budget, top_level_budget, preset_budget, DEFAULT_BUDGET):
-        if candidate:
-            return candidate
-    return DEFAULT_BUDGET
+    return _first_of(slice_budget, top_level_budget, preset_budget) or DEFAULT_BUDGET
 
 
 def choose_verifiers(top_level_verifiers, preset_verifiers, slice_verifiers):
-    for candidate in (slice_verifiers, top_level_verifiers, preset_verifiers):
-        if candidate:
-            return candidate
-    raise ValueError("each slice needs verification_checks or a preset with defaults")
+    result = _first_of(slice_verifiers, top_level_verifiers, preset_verifiers)
+    if not result:
+        raise ValueError("each slice needs verification_checks or a preset with defaults")
+    return result
 
 
 def render_stack_markdown(spec, generated):

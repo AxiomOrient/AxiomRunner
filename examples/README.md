@@ -14,6 +14,9 @@
 - `pack.json`
 - 최소 verifier workspace 파일
 
+이 예제들은 self-contained minimal workspace다.
+verifier command가 바로 실행될 수 있게 필요한 최소 파일을 함께 둔다.
+
 goal을 직접 쪼개서 만들 때는 `examples/goal_stacks/` 와
 `docs/GOAL_STACK_PLAYBOOK.md` 를 같이 본다.
 
@@ -21,6 +24,7 @@ goal을 직접 쪼개서 만들 때는 `examples/goal_stacks/` 와
 
 ```bash
 cargo run -q -p axiomrunner_apps -- \
+  --provider=codek \
   --workspace="$PWD/examples/rust_service" \
   run examples/rust_service/goal.json
 ```

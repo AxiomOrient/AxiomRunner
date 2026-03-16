@@ -11,7 +11,6 @@ crates/apps      — CLI entrypoint와 run orchestration
 docs/            — 현재 제품 계약과 운영 문서
 examples/        — representative verifier examples
 scripts/         — 반복 실행 보조
-plans/           — review/plan/task 같은 작업 산출물 (제품 truth 아님)
 ```
 
 ## crates/core
@@ -81,6 +80,13 @@ goal/run 입력 계약과 상태 primitive를 소유한다.
 7. `state_store.rs` + `trace_store.rs` + `workspace_lock.rs` → 상태/증거/lock 기록
 8. `status` / `replay` / `doctor` → 같은 증거를 다시 읽어 operator에게 표시
 
+### 현재 실행 성격
+
+- accepted goal run도 현재는 `workflow_pack + verifier tool path` 중심으로 조립된다.
+- `build_runtime_compose_plan()`은 현재 accepted run에 대해 `provider: None`, `tool: None`으로 시작하고,
+  verifier command 경로는 별도 default/packs 규칙에서 도출된다.
+- 즉 현재 제품은 general autonomous planning runtime보다 verifier-first goal runtime에 가깝다.
+
 ### 핵심 순수 함수
 
 `runtime_compose.rs`의 pure mapping functions:
@@ -114,7 +120,7 @@ goal/run 입력 계약과 상태 primitive를 소유한다.
 - `degraded`: binary는 보였지만 version parse 또는 shutdown path가 불완전
 - `blocked`: binary missing, version minimum 미달, handshake 실패
 
-## docs / examples / scripts / plans
+## docs / examples / scripts
 
 - `docs/` — 현재 제품 truth (이 디렉터리)
   - `project-charter.md` — 제품 정의, 아키텍처, retained surface, 원칙
@@ -126,10 +132,9 @@ goal/run 입력 계약과 상태 primitive를 소유한다.
   - `VERSIONING.md` — versioning / changelog / release gate 규칙
   - `PROJECT_STRUCTURE.md` — 이 파일
 - `examples/` — representative app/server verifier examples
-- `scripts/` — `nightly_dogfood.sh` 같은 반복 실행 보조
-- `plans/` — review bundle, implementation plan, task ledger (작업 산출물, 제품 truth 아님)
+- `scripts/` — `nightly_dogfood.sh`, `generate_goal_stack.py` 같은 반복 실행 보조
 
-중요: `docs/`와 루트 `README.md`가 shipped truth를 소유한다. `plans/`가 `docs/`와 다르면 `docs/`가 우선이다.
+중요: `docs/`와 루트 `README.md`가 shipped truth를 소유한다. 임시 메모나 작업 중 분석 문서보다 `docs/`가 우선이다.
 `AUTONOMOUS_AGENT_TARGET`와 `AUTONOMOUS_AGENT_SPEC`은 bridge 문서이며 current truth를 덮어쓰지 않는다.
 
 ## 구조를 읽는 순서

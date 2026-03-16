@@ -100,13 +100,9 @@ fn is_config_option(arg: &str) -> bool {
 }
 
 fn spaced_config_option(arg: &str) -> Option<&'static str> {
-    match arg {
-        "--profile" => Some("--profile"),
-        "--provider" => Some("--provider"),
-        "--provider-model" => Some("--provider-model"),
-        "--workspace" => Some("--workspace"),
-        "--state-path" => Some("--state-path"),
-        "--command-allowlist" => Some("--command-allowlist"),
-        _ => None,
+    if arg.contains('=') {
+        return None;
     }
+    let probe = format!("{arg}=");
+    config_loader::parse_cli_config_option(&probe).map(|(opt, _)| opt.flag_name())
 }

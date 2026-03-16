@@ -2,7 +2,7 @@
 
 ## 제품 정의
 
-**AxiomRunner는 goal file과 workflow pack을 받아, 로컬 workspace에서 개발 작업을 계획·실행·검증·복구·보고까지 끝내는 single-agent autonomous developer runtime이다.**
+**AxiomRunner는 goal file과 workflow pack을 받아, 로컬 workspace에서 verifier-first goal run을 실행하고 `status / replay / resume / abort / doctor`로 그 상태와 증거를 운영하는 single-agent CLI runtime이다.**
 
 공식 identity:
 
@@ -14,7 +14,7 @@
 
 ```
 Kernel (이 저장소)
-  goal schema / run lifecycle / status / replay / resume / abort / doctor
+  goal schema / run lifecycle / verifier-first execution / status / replay / resume / abort / doctor
   trace / report / evidence / budget / approval / terminal outcome
   workspace safety / failure propagation
 
@@ -27,6 +27,9 @@ Adapter  (crates/adapters)
 
 Kernel이 `goal`, `run`, `resume`, `abort`, `trace`, `report`, `done`의 의미를 소유한다.
 Pack과 adapter는 도메인별 실행 수단만 제공하며, 이 의미를 재정의할 수 없다.
+
+현재 기본 경로는 general autonomous planning runtime이 아니라 verifier-first runtime이다.
+pack은 planner hint를 담을 수 있지만, 현재 제품 의미를 잠그는 핵심은 verifier/evidence loop다.
 
 ## Retained CLI Surface
 
@@ -62,7 +65,7 @@ help
 
 ## Non-negotiable Principles
 
-- **single-agent first**: 복수 agent 없이 단일 agent가 workspace 안에서 완결한다.
+- **single-agent first**: 복수 agent 없이 단일 runtime이 workspace 경계 안에서 동작한다.
 - **workspace-bound execution**: provider cwd는 runtime tool workspace와 같은 경계에 묶인다.
 - **verify-before-done**: `success`는 verification이 `passed`이고 done condition이 모두 증거를 가질 때만 허용된다.
 - **hidden fallback 금지**: 실패는 숨기지 않고 operator-visible reason으로 올린다.

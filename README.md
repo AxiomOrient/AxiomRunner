@@ -109,6 +109,12 @@ representative verifier examples:
 - `examples/python_fastapi`
 - 실행 방법: [examples/README.md](examples/README.md)
 
+직접 goal을 잘게 쪼개서 만들 때의 권장 경로:
+
+- brief 작성: `examples/goal_stacks/axiomrunner_dogfood.brief.json`
+- 작성 가이드: [docs/GOAL_STACK_PLAYBOOK.md](docs/GOAL_STACK_PLAYBOOK.md)
+- goal 생성기: `python3 scripts/generate_goal_stack.py ...`
+
 developer automation milestone:
 
 - `v0.1`: honest autonomous runtime lock
@@ -118,11 +124,12 @@ developer automation milestone:
 
 정식 config surface:
 
-- `--profile=<name>` / `profile=...`
-- `--provider=<id>` / `provider=...`
-- `--provider-model=<name>` / `provider_model=...`
-- `--workspace=<path>` / `workspace=...`
-- `--state-path=<path>` / `state_path=...`
+- `--profile=<name>` 또는 `--profile <name>` / `profile=...`
+- `--provider=<id>` 또는 `--provider <id>` / `provider=...`
+- `--provider-model=<name>` 또는 `--provider-model <name>` / `provider_model=...`
+- `--workspace=<path>` 또는 `--workspace <path>` / `workspace=...`
+- `--state-path=<path>` 또는 `--state-path <path>` / `state_path=...`
+- `--command-allowlist=<cmds>` 또는 `--command-allowlist <cmds>` / `command_allowlist=...`
 
 `--config-file=<path>` 또는 `--config-file <path>` 로 설정 파일을 읽을 수 있다.
 
@@ -151,6 +158,7 @@ env-only runtime knobs:
 - minimum supported Codex CLI: `0.104.0`
 - `doctor --json` exposes `cli_bin`, detected `version`, and `compatibility`
   through provider health detail
+- `doctor --json` tool detail exposes `workspace` and `command_timeout_ms`
 - session reuse는 `cwd`와 `model`이 같을 때만 허용된다
 
 ## 실행 의미

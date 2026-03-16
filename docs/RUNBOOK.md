@@ -18,6 +18,7 @@ cargo build
 
 확인 항목: `provider_state`, `memory_state`, `tool_state`, `lock_state`, `lock_path`
 provider detail에서 `cli_bin`, `version`, `compatibility` 확인.
+tool detail에서 `workspace`, `command_timeout_ms` 확인.
 
 ## 3. Run
 
@@ -47,6 +48,18 @@ EOF
 minimal onboarding 순서: `doctor` → `run` → `status` → `replay` → `report.md`
 
 예제 파일: `examples/minimal_goal.json`, `examples/minimal_pack.json`
+
+직접 goal을 만들 때는 raw `goal.json`부터 시작하지 말고 아래 순서를 권장한다:
+
+1. brief 작성
+2. `python3 scripts/generate_goal_stack.py ...` 로 atomic goal 생성
+3. generated goal을 pack-backed run으로 실행
+
+참고:
+
+- guide: `docs/GOAL_STACK_PLAYBOOK.md`
+- sample brief: `examples/goal_stacks/axiomrunner_dogfood.brief.json`
+- sample output: `examples/goal_stacks/axiomrunner_dogfood/`
 
 ## 4. Status / Resume / Abort
 
@@ -160,6 +173,20 @@ cargo test -p axiomrunner_apps --test fault_path_suite
 cargo test -p axiomrunner_apps --test nightly_dogfood_contract
 cargo test -p axiomrunner_apps --test release_security_gate
 cargo test -p axiomrunner_adapters
+```
+
+대표 수동 dogfood:
+
+```bash
+cargo run -q -p axiomrunner_apps -- \
+  --provider=codek \
+  --workspace="$PWD/examples/rust_service" \
+  run examples/rust_service/goal.json
+
+cargo run -q -p axiomrunner_apps -- \
+  --provider=codek \
+  --workspace="$PWD/examples/node_api" \
+  run examples/node_api/goal.json
 ```
 
 autonomous eval corpus 확인 항목:

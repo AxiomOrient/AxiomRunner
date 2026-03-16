@@ -1,7 +1,8 @@
 # Docs
 
 현재 shipped truth는 이 `docs/` 디렉터리와 루트 `README.md`가 소유한다.
-`plans/`는 작업 산출물이며 제품 truth가 아니다. 두 문서가 다르면 `docs/`가 우선이다.
+임시 분석 메모, review note, ad-hoc 정리 문서는 제품 truth가 아니다.
+두 문서가 다르면 `docs/`가 우선이다.
 bridge 문서는 현재 truth를 보조하지만, 이를 덮어쓰지 않는다.
 
 ## 읽는 순서

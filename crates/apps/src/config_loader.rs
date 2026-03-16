@@ -213,6 +213,19 @@ pub(crate) enum CliConfigOption {
     CommandAllowlist,
 }
 
+impl CliConfigOption {
+    pub(crate) fn flag_name(self) -> &'static str {
+        match self {
+            Self::Profile => "--profile",
+            Self::Provider => "--provider",
+            Self::ProviderModel => "--provider-model",
+            Self::Workspace => "--workspace",
+            Self::StatePath => "--state-path",
+            Self::CommandAllowlist => "--command-allowlist",
+        }
+    }
+}
+
 pub(crate) fn parse_cli_config_option(arg: &str) -> Option<(CliConfigOption, &str)> {
     if let Some(value) = arg.strip_prefix("--profile=") {
         return Some((CliConfigOption::Profile, value));
