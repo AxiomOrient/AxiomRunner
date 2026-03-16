@@ -33,7 +33,7 @@ fn isolated_cli_home(label: &str) -> std::path::PathBuf {
     path
 }
 
-fn resolve_cli_bin() -> PathBuf {
+pub fn resolve_cli_bin() -> PathBuf {
     let compiled = PathBuf::from(env!("CARGO_BIN_EXE_axiomrunner_apps"));
     if compiled.is_file() {
         return compiled;
@@ -42,7 +42,7 @@ fn resolve_cli_bin() -> PathBuf {
     fallback_cli_bin_from_current_exe().unwrap_or(compiled)
 }
 
-fn fallback_cli_bin_from_current_exe() -> Option<PathBuf> {
+pub fn fallback_cli_bin_from_current_exe() -> Option<PathBuf> {
     let current = std::env::current_exe().ok()?;
     current
         .ancestors()

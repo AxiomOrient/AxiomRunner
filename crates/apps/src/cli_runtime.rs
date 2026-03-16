@@ -14,7 +14,7 @@ use crate::status::{
 };
 use crate::trace_store::{TraceEventInput, TraceStore};
 use crate::workspace_lock::WorkspaceLock;
-use axiomrunner_core::{AgentState, DecisionOutcome, PolicyCode, RunConstraintMode};
+use axiomrunner_core::{AgentState, DecisionOutcome, PolicyCode, RunConstraint, RunConstraintMode};
 use std::time::Instant;
 
 mod lifecycle;
@@ -618,20 +618,6 @@ fn pending_run_snapshot(
     if !matches!(record.outcome, RuntimeRunOutcome::ApprovalRequired) {
         return None;
     }
-    let advisory_constraints = {
-        let labels: Vec<&str> = intent
-            .goal
-            .constraints
-            .iter()
-            .filter(|c| c.mode() == RunConstraintMode::Advisory)
-            .map(|c| c.label.as_str())
-            .collect();
-        if labels.is_empty() {
-            String::from("none")
-        } else {
-            labels.join(",")
-        }
-    };
     Some(PendingRunSnapshot {
         run_id: record.plan.run_id.clone(),
         intent_id: applied.intent_id.clone(),
@@ -640,8 +626,21 @@ fn pending_run_snapshot(
         reason: record.reason.clone(),
         approval_state: String::from(APPROVAL_STATE_REQUIRED),
         verifier_state: record.verification.status.to_owned(),
-        advisory_constraints,
+        advisory_constraints: advisory_constraint_labels(&intent.goal.constraints),
     })
+}
+
+fn advisory_constraint_labels(constraints: &[RunConstraint]) -> String {
+    let labels: Vec<&str> = constraints
+        .iter()
+        .filter(|c| c.mode() == RunConstraintMode::Advisory)
+        .map(|c| c.label.as_str())
+        .collect();
+    if labels.is_empty() {
+        String::from("none")
+    } else {
+        labels.join(",")
+    }
 }
 
 fn load_pending_goal_template(goal_file_path: &str) -> Result<RunTemplate, String> {

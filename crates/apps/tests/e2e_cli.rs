@@ -1,3 +1,5 @@
+mod common;
+use common::resolve_cli_bin;
 use std::fs;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
@@ -104,25 +106,6 @@ fn run_cli_internal(
     let output = cmd.output().expect("axiomrunner_apps binary should run");
     let _ = fs::remove_dir_all(&canonical_home);
     output
-}
-
-fn resolve_cli_bin() -> PathBuf {
-    let compiled = PathBuf::from(env!("CARGO_BIN_EXE_axiomrunner_apps"));
-    if compiled.is_file() {
-        return compiled;
-    }
-
-    fallback_cli_bin_from_current_exe().unwrap_or(compiled)
-}
-
-fn fallback_cli_bin_from_current_exe() -> Option<PathBuf> {
-    let current = std::env::current_exe().ok()?;
-    current
-        .ancestors()
-        .find(|path| path.file_name().is_some_and(|name| name == "deps"))
-        .and_then(Path::parent)
-        .map(|dir| dir.join(format!("axiomrunner_apps{}", std::env::consts::EXE_SUFFIX)))
-        .filter(|path| path.is_file())
 }
 
 fn stdout_of(output: &Output) -> String {
