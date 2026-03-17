@@ -94,7 +94,7 @@ pub fn commit_prepared_run(
                 return Err(error);
             }
         };
-    all_report_patch_artifacts.extend(report_patch_artifacts.clone());
+    all_report_patch_artifacts.extend(report_patch_artifacts.iter().cloned());
     if apply_done_conditions {
         let (updated_record, applied) = lifecycle::apply_goal_done_conditions(
             template,
@@ -135,7 +135,7 @@ pub fn commit_prepared_run(
                         return Err(error);
                     }
                 };
-            all_report_patch_artifacts.extend(report_patch_artifacts.clone());
+            all_report_patch_artifacts.extend(report_patch_artifacts.iter().cloned());
         }
     }
 
@@ -183,7 +183,7 @@ pub fn commit_prepared_run(
                     return Err(error);
                 }
             };
-        all_report_patch_artifacts.extend(report_patch_artifacts.clone());
+        all_report_patch_artifacts.extend(report_patch_artifacts.iter().cloned());
     }
 
     let mut patch_artifacts = execution_patch_artifacts.clone();
@@ -294,7 +294,6 @@ fn cleanup_commit_artifacts(
     }
     for artifact in execution_patch_artifacts {
         cleanup_execution_target(artifact);
-        remove_restore_artifact(&artifact.artifact_path);
         let _ = fs::remove_file(&artifact.artifact_path);
     }
     for artifact_path in tool_output_artifact_paths(execution_tool_outputs) {
@@ -341,25 +340,25 @@ fn cleanup_execution_target(artifact: &RuntimeComposePatchArtifact) {
         return;
     };
 
+    let restore_artifact_path = value
+        .get("restore_artifact_path")
+        .and_then(serde_json::Value::as_str);
+
     match value
         .get("restore_mode")
         .and_then(serde_json::Value::as_str)
         .unwrap_or(RESTORE_MODE_DELETE_CREATED)
     {
         RESTORE_MODE_FILE => {
-            if let Some(path) = value
-                .get("restore_artifact_path")
-                .and_then(serde_json::Value::as_str)
-            {
+            if let Some(path) = restore_artifact_path {
                 let _ = restore_file_target(&artifact.target_path, path);
+                let _ = fs::remove_file(path);
             }
         }
         RESTORE_MODE_DIR => {
-            if let Some(path) = value
-                .get("restore_artifact_path")
-                .and_then(serde_json::Value::as_str)
-            {
+            if let Some(path) = restore_artifact_path {
                 let _ = restore_directory_target(&artifact.target_path, path);
+                let _ = fs::remove_file(path);
             }
         }
         _ => remove_if_file(&artifact.target_path),

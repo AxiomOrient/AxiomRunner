@@ -120,7 +120,8 @@ fn validate_run_command_args(program: &str, args: &[String]) -> Result<(), &'sta
         "rg" => ensure_rg_args(args),
         "git" => ensure_git_args(args),
         "cargo" => ensure_cargo_args(args),
-        "npm" | "pnpm" | "yarn" => ensure_node_package_args(program, args),
+        "npm" => ensure_npm_args(args),
+        "pnpm" | "yarn" => ensure_pnpm_yarn_args(program, args),
         "python" | "python3" => ensure_python_args(args),
         "node" => ensure_node_args(args),
         "pytest" => ensure_pytest_args(args),
@@ -767,16 +768,20 @@ fn ensure_cargo_args(args: &[String]) -> Result<(), &'static str> {
     }
 }
 
-fn ensure_node_package_args(program: &str, args: &[String]) -> Result<(), &'static str> {
-    match (program, args) {
-        ("npm", [subcommand, flag]) if subcommand == "install" && flag == "--ignore-scripts" => {
-            Ok(())
-        }
-        (_, [subcommand]) if subcommand == "test" => Ok(()),
-        (_, [subcommand, target]) if subcommand == "run" && is_allowed_package_target(target) => {
-            Ok(())
-        }
-        ("yarn", [target]) if is_allowed_package_target(target) => Ok(()),
+fn ensure_npm_args(args: &[String]) -> Result<(), &'static str> {
+    match args {
+        [subcommand, flag] if subcommand == "install" && flag == "--ignore-scripts" => Ok(()),
+        [subcommand] if subcommand == "test" => Ok(()),
+        [subcommand, target] if subcommand == "run" && is_allowed_package_target(target) => Ok(()),
+        _ => Err("command_args_forbidden"),
+    }
+}
+
+fn ensure_pnpm_yarn_args(program: &str, args: &[String]) -> Result<(), &'static str> {
+    match args {
+        [subcommand] if subcommand == "test" => Ok(()),
+        [subcommand, target] if subcommand == "run" && is_allowed_package_target(target) => Ok(()),
+        [target] if program == "yarn" && is_allowed_package_target(target) => Ok(()),
         _ => Err("command_args_forbidden"),
     }
 }
