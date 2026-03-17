@@ -3,7 +3,7 @@ use axiomrunner_core::{DecisionOutcome, ExecutionMode};
 pub fn mode_name(mode: ExecutionMode) -> &'static str {
     match mode {
         ExecutionMode::Active => "active",
-        _ => "unknown",
+        _ => unreachable!("ExecutionMode has no retained operator-facing variant here"),
     }
 }
 

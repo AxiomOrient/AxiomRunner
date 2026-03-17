@@ -34,18 +34,15 @@ pub(super) fn execute_intent(runtime: &mut CliRuntime, intent: &RunTemplate) -> 
                 )
             },
         );
-    let (execution, verification, repair, checkpoint) = if let Some(guard) = pre_execution_guard {
-        (guard.0, guard.1, guard.2, None)
+    let (execution, verification, repair, write_checkpoint) = if let Some(guard) = pre_execution_guard {
+        (guard.0, guard.1, guard.2, false)
     } else {
         runtime.compose_state.prepare_execution_workspace(&run_id)?;
-        let checkpoint = runtime
-            .compose_state
-            .write_checkpoint_metadata(&applied.intent_id, &run_id)?;
         let execution = runtime.persist_template_result(intent, &applied);
         let verification = lifecycle::verify_run(intent, &execution);
         let (execution, verification, repair) =
             lifecycle::run_repair_loop(runtime, intent, &plan, &applied, execution, verification);
-        (execution, verification, repair, checkpoint)
+        (execution, verification, repair, true)
     };
     let mut finalized = lifecycle::finalize_run(
         runtime.compose_state.health(),
@@ -61,7 +58,6 @@ pub(super) fn execute_intent(runtime: &mut CliRuntime, intent: &RunTemplate) -> 
             requested_max_tokens: runtime.compose_state.max_tokens(),
         },
     );
-    finalized.record.checkpoint = checkpoint;
     finalized.record = lifecycle::apply_goal_elapsed_budget(intent, finalized.record);
     let first_failure = finalized
         .execution
@@ -102,6 +98,7 @@ pub(super) fn execute_intent(runtime: &mut CliRuntime, intent: &RunTemplate) -> 
             state: &runtime.state,
             snapshot: persist_snapshot.clone(),
             apply_done_conditions: true,
+            write_checkpoint,
         },
     )?;
     finalized.record = committed.record;
@@ -140,9 +137,6 @@ pub(super) fn execute_resume(runtime: &mut CliRuntime, target: &str) -> Result<(
     runtime
         .compose_state
         .prepare_execution_workspace(&pending.run_id)?;
-    let checkpoint = runtime
-        .compose_state
-        .write_checkpoint_metadata(&pending.intent_id, &pending.run_id)?;
     let template = load_pending_goal_template(&pending.goal_file_path)?;
     let plan = runtime
         .compose_state
@@ -174,7 +168,6 @@ pub(super) fn execute_resume(runtime: &mut CliRuntime, target: &str) -> Result<(
             requested_max_tokens: runtime.compose_state.max_tokens(),
         },
     );
-    finalized.record.checkpoint = checkpoint;
     finalized.record = lifecycle::apply_goal_elapsed_budget(&template, finalized.record);
     let report_input = report_write_input(&resume_applied);
     let committed = crate::run_commit::commit_prepared_run(
@@ -199,6 +192,8 @@ pub(super) fn execute_resume(runtime: &mut CliRuntime, target: &str) -> Result<(
                 pending_run: None,
             }),
             apply_done_conditions: true,
+            // resume always executes — no pre-execution guard path, so checkpoint is always written
+            write_checkpoint: true,
         },
     )?;
     finalized.record = committed.record;
@@ -275,6 +270,7 @@ pub(super) fn execute_abort(runtime: &mut CliRuntime, target: &str) -> Result<()
                 pending_run: None,
             }),
             apply_done_conditions: false,
+            write_checkpoint: false,
         },
     )?;
     if let Some(warning) = committed.memory_warning {

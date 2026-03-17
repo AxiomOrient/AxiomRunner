@@ -383,14 +383,7 @@ fn goal_done_condition_failure(
                     .patch_artifacts
                     .iter()
                     .chain(report_patch_artifacts.iter())
-                    .any(|artifact| {
-                        artifact.target_path == *path
-                            || artifact
-                                .target_path
-                                .strip_prefix(path)
-                                .map(|suffix| suffix.starts_with('/'))
-                                .unwrap_or(false)
-                    });
+                    .any(|artifact| path_matches_changed_target(&artifact.target_path, path));
                 checks.push(format!(
                     "done_condition={} path_changed={} status={}",
                     condition.label,
@@ -425,6 +418,22 @@ fn goal_done_condition_failure(
     }
 
     None
+}
+
+fn path_matches_changed_target(target_path: &str, expected_path: &str) -> bool {
+    let target = normalize_path_segments(target_path);
+    let expected = normalize_path_segments(expected_path);
+    !expected.is_empty()
+        && target.len() >= expected.len()
+        && target.iter().zip(expected.iter()).all(|(left, right)| left == right)
+}
+
+fn normalize_path_segments(path: &str) -> Vec<String> {
+    path.replace('\\', "/")
+        .split('/')
+        .filter(|segment| !segment.is_empty() && *segment != ".")
+        .map(str::to_owned)
+        .collect()
 }
 
 pub(super) fn finalize_run(

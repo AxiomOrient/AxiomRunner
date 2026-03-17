@@ -816,7 +816,7 @@ fn configure_command(command: &mut Command) {
     }
 }
 
-fn is_forbidden_shell_program(program: &str) -> bool {
+pub fn is_forbidden_shell_program(program: &str) -> bool {
     matches!(
         program.trim(),
         "sh" | "bash" | "zsh" | "fish" | "dash" | "ksh"

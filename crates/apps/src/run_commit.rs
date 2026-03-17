@@ -22,6 +22,7 @@ pub struct PreparedRunCommit<'a> {
     pub state: &'a AgentState,
     pub snapshot: Option<RuntimeStateSnapshot>,
     pub apply_done_conditions: bool,
+    pub write_checkpoint: bool,
 }
 
 pub struct RunCommitOutcome {
@@ -48,10 +49,26 @@ pub fn commit_prepared_run(
         state,
         snapshot,
         apply_done_conditions,
+        write_checkpoint,
     } = prepared;
 
-    let mut report_patch_artifacts =
-        compose_state.write_report(template, &report_input, &execution, &record)?;
+    if write_checkpoint {
+        record.checkpoint =
+            compose_state.write_checkpoint_metadata(intent_id, &record.plan.run_id)?;
+    }
+
+    let mut report_patch_artifacts = match compose_state.write_report(
+        template,
+        &report_input,
+        &execution,
+        &record,
+    ) {
+        Ok(artifacts) => artifacts,
+        Err(error) => {
+            cleanup_commit_artifacts(&[], record.checkpoint.as_ref(), record.rollback.as_ref());
+            return Err(error);
+        }
+    };
     if apply_done_conditions {
         let (updated_record, applied) = lifecycle::apply_goal_done_conditions(
             template,
@@ -61,14 +78,43 @@ pub fn commit_prepared_run(
         );
         record = updated_record;
         if applied {
-            report_patch_artifacts =
-                compose_state.write_report(template, &report_input, &execution, &record)?;
+            report_patch_artifacts = match compose_state.write_report(
+                template,
+                &report_input,
+                &execution,
+                &record,
+            ) {
+                Ok(artifacts) => artifacts,
+                Err(error) => {
+                    cleanup_commit_artifacts(
+                        &report_patch_artifacts,
+                        record.checkpoint.as_ref(),
+                        record.rollback.as_ref(),
+                    );
+                    return Err(error);
+                }
+            };
         }
     }
 
     record.rollback = compose_state.write_rollback_metadata(intent_id, &execution, &record)?;
     if record.rollback.is_some() {
-        report_patch_artifacts = compose_state.write_report(template, &report_input, &execution, &record)?;
+        report_patch_artifacts = match compose_state.write_report(
+            template,
+            &report_input,
+            &execution,
+            &record,
+        ) {
+            Ok(artifacts) => artifacts,
+            Err(error) => {
+                cleanup_commit_artifacts(
+                    &report_patch_artifacts,
+                    record.checkpoint.as_ref(),
+                    record.rollback.as_ref(),
+                );
+                return Err(error);
+            }
+        };
     }
 
     let mut patch_artifacts = execution.patch_artifacts.clone();
@@ -88,14 +134,22 @@ pub fn commit_prepared_run(
         patch_artifacts: &patch_artifacts,
         run: &record,
     }) {
-        cleanup_commit_artifacts(&report_patch_artifacts, record.rollback.as_ref());
+        cleanup_commit_artifacts(
+            &report_patch_artifacts,
+            record.checkpoint.as_ref(),
+            record.rollback.as_ref(),
+        );
         return Err(format!("runtime trace error: {error}"));
     }
 
     if let Some(snapshot) = snapshot
         && let Err(error) = state_store.save_snapshot(&snapshot)
     {
-        cleanup_commit_artifacts(&report_patch_artifacts, record.rollback.as_ref());
+        cleanup_commit_artifacts(
+            &report_patch_artifacts,
+            record.checkpoint.as_ref(),
+            record.rollback.as_ref(),
+        );
         let trace_cleanup = trace_store
             .remove_last_event_for_intent(intent_id)
             .map_err(|cleanup_error| {
@@ -124,11 +178,14 @@ pub fn commit_prepared_run(
 
 fn cleanup_commit_artifacts(
     patch_artifacts: &[RuntimeComposePatchArtifact],
+    checkpoint: Option<&crate::runtime_compose::RuntimeRunCheckpointMetadata>,
     rollback: Option<&crate::runtime_compose::RuntimeRunRollbackMetadata>,
 ) {
     for artifact in patch_artifacts {
-        let _ = fs::remove_file(&artifact.target_path);
         let _ = fs::remove_file(&artifact.artifact_path);
+    }
+    if let Some(checkpoint) = checkpoint {
+        let _ = fs::remove_file(&checkpoint.metadata_path);
     }
     if let Some(rollback) = rollback {
         let _ = fs::remove_file(&rollback.metadata_path);

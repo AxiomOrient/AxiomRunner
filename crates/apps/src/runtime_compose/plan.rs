@@ -1,4 +1,5 @@
 use crate::cli_command::RunTemplate;
+use axiomrunner_adapters::{RunCommandClass, classify_run_command_class, is_forbidden_shell_program};
 use axiomrunner_core::{
     DecisionOutcome, RunCommandProfile, WorkflowPackAllowedTool, WorkflowPackContract,
     WorkflowPackVerifierCommand, WorkflowPackVerifierRule, WorkflowPackVerifierStrength,
@@ -360,40 +361,58 @@ fn derive_default_verifier_command(
 }
 
 fn parse_command_detail(detail: &str) -> Option<(String, Vec<String>)> {
-    let mut parts = detail
-        .split_whitespace()
-        .map(str::trim)
-        .filter(|part| !part.is_empty())
-        .map(str::to_owned)
-        .collect::<Vec<_>>();
+    let mut parts = tokenize_command_detail(detail)?;
     let program = parts.first()?.clone();
-    if !looks_like_command_program(&program) {
+    if is_forbidden_shell_program(&program)
+        || !matches!(classify_run_command_class(&program), RunCommandClass::WorkspaceLocal)
+    {
         return None;
     }
     let args = parts.split_off(1);
     Some((program, args))
 }
 
-fn looks_like_command_program(program: &str) -> bool {
-    matches!(
-        program,
-        "cargo"
-            | "npm"
-            | "node"
-            | "python"
-            | "python3"
-            | "pytest"
-            | "pwd"
-            | "rg"
-            | "git"
-            | "ls"
-            | "cat"
-            | "pnpm"
-            | "yarn"
-            | "uv"
-            | "make"
-    ) || program.starts_with("./")
-        || program.starts_with("../")
+fn tokenize_command_detail(detail: &str) -> Option<Vec<String>> {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    let mut chars = detail.chars().peekable();
+    let mut quote: Option<char> = None;
+
+    while let Some(ch) = chars.next() {
+        match quote {
+            Some(active) if ch == active => quote = None,
+            Some(_) if ch == '\\' => {
+                if let Some(next) = chars.next() {
+                    current.push(next);
+                }
+            }
+            Some(_) => current.push(ch),
+            None if ch == '"' || ch == '\'' => quote = Some(ch),
+            None if ch.is_whitespace() => {
+                if !current.is_empty() {
+                    tokens.push(std::mem::take(&mut current));
+                }
+            }
+            None if ch == '\\' => {
+                if let Some(next) = chars.next() {
+                    current.push(next);
+                }
+            }
+            None => current.push(ch),
+        }
+    }
+
+    if quote.is_some() {
+        return None;
+    }
+    if !current.is_empty() {
+        tokens.push(current);
+    }
+    if tokens.is_empty() {
+        None
+    } else {
+        Some(tokens)
+    }
 }
 
 fn unresolved_verifier_strength(

@@ -86,10 +86,8 @@ pub fn lock_path(workspace_root: &Path) -> PathBuf {
 
 pub fn inspect_lock_state(workspace_root: &Path) -> String {
     let path = lock_path(workspace_root);
-    if !path.exists() {
-        return String::from("absent");
-    }
     match fs::read_to_string(&path) {
+        Err(error) if error.kind() == ErrorKind::NotFound => String::from("absent"),
         Ok(raw) if raw.trim().is_empty() => String::from("active"),
         Ok(raw) => {
             if lock_holder_is_stale(raw.trim()) {
@@ -125,7 +123,27 @@ fn process_is_alive(pid: u32) -> bool {
         .unwrap_or(true)
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+fn process_is_alive(pid: u32) -> bool {
+    let output = std::process::Command::new("tasklist")
+        .args(["/FI", &format!("PID eq {pid}"), "/NH", "/FO", "CSV"])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .output();
+    let Ok(output) = output else {
+        return true;
+    };
+    if !output.status.success() {
+        return true;
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout).to_ascii_lowercase();
+    if stdout.contains("no tasks are running") || stdout.contains("info: no tasks") {
+        return false;
+    }
+    stdout.contains(&format!("\"{}\"", pid))
+}
+
+#[cfg(not(any(unix, windows)))]
 fn process_is_alive(_pid: u32) -> bool {
     true
 }
