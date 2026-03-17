@@ -1,5 +1,5 @@
 use crate::error::AdapterResult;
-use serde::{Deserialize, Serialize};
+use axiomrunner_core::RunCommandProfile;
 use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
@@ -164,26 +164,6 @@ pub enum SearchMode {
     Regex,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum RunCommandProfile {
-    Generic,
-    Build,
-    Test,
-    Lint,
-}
-
-impl RunCommandProfile {
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Generic => "generic",
-            Self::Build => "build",
-            Self::Test => "test",
-            Self::Lint => "lint",
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ToolResult {
     ListFiles(ListFilesOutput),
@@ -271,102 +251,4 @@ pub trait ToolAdapter: Send + Sync {
     fn id(&self) -> &str;
     fn health(&self) -> AdapterHealth;
     fn execute(&self, request: ToolRequest) -> AdapterResult<ToolResult>;
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct WorkflowPackContract {
-    pub pack_id: String,
-    pub version: String,
-    pub description: String,
-    pub entry_goal: String,
-    pub planner_hints: Vec<String>,
-    pub recommended_verifier_flow: Vec<RunCommandProfile>,
-    pub allowed_tools: Vec<WorkflowPackAllowedTool>,
-    pub verifier_rules: Vec<WorkflowPackVerifierRule>,
-    pub risk_policy: WorkflowPackRiskPolicy,
-}
-
-impl WorkflowPackContract {
-    pub fn validate(&self) -> Result<(), &'static str> {
-        if self.pack_id.trim().is_empty() {
-            return Err("pack_id");
-        }
-        if self.version.trim().is_empty() {
-            return Err("version");
-        }
-        if self.entry_goal.trim().is_empty() {
-            return Err("entry_goal");
-        }
-        if self.recommended_verifier_flow.is_empty() {
-            return Err("recommended_verifier_flow");
-        }
-        if self.allowed_tools.is_empty() {
-            return Err("allowed_tools");
-        }
-        if self.verifier_rules.is_empty() {
-            return Err("verifier_rules");
-        }
-        if self
-            .allowed_tools
-            .iter()
-            .any(|tool| tool.operation.trim().is_empty() || tool.scope.trim().is_empty())
-        {
-            return Err("allowed_tools.entry");
-        }
-        if self.verifier_rules.iter().any(|rule| {
-            rule.label.trim().is_empty()
-                || rule.command_example.trim().is_empty()
-                || rule.artifact_expectation.trim().is_empty()
-        }) {
-            return Err("verifier_rules.entry");
-        }
-        if self.risk_policy.approval_mode.trim().is_empty() {
-            return Err("risk_policy.approval_mode");
-        }
-        Ok(())
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct WorkflowPackAllowedTool {
-    pub operation: String,
-    pub scope: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct WorkflowPackVerifierRule {
-    pub label: String,
-    pub profile: RunCommandProfile,
-    pub command_example: String,
-    pub artifact_expectation: String,
-    #[serde(default)]
-    pub strength: WorkflowPackVerifierStrength,
-    pub required: bool,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum WorkflowPackVerifierStrength {
-    #[default]
-    Strong,
-    Weak,
-    Unresolved,
-    PackRequired,
-}
-
-impl WorkflowPackVerifierStrength {
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Strong => "strong",
-            Self::Weak => "weak",
-            Self::Unresolved => "unresolved",
-            Self::PackRequired => "pack_required",
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct WorkflowPackRiskPolicy {
-    pub approval_mode: String,
-    pub max_mutating_steps: u64,
 }

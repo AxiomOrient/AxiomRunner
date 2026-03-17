@@ -19,7 +19,7 @@ goal-oriented run이 반드시 답해야 하는 항목:
 | `RunGoal.done_conditions[]` | 외부에서 확인 가능한 완료 기준 |
 | `RunGoal.verification_checks[]` | 완료를 증명하는 concrete 검증 단계 |
 | `RunGoal.budget` | step/minute/token budget |
-| `RunGoal.approval_mode` | `never` / `on-risk` / `always` |
+| `RunGoal.approval_mode` | `never` / `always` |
 
 계약 유효 조건: 모든 required 필드가 존재하고 비어 있지 않아야 하며, done condition이 1개 이상, verification check가 1개 이상, 모든 budget dimension이 0 초과여야 한다.
 
@@ -39,18 +39,19 @@ pack manifest가 주어지면 AxiomRunner는 먼저 manifest를 읽고 검증한
 
 그 외 constraint label은 advisory-only다. operator에게 보이지만 실행을 막지 않는다.
 
-`approval_mode=always` 또는 `approval_mode=on-risk` goal은 default pack 경로에서 실행 전 approval을 요구한다.
+`approval_mode=always` goal은 default pack 경로에서 실행 전 approval을 요구한다.
 
 ## 3. Done Condition Schema
 
 run이 완료되려면 선언된 모든 done condition에 evidence가 있어야 한다.
-done condition은 외부에서 확인 가능해야 하며, 아래 중 하나 이상을 써야 한다.
+현재 v1 supported evidence vocabulary:
 
-- file existence 또는 file content assertion
-- build, test, lint command
-- changed-path summary
-- replayable patch evidence
-- operator-readable report summary
+- `report_artifact_exists`
+- `file_exists:<workspace-relative path>`
+- `path_changed:<workspace-relative path>`
+- `command_exit_zero:<command string>`
+
+free-form evidence는 허용하지 않는다.
 
 ## 4. Verification / Done Relation
 
@@ -85,7 +86,6 @@ budget 소진은 silent stop이 아니라 `budget_exhausted` terminal outcome으
 | approval_mode | 의미 |
 |---|---|
 | `never` | 승인 불필요 |
-| `on-risk` | high-risk 작업 전 승인 요구. default pack 경로는 보수적으로 판단하므로 실행 전 approval이 필요하다. |
 | `always` | 항상 실행 전 승인 요구 |
 
 `approval_escalation=required` constraint는 planned verifier command가 high-risk로 분류될 때 추가 pre-execution approval을 요구한다.
@@ -139,13 +139,11 @@ workflow pack manifest 필수 필드:
 
 - `pack_id`
 - `version`
-- `description`
 - `entry_goal`
-- `planner_hints[]`
 - `recommended_verifier_flow[]`
 - `allowed_tools[]`
 - `verifier_rules[]`
-- `risk_policy`
+- `approval_mode`
 
 ## 11. Allowed Tools
 
@@ -165,7 +163,8 @@ workflow pack manifest 필수 필드:
 |---|---|
 | `label` | rule 이름 |
 | `profile` | `build` / `test` / `lint` / `generic` |
-| `command_example` | 실행 예시 |
+| `command.program` | 실행 파일 |
+| `command.args[]` | 인자 목록 |
 | `artifact_expectation` | 기대 artifact |
 | `strength` | `strong` / `weak` / `unresolved` / `pack_required` |
 | `required` | 필수 여부 |
@@ -178,18 +177,18 @@ workflow pack manifest 필수 필드:
 
 `recommended_verifier_flow[]`는 `build` → `test` → `lint` → `generic` 순서 힌트다. 실제 verifier rule을 대체하지 않는다.
 
-## 13. Risk Policy
+## 13. Approval Mode
 
-`risk_policy` 필드:
-- `approval_mode`: `never` / `on-risk` / `always`
-- `max_mutating_steps`: 최대 mutating step 수
+pack은 `approval_mode`만 선언할 수 있다.
 
-pack이 risk hint를 줄 수 있지만, 최종 승인 판단은 AxiomRunner가 한다.
+- `never`
+- `always`
+
+추가 risk hint 필드는 retained contract가 아니다.
 
 ## 14. Ownership Boundary
 
 **pack이 할 수 있는 것**:
-- planner 힌트 제공
 - 허용 도구 범위 축소
 - verifier rule 제공
 - 도메인별 기본 흐름 제안
@@ -218,9 +217,7 @@ allowed_tools:
   - run_command within workspace
   - read_file within workspace
 verifier_rules:
-  - test via cargo test, required=true, strength=strong
-  - lint via cargo clippy, required=false, strength=weak
-risk_policy:
-  approval_mode: on-risk
-  max_mutating_steps: 8
+  - test via command.program=cargo command.args=[test], required=true, strength=strong
+  - lint via command.program=cargo command.args=[clippy,--,-D,warnings], required=false, strength=weak
+approval_mode: always
 ```

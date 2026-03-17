@@ -24,7 +24,7 @@
   "verification_checks": [
     {
       "label": "python syntax",
-      "detail": "python3 -m py_compile scripts/generate_goal_stack.py"
+      "detail": "python3 -m py_compile tools/dev/generate_goal_stack.py"
     }
   ],
   "budget": {

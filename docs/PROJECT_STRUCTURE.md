@@ -10,7 +10,9 @@ crates/adapters  — provider/tool/memory substrate
 crates/apps      — CLI entrypoint와 run orchestration
 docs/            — 현재 제품 계약과 운영 문서
 examples/        — representative verifier examples
-scripts/         — 반복 실행 보조
+scripts/         — retained ops script
+tools/dev/       — dev helper
+archive/specs/   — shipped truth가 아닌 보관 spec
 ```
 
 ## crates/core
@@ -91,8 +93,8 @@ goal/run 입력 계약과 상태 primitive를 소유한다.
 
 `runtime_compose.rs`의 pure mapping functions:
 - `verifier_strength_label(verification_status: &str) -> &str` — strength 도출. 현재는 identity (state = strength).
-- `run_reason_code(reason: &str) -> &str` — reason을 짧은 code로 매핑
-- `run_reason_detail(reason: &str) -> &str` — reason detail 추출
+- `render_run_reason(code, detail)` — operator-facing reason 문자열 생성
+- `RuntimeRunRecord.reason_code / reason_detail` — 구조화된 reason source
 - `run_phase_name(phase: RuntimeRunPhase) -> &str`
 - `run_outcome_name(outcome: RuntimeRunOutcome) -> &str`
 
@@ -127,15 +129,15 @@ goal/run 입력 계약과 상태 primitive를 소유한다.
   - `RUNBOOK.md` — 빌드, 실행, 운영, 버전 정책
   - `CAPABILITY_MATRIX.md` — 지원 범위, constraint enforcement, release blocker
   - `WORKFLOW_PACK_CONTRACT.md` — goal 스키마, pack 계약, verification/done 규칙
-  - `AUTONOMOUS_AGENT_TARGET.md` — bridge target
-  - `AUTONOMOUS_AGENT_SPEC.md` — bridge spec
+  - `AUTONOMOUS_AGENT_BRIDGE.md` — bridge note
   - `VERSIONING.md` — versioning / changelog / release gate 규칙
   - `PROJECT_STRUCTURE.md` — 이 파일
 - `examples/` — representative app/server verifier examples
-- `scripts/` — `nightly_dogfood.sh`, `generate_goal_stack.py` 같은 반복 실행 보조
+- `scripts/` — retained ops script (`nightly_dogfood.sh`)
+- `tools/dev/` — shipped truth가 아닌 dev helper (`generate_goal_stack.py`)
 
 중요: `docs/`와 루트 `README.md`가 shipped truth를 소유한다. 임시 메모나 작업 중 분석 문서보다 `docs/`가 우선이다.
-`AUTONOMOUS_AGENT_TARGET`와 `AUTONOMOUS_AGENT_SPEC`은 bridge 문서이며 current truth를 덮어쓰지 않는다.
+`AUTONOMOUS_AGENT_BRIDGE`는 bridge 문서이며 current truth를 덮어쓰지 않는다.
 
 ## 구조를 읽는 순서
 

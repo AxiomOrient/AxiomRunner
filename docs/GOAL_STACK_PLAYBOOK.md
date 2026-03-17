@@ -31,7 +31,8 @@ Mapped into AxiomRunner:
 
 - `why` stays in the brief and stack markdown
 - `summary` becomes `RunGoal.summary`
-- `acceptance[]` becomes `done_conditions[]`
+- `acceptance[]` stays in brief/stack review input
+- generated `done_conditions[]`는 기본적으로 `report_artifact_exists`만 사용한다
 - `verification_checks[]` becomes executable proof
 - `paths[]` becomes `path_scope`
 
@@ -84,7 +85,7 @@ Good slices:
 
 ## Generator
 
-Use [`scripts/generate_goal_stack.py`](/Users/axient/repository/AxiomRunner/scripts/generate_goal_stack.py) to turn a small brief into atomic goals.
+[`tools/dev/generate_goal_stack.py`](../tools/dev/generate_goal_stack.py) 는 dev helper다. generated goal은 실행 전 검토 대상이며, runtime contract를 대신 정의하지 않는다.
 
 Supported presets:
 
@@ -93,12 +94,12 @@ Supported presets:
 - `nextjs-app`
 - `python-fastapi`
 
-Each preset fills a default workflow pack and verifier bundle.
+Each preset fills a default workflow pack and verifier bundle. generated done condition은 기본적으로 `report_artifact_exists` 하나만 넣는다. 더 강한 완료 기준이 필요하면 goal JSON을 직접 수정해 supported typed evidence만 써야 한다.
 
 Example:
 
 ```bash
-python3 scripts/generate_goal_stack.py \
+python3 tools/dev/generate_goal_stack.py \
   examples/goal_stacks/axiomrunner_dogfood.brief.json \
   --output-dir examples/goal_stacks/axiomrunner_dogfood
 ```
@@ -145,15 +146,16 @@ The generator writes:
 - one `NN_<slice>.goal.json` per slice
 - `GOAL_STACK.md` with the slice order, why, path scope, and verifier labels
 
-That means operators can work from a brief, review the stack, and only then execute goals.
+That means operators can work from a brief, review the stack, inspect the generated goal, and only then execute it.
 
 ## Best Current Method
 
 For this repo, the best current method is:
 
 1. author a stack brief
-2. generate atomic goals
-3. run goals in order with pack-backed presets
-4. adjust the brief, not raw goal JSON, when slicing is wrong
+2. generate atomic goals or copy a static example
+3. inspect `done_conditions[]` and keep only supported typed evidence
+4. run goals in order with pack-backed presets
+5. adjust the brief, not raw goal JSON, when slicing is wrong
 
 This is better than hand-writing raw goals because it keeps the editing surface small and keeps decomposition visible.

@@ -139,6 +139,7 @@ pub(crate) fn digest_path(path: &Path) -> Result<String, io::Error> {
 }
 
 pub(crate) struct PatchArtifact<'a> {
+    pub artifact_root: &'a Path,
     pub workspace_root: &'a Path,
     pub target_path: &'a Path,
     pub operation: &'a str,
@@ -151,7 +152,7 @@ pub(crate) struct PatchArtifact<'a> {
 }
 
 pub(crate) fn write_patch_artifact(artifact: PatchArtifact<'_>) -> Result<PathBuf, io::Error> {
-    let patch_dir = artifact.workspace_root.join(".axiomrunner").join("patches");
+    let patch_dir = artifact.artifact_root.join(".axiomrunner").join("patches");
     fs::create_dir_all(&patch_dir)?;
     let artifact_path = patch_dir.join(unique_patch_filename(artifact.target_path));
     let relative_target = artifact
@@ -179,7 +180,7 @@ pub(crate) fn write_patch_artifact(artifact: PatchArtifact<'_>) -> Result<PathBu
 }
 
 pub(crate) struct CommandArtifact<'a> {
-    pub workspace_root: &'a Path,
+    pub artifact_root: &'a Path,
     pub program: &'a str,
     pub args: &'a [String],
     pub profile: &'a str,
@@ -192,7 +193,7 @@ pub(crate) struct CommandArtifact<'a> {
 
 pub(crate) fn write_command_artifact(artifact: CommandArtifact<'_>) -> Result<PathBuf, io::Error> {
     let command_dir = artifact
-        .workspace_root
+        .artifact_root
         .join(".axiomrunner")
         .join("commands");
     fs::create_dir_all(&command_dir)?;

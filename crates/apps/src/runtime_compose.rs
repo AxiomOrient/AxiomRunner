@@ -160,6 +160,8 @@ pub struct RuntimeRunRecord {
     pub phase: RuntimeRunPhase,
     pub outcome: RuntimeRunOutcome,
     pub reason: String,
+    pub reason_code: String,
+    pub reason_detail: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1470,43 +1472,12 @@ pub fn run_outcome_name(outcome: RuntimeRunOutcome) -> &'static str {
     }
 }
 
-pub fn run_reason_code(reason: &str) -> String {
-    if reason == "verification_passed"
-        || reason == "approval_required_before_execution"
-        || reason.starts_with("approval_required_before_execution:")
-        || reason == "budget_exhausted_before_execution"
-        || reason.starts_with("budget_exhausted_elapsed_minutes:")
-        || reason == RUN_REASON_OPERATOR_ABORT
-        || reason == "provider_health_blocked"
-        || reason == "goal_execution_missing_verifier_output"
-    {
-        if reason.starts_with("approval_required_before_execution:") {
-            return String::from("approval_required_before_execution");
-        }
-        if reason.starts_with("budget_exhausted_elapsed_minutes:") {
-            return String::from("budget_exhausted_elapsed_minutes");
-        }
-        return reason.to_owned();
+pub fn render_run_reason(code: &str, detail: &str) -> String {
+    if detail == "none" || detail.is_empty() {
+        code.to_owned()
+    } else {
+        format!("{code}:{detail}")
     }
-    if reason.starts_with("repair_budget_exhausted:") {
-        return String::from("repair_budget_exhausted");
-    }
-    if reason.starts_with("report_write_failed:") {
-        return String::from("report_write_failed");
-    }
-    if reason.starts_with("done_condition_missing_report_artifact:") {
-        return String::from("done_condition_missing_report_artifact");
-    }
-    if reason.starts_with("blocked_by_policy=") {
-        return String::from("blocked_by_policy");
-    }
-    if reason.starts_with("stage=") {
-        return String::from("verification_failed");
-    }
-    if let Some((code, _)) = reason.split_once(':') {
-        return code.to_owned();
-    }
-    reason.to_owned()
 }
 
 /// Returns the verifier strength label for a given `verification.status` value.
@@ -1520,19 +1491,10 @@ pub fn verifier_strength_label(verification_status: &str) -> &str {
     verification_status
 }
 
-pub fn run_reason_detail(reason: &str) -> String {
-    if reason.starts_with("stage=") {
-        return reason.to_owned();
-    }
-    if let Some((_, detail)) = reason.split_once(':') {
-        return detail.to_owned();
-    }
-    if let Some((_, detail)) = reason.split_once('=') {
-        if reason.starts_with("blocked_by_policy=") {
-            return detail.to_owned();
-        }
-    }
-    String::from("none")
+pub fn runtime_run_reason(code: &str, detail: impl Into<String>) -> (String, String, String) {
+    let detail = detail.into();
+    let rendered = render_run_reason(code, &detail);
+    (rendered, code.to_owned(), detail)
 }
 
 /// Maps a terminal outcome string to an operator-facing next action hint.
@@ -1581,14 +1543,16 @@ fn env_string(key: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        RuntimeComposeConfig, RuntimeComposeExecution, RuntimeComposeState, RuntimeComposeStep,
-        build_tool_adapter, run_outcome_name, run_phase_name,
+        DEFAULT_TOOL_COMMAND_TIMEOUT_MS, RuntimeComposeConfig, RuntimeComposeExecution,
+        RuntimeComposeState, RuntimeComposeStep, build_tool_adapter, run_outcome_name,
+        run_phase_name,
     };
     use crate::cli_command::GoalFileTemplate;
     use crate::config_loader::AppConfig;
     use axiomrunner_adapters::{ToolAdapter, ToolRequest};
     use axiomrunner_core::{
-        DecisionOutcome, DoneCondition, RunApprovalMode, RunBudget, RunGoal, VerificationCheck,
+        DecisionOutcome, DoneCondition, DoneConditionEvidence, RunApprovalMode, RunBudget,
+        RunGoal, VerificationCheck,
     };
     use std::fs;
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -1613,7 +1577,7 @@ mod tests {
                 constraints: Vec::new(),
                 done_conditions: vec![DoneCondition {
                     label: String::from("report"),
-                    evidence: String::from("report artifact exists"),
+                    evidence: DoneConditionEvidence::ReportArtifactExists,
                 }],
                 verification_checks: vec![VerificationCheck {
                     label: String::from("workspace"),
@@ -1810,35 +1774,16 @@ mod tests {
 
     #[test]
     fn run_reason_schema_extracts_code_and_detail() {
-        assert_eq!(
-            super::run_reason_code("verification_passed"),
-            "verification_passed"
-        );
-        assert_eq!(super::run_reason_detail("verification_passed"), "none");
-        assert_eq!(
-            super::run_reason_code("repair_budget_exhausted:attempts=1/1"),
-            "repair_budget_exhausted"
-        );
-        assert_eq!(
-            super::run_reason_detail("repair_budget_exhausted:attempts=1/1"),
-            "attempts=1/1"
-        );
-        assert_eq!(
-            super::run_reason_code("done_condition_missing_report_artifact:report"),
-            "done_condition_missing_report_artifact"
-        );
-        assert_eq!(
-            super::run_reason_detail("done_condition_missing_report_artifact:report"),
-            "report"
-        );
-        assert_eq!(
-            super::run_reason_code("stage=provider,message=boom"),
-            "verification_failed"
-        );
-        assert_eq!(
-            super::run_reason_detail("stage=provider,message=boom"),
-            "stage=provider,message=boom"
-        );
+        let (reason, code, detail) = super::runtime_run_reason("verification_passed", "none");
+        assert_eq!(reason, "verification_passed");
+        assert_eq!(code, "verification_passed");
+        assert_eq!(detail, "none");
+
+        let (reason, code, detail) =
+            super::runtime_run_reason("repair_budget_exhausted", "attempts=1/1");
+        assert_eq!(reason, "repair_budget_exhausted:attempts=1/1");
+        assert_eq!(code, "repair_budget_exhausted");
+        assert_eq!(detail, "attempts=1/1");
     }
 
     #[test]

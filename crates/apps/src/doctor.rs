@@ -2,8 +2,8 @@ use crate::async_runtime_host::global_async_runtime_host_status;
 use crate::config_loader::AppConfig;
 use crate::display::mode_name;
 use crate::runtime_compose::{RuntimeComposeConfig, RuntimeComposeHealth};
-use crate::state_store::PendingRunSnapshot;
-use crate::trace_store::TraceStore;
+use crate::storage::state::PendingRunSnapshot;
+use crate::storage::trace::TraceStore;
 use crate::workspace_lock::{inspect_lock_state, lock_path};
 use axiomrunner_adapters::provider_registry;
 use axiomrunner_core::AgentState;
@@ -69,6 +69,8 @@ pub struct DoctorPendingRun {
     pub goal_file_path: String,
     pub phase: String,
     pub reason: String,
+    pub reason_code: String,
+    pub reason_detail: String,
     pub approval_state: String,
     pub verifier_state: String,
     pub advisory_constraints: String,
@@ -186,6 +188,8 @@ pub fn build_doctor_report(
             goal_file_path: pending.goal_file_path.clone(),
             phase: pending.phase.clone(),
             reason: pending.reason.clone(),
+            reason_code: pending.reason_code.clone(),
+            reason_detail: pending.reason_detail.clone(),
             approval_state: pending.approval_state.clone(),
             verifier_state: pending.verifier_state.clone(),
             advisory_constraints: pending.advisory_constraints.clone(),

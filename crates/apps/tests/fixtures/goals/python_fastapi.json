@@ -5,8 +5,8 @@
     { "label": "domain", "detail": "python-fastapi-basic representative path" }
   ],
   "done_conditions": [
-    { "label": "report", "evidence": "report artifact exists" },
-    { "label": "api", "evidence": "report artifact exists" }
+    { "label": "report", "evidence": "report_artifact_exists" },
+    { "label": "api", "evidence": "report_artifact_exists" }
   ],
   "verification_checks": [
     { "label": "test", "detail": "pytest" },

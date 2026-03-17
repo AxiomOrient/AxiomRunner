@@ -1,4 +1,5 @@
 use super::*;
+use axiomrunner_core::DoneConditionEvidence;
 use crate::runtime_compose::step_name;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -20,7 +21,6 @@ pub(super) struct FinalizeRunInput<'a> {
 }
 
 struct StepJournalInput<'a> {
-    template: &'a RunTemplate,
     plan: &'a crate::runtime_compose::RuntimeRunPlan,
     verification: &'a RuntimeRunVerification,
     final_phase: RuntimeRunPhase,
@@ -286,7 +286,7 @@ fn classify_goal_verifier_strength(
     None
 }
 
-pub(super) fn apply_goal_done_conditions(
+pub(crate) fn apply_goal_done_conditions(
     goal_file: &crate::cli_command::GoalFileTemplate,
     execution: &RuntimeComposeExecution,
     report_patch_artifacts: &[crate::runtime_compose::RuntimeComposePatchArtifact],
@@ -301,7 +301,7 @@ pub(super) fn apply_goal_done_conditions(
         goal_done_condition_failure(goal_file, execution, report_patch_artifacts, &mut checks);
 
     match failure {
-        Some(summary) => (
+        Some((summary, reason_code, reason_detail)) => (
             RuntimeRunRecord {
                 verification: RuntimeRunVerification {
                     status: "failed",
@@ -311,6 +311,8 @@ pub(super) fn apply_goal_done_conditions(
                 phase: RuntimeRunPhase::Failed,
                 outcome: RuntimeRunOutcome::Failed,
                 reason: summary,
+                reason_code,
+                reason_detail,
                 ..record
             },
             true,
@@ -334,14 +336,17 @@ fn goal_done_condition_failure(
     execution: &RuntimeComposeExecution,
     report_patch_artifacts: &[crate::runtime_compose::RuntimeComposePatchArtifact],
     checks: &mut Vec<String>,
-) -> Option<String> {
+) -> Option<(String, String, String)> {
     if execution.tool_outputs.is_empty() {
-        return Some(String::from("goal_execution_missing_verifier_output"));
+        return Some(crate::runtime_compose::runtime_run_reason(
+            "goal_execution_missing_verifier_output",
+            "none",
+        ));
     }
 
     for condition in &goal_file.goal.done_conditions {
-        match condition.evidence.as_str() {
-            "report artifact exists" => {
+        match &condition.evidence {
+            DoneConditionEvidence::ReportArtifactExists => {
                 let ok = report_patch_artifacts
                     .iter()
                     .any(|artifact| artifact.target_path.ends_with(".report.md"));
@@ -351,17 +356,70 @@ fn goal_done_condition_failure(
                     if ok { "present" } else { "missing" }
                 ));
                 if !ok {
-                    return Some(format!(
-                        "done_condition_missing_report_artifact:{}",
-                        condition.label
+                    return Some(crate::runtime_compose::runtime_run_reason(
+                        "done_condition_missing_report_artifact",
+                        condition.label.clone(),
                     ));
                 }
             }
-            other => {
-                return Some(format!(
-                    "unsupported_done_condition_evidence:{}:{}",
-                    condition.label, other
+            DoneConditionEvidence::FileExists { path } => {
+                let full_path = std::path::Path::new(&goal_file.goal.workspace_root).join(path);
+                let ok = full_path.is_file();
+                checks.push(format!(
+                    "done_condition={} file_exists={} status={}",
+                    condition.label,
+                    path,
+                    if ok { "present" } else { "missing" }
                 ));
+                if !ok {
+                    return Some(crate::runtime_compose::runtime_run_reason(
+                        "done_condition_missing_file",
+                        format!("{}:{}", condition.label, path),
+                    ));
+                }
+            }
+            DoneConditionEvidence::PathChanged { path } => {
+                let ok = execution
+                    .patch_artifacts
+                    .iter()
+                    .chain(report_patch_artifacts.iter())
+                    .any(|artifact| {
+                        artifact.target_path == *path
+                            || artifact
+                                .target_path
+                                .strip_prefix(path)
+                                .map(|suffix| suffix.starts_with('/'))
+                                .unwrap_or(false)
+                    });
+                checks.push(format!(
+                    "done_condition={} path_changed={} status={}",
+                    condition.label,
+                    path,
+                    if ok { "present" } else { "missing" }
+                ));
+                if !ok {
+                    return Some(crate::runtime_compose::runtime_run_reason(
+                        "done_condition_path_not_changed",
+                        format!("{}:{}", condition.label, path),
+                    ));
+                }
+            }
+            DoneConditionEvidence::CommandExitZero { command } => {
+                let ok = parse_goal_verifier_evidence(&execution.tool_outputs)
+                    .iter()
+                    .any(|evidence| evidence.command == *command && evidence.exit_code == 0);
+                checks.push(format!(
+                    "done_condition={} command_exit_zero={} status={}",
+                    condition.label,
+                    command,
+                    if ok { "present" } else { "missing" }
+                ));
+                if !ok {
+                    return Some(crate::runtime_compose::runtime_run_reason(
+                        "done_condition_command_not_verified",
+                        format!("{}:{}", condition.label, command),
+                    ));
+                }
             }
         }
     }
@@ -385,7 +443,7 @@ pub(super) fn finalize_run(
         requested_max_tokens,
     } = input;
 
-    let (phase, outcome, reason) = finalize_goal_run(
+    let (phase, outcome, reason, reason_code, reason_detail) = finalize_goal_run(
         template,
         &plan,
         &applied,
@@ -397,7 +455,6 @@ pub(super) fn finalize_run(
     );
 
     let step_journal = build_step_journal(StepJournalInput {
-        template,
         plan: &plan,
         verification: &verification,
         final_phase: phase,
@@ -417,6 +474,8 @@ pub(super) fn finalize_run(
             phase,
             outcome,
             reason,
+            reason_code,
+            reason_detail,
         },
     }
 }
@@ -430,71 +489,91 @@ fn finalize_goal_run(
     compose: &crate::runtime_compose::RuntimeComposeHealth,
     approval_granted: bool,
     requested_max_tokens: usize,
-) -> (RuntimeRunPhase, RuntimeRunOutcome, String) {
+) -> (
+    RuntimeRunPhase,
+    RuntimeRunOutcome,
+    String,
+    String,
+    String,
+) {
     if let Some(reason) = goal_budget_guard_reason(goal_file, plan_ref, requested_max_tokens) {
-        (
-            RuntimeRunPhase::Blocked,
-            RuntimeRunOutcome::BudgetExhausted,
-            reason,
-        )
+        let (rendered, code, detail) = if let Some(detail) =
+            reason.strip_prefix("budget_exhausted_before_execution_tokens:")
+        {
+            (
+                reason.clone(),
+                String::from("budget_exhausted_before_execution_tokens"),
+                detail.to_owned(),
+            )
+        } else {
+            (
+                String::from("budget_exhausted_before_execution"),
+                String::from("budget_exhausted_before_execution"),
+                String::from("none"),
+            )
+        };
+        (RuntimeRunPhase::Blocked, RuntimeRunOutcome::BudgetExhausted, rendered, code, detail)
     } else if goal_requires_pre_execution_approval(goal_file) && !approval_granted {
+        let detail = verification
+            .summary
+            .strip_prefix("approval_required_before_execution:")
+            .unwrap_or("none")
+            .to_owned();
+        let rendered = verification.summary.clone();
+        let code = String::from("approval_required_before_execution");
         (
             RuntimeRunPhase::WaitingApproval,
             RuntimeRunOutcome::ApprovalRequired,
-            verification.summary.clone(),
+            rendered,
+            code,
+            detail,
         )
     } else if verification.status == "passed" {
-        (
-            RuntimeRunPhase::Completed,
-            RuntimeRunOutcome::Success,
-            String::from("verification_passed"),
-        )
+        let (rendered, code, detail) =
+            crate::runtime_compose::runtime_run_reason("verification_passed", "none");
+        (RuntimeRunPhase::Completed, RuntimeRunOutcome::Success, rendered, code, detail)
     } else if matches!(
         verification.status,
         "verification_weak" | "verification_unresolved" | "pack_required"
     ) {
-        (
-            RuntimeRunPhase::Blocked,
-            RuntimeRunOutcome::Blocked,
-            verification.summary.clone(),
-        )
+        let rendered = verification.summary.clone();
+        let code = String::from("verification_blocked");
+        let detail = verification.summary.clone();
+        (RuntimeRunPhase::Blocked, RuntimeRunOutcome::Blocked, rendered, code, detail)
     } else if verification.summary.starts_with("repair_budget_exhausted") {
-        (
-            RuntimeRunPhase::Blocked,
-            RuntimeRunOutcome::BudgetExhausted,
-            verification.summary.clone(),
-        )
+        let rendered = verification.summary.clone();
+        let code = String::from("repair_budget_exhausted");
+        let detail = verification.summary.clone();
+        (RuntimeRunPhase::Blocked, RuntimeRunOutcome::BudgetExhausted, rendered, code, detail)
     } else if applied.outcome == DecisionOutcome::Rejected {
         blocked_policy_outcome(applied)
     } else if matches!(execution.first_failure(), Some(("provider", _)))
         && compose.provider.state == "blocked"
     {
-        (
-            RuntimeRunPhase::Blocked,
-            RuntimeRunOutcome::Blocked,
-            String::from("provider_health_blocked"),
-        )
+        let (rendered, code, detail) =
+            crate::runtime_compose::runtime_run_reason("provider_health_blocked", "none");
+        (RuntimeRunPhase::Blocked, RuntimeRunOutcome::Blocked, rendered, code, detail)
     } else {
-        (
-            RuntimeRunPhase::Failed,
-            RuntimeRunOutcome::Failed,
-            verification.summary.clone(),
-        )
+        let rendered = verification.summary.clone();
+        let code = String::from("verification_failed");
+        let detail = verification.summary.clone();
+        (RuntimeRunPhase::Failed, RuntimeRunOutcome::Failed, rendered, code, detail)
     }
 }
 
-fn blocked_policy_outcome(applied: &AppliedIntent) -> (RuntimeRunPhase, RuntimeRunOutcome, String) {
-    (
-        RuntimeRunPhase::Blocked,
-        RuntimeRunOutcome::Blocked,
-        format!("policy={}", applied.policy_code.as_str()),
-    )
+fn blocked_policy_outcome(
+    applied: &AppliedIntent,
+) -> (RuntimeRunPhase, RuntimeRunOutcome, String, String, String) {
+    let rendered = format!("policy={}", applied.policy_code.as_str());
+    let code = String::from("blocked_by_policy");
+    let detail = applied.policy_code.as_str().to_owned();
+    (RuntimeRunPhase::Blocked, RuntimeRunOutcome::Blocked, rendered, code, detail)
 }
 
 fn goal_requires_pre_execution_approval(goal_file: &crate::cli_command::GoalFileTemplate) -> bool {
     matches!(
         goal_file.goal.approval_mode,
-        axiomrunner_core::RunApprovalMode::Always | axiomrunner_core::RunApprovalMode::OnRisk
+        axiomrunner_core::RunApprovalMode::Always
     ) || crate::runtime_compose::constraint_requires_pre_execution_approval(goal_file)
 }
 
@@ -544,7 +623,7 @@ pub(super) fn goal_pre_execution_guard(
     }
     if matches!(
         goal_file.goal.approval_mode,
-        axiomrunner_core::RunApprovalMode::Always | axiomrunner_core::RunApprovalMode::OnRisk
+        axiomrunner_core::RunApprovalMode::Always
     ) {
         return Some(PreExecutionGuard {
             summary: String::from("approval_required_before_execution"),
@@ -568,10 +647,12 @@ pub(super) fn apply_goal_elapsed_budget(
         RuntimeRunRecord {
             phase: RuntimeRunPhase::Blocked,
             outcome: RuntimeRunOutcome::BudgetExhausted,
-            reason: format!(
-                "budget_exhausted_elapsed_minutes:{}>{}",
-                record.elapsed_ms, limit_ms
+            reason: crate::runtime_compose::render_run_reason(
+                "budget_exhausted_elapsed_minutes",
+                &format!("{}>{}", record.elapsed_ms, limit_ms),
             ),
+            reason_code: String::from("budget_exhausted_elapsed_minutes"),
+            reason_detail: format!("{}>{}", record.elapsed_ms, limit_ms),
             ..record
         }
     } else {
@@ -585,49 +666,52 @@ pub(super) fn elapsed_ms(started_at: Instant) -> u64 {
 
 fn build_step_journal(input: StepJournalInput<'_>) -> Vec<RuntimeRunStepRecord> {
     let StepJournalInput {
-        template,
         plan,
         verification,
         final_phase,
         final_reason,
     } = input;
-    debug_assert!(
-        plan.steps.len() >= 3,
-        "goal plan must have ≥3 steps, got {}",
-        plan.steps.len()
-    );
-
-    vec![
-        RuntimeRunStepRecord {
-            id: plan.steps[0].id.clone(),
-            label: plan.steps[0].label.clone(),
-            phase: plan.steps[0].phase.to_owned(),
-            status: String::from("completed"),
-            evidence: format!("goal_file={}", template.path),
-            failure: None,
-        },
-        RuntimeRunStepRecord {
-            id: plan.steps[1].id.clone(),
-            label: plan.steps[1].label.clone(),
-            phase: plan.steps[1].phase.to_owned(),
-            status: if verification.status == "passed" {
-                String::from("verified")
-            } else {
-                String::from("failed")
-            },
-            evidence: verification.summary.clone(),
-            failure: (verification.status != "passed").then(|| verification.summary.clone()),
-        },
-        RuntimeRunStepRecord {
-            id: plan.steps[2].id.clone(),
-            label: plan.steps[2].label.clone(),
-            phase: String::from(run_phase_name(final_phase)),
-            status: goal_terminal_step_status(final_phase).to_owned(),
-            evidence: final_reason.to_owned(),
-            failure: matches!(final_phase, RuntimeRunPhase::Failed)
-                .then(|| final_reason.to_owned()),
-        },
-    ]
+    let last_index = plan.steps.len().saturating_sub(1);
+    plan.steps
+        .iter()
+        .enumerate()
+        .map(|(index, step)| {
+            if index == last_index {
+                return RuntimeRunStepRecord {
+                    id: step.id.clone(),
+                    label: step.label.clone(),
+                    phase: String::from(run_phase_name(final_phase)),
+                    status: goal_terminal_step_status(final_phase).to_owned(),
+                    evidence: final_reason.to_owned(),
+                    failure: matches!(final_phase, RuntimeRunPhase::Failed)
+                        .then(|| final_reason.to_owned()),
+                };
+            }
+            if step.phase == "verifying" {
+                return RuntimeRunStepRecord {
+                    id: step.id.clone(),
+                    label: step.label.clone(),
+                    phase: step.phase.to_owned(),
+                    status: if verification.status == "passed" {
+                        String::from("verified")
+                    } else {
+                        String::from("failed")
+                    },
+                    evidence: verification.summary.clone(),
+                    failure: (verification.status != "passed")
+                        .then(|| verification.summary.clone()),
+                };
+            }
+            RuntimeRunStepRecord {
+                id: step.id.clone(),
+                label: step.label.clone(),
+                phase: step.phase.to_owned(),
+                status: String::from("completed"),
+                evidence: step.done_when.clone(),
+                failure: None,
+            }
+        })
+        .collect()
 }
 
 fn goal_terminal_step_status(final_phase: RuntimeRunPhase) -> &'static str {

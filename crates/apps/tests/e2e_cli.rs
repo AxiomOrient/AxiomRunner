@@ -203,7 +203,7 @@ fn e2e_cli_goal_run_can_use_isolated_git_worktree() {
   "workspace_root": "/workspace",
   "constraints": [],
   "done_conditions": [
-    { "label": "report", "evidence": "report artifact exists" }
+    { "label": "report", "evidence": "report_artifact_exists" }
   ],
   "verification_checks": [
     { "label": "pwd", "detail": "pwd" }
@@ -287,7 +287,7 @@ fn e2e_cli_failed_isolated_run_writes_rollback_metadata() {
   "workspace_root": "/workspace",
   "constraints": [],
   "done_conditions": [
-    { "label": "report", "evidence": "report artifact exists" }
+    { "label": "report", "evidence": "report_artifact_exists" }
   ],
   "verification_checks": [
     { "label": "domain verification", "detail": "representative domain path" }
@@ -384,7 +384,7 @@ fn e2e_cli_goal_file_run_persists_run_id_and_supports_status_and_replay_by_run_i
     { "label": "non-goal", "detail": "no multi-agent orchestration" }
   ],
   "done_conditions": [
-    { "label": "report", "evidence": "report artifact exists" }
+    { "label": "report", "evidence": "report_artifact_exists" }
   ],
   "verification_checks": [
     { "label": "workspace files", "detail": "ls ." }
@@ -454,23 +454,23 @@ fn e2e_cli_goal_file_run_persists_run_id_and_supports_status_and_replay_by_run_i
 
 #[test]
 fn e2e_cli_goal_file_on_risk_requires_approval_before_execution() {
-    let workspace = unique_path("goal-file-on-risk-workspace", "dir");
-    let state_path = unique_path("goal-file-on-risk-state", "snapshot");
-    let goal_file = unique_path("goal-file-on-risk", "json");
+    let workspace = unique_path("goal-file-always-workspace", "dir");
+    let state_path = unique_path("goal-file-always-state", "snapshot");
+    let goal_file = unique_path("goal-file-always", "json");
     fs::write(
         &goal_file,
         r#"{
-  "summary": "Wait for on-risk approval before execution",
+  "summary": "Wait for always approval before execution",
   "workspace_root": "/workspace",
   "constraints": [],
   "done_conditions": [
-    { "label": "report", "evidence": "report artifact exists" }
+    { "label": "report", "evidence": "report_artifact_exists" }
   ],
   "verification_checks": [
     { "label": "workspace files", "detail": "ls ." }
   ],
   "budget": { "max_steps": 5, "max_minutes": 10, "max_tokens": 8000 },
-  "approval_mode": "on-risk"
+  "approval_mode": "always"
 }"#,
     )
     .expect("goal file should be written");
@@ -481,7 +481,7 @@ fn e2e_cli_goal_file_on_risk_requires_approval_before_execution() {
             ("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace)),
             ("AXIOMRUNNER_RUNTIME_STATE_PATH", path_str(&state_path)),
         ],
-        "goal-file-on-risk-run",
+        "goal-file-always-run",
     );
     assert!(run.status.success());
     assert!(stdout_of(&run).contains(
@@ -510,7 +510,7 @@ fn e2e_cli_goal_file_on_risk_requires_approval_before_execution() {
             ("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace)),
             ("AXIOMRUNNER_RUNTIME_STATE_PATH", path_str(&state_path)),
         ],
-        "goal-file-on-risk-resume",
+        "goal-file-always-resume",
     );
     let status = run_cli_with_env(
         &["status", "run-1"],
@@ -518,12 +518,12 @@ fn e2e_cli_goal_file_on_risk_requires_approval_before_execution() {
             ("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace)),
             ("AXIOMRUNNER_RUNTIME_STATE_PATH", path_str(&state_path)),
         ],
-        "goal-file-on-risk-status",
+        "goal-file-always-status",
     );
     let replay = run_cli_with_env(
         &["replay", "run-1"],
         &[("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
-        "goal-file-on-risk-replay",
+        "goal-file-always-replay",
     );
 
     assert!(resume.status.success());
@@ -552,7 +552,7 @@ fn e2e_cli_goal_file_approval_can_resume_from_pending_run() {
   "workspace_root": "/workspace",
   "constraints": [],
   "done_conditions": [
-    { "label": "report", "evidence": "report artifact exists" }
+    { "label": "report", "evidence": "report_artifact_exists" }
   ],
   "verification_checks": [
     { "label": "workspace files", "detail": "ls ." }
@@ -662,7 +662,7 @@ fn e2e_cli_goal_file_pending_run_can_abort_cleanly() {
   "workspace_root": "/workspace",
   "constraints": [],
   "done_conditions": [
-    { "label": "report", "evidence": "report artifact exists" }
+    { "label": "report", "evidence": "report_artifact_exists" }
   ],
   "verification_checks": [
     { "label": "workspace files", "detail": "ls ." }
@@ -758,7 +758,7 @@ fn e2e_cli_goal_file_blocks_when_step_budget_is_already_exhausted() {
   "workspace_root": "/workspace",
   "constraints": [],
   "done_conditions": [
-    { "label": "report", "evidence": "report artifact exists" }
+    { "label": "report", "evidence": "report_artifact_exists" }
   ],
   "verification_checks": [
     { "label": "workspace files", "detail": "ls ." }
@@ -825,7 +825,7 @@ fn e2e_cli_goal_file_blocks_when_token_budget_is_already_exhausted() {
   "workspace_root": "/workspace",
   "constraints": [],
   "done_conditions": [
-    { "label": "report", "evidence": "report artifact exists" }
+    { "label": "report", "evidence": "report_artifact_exists" }
   ],
   "verification_checks": [
     { "label": "workspace files", "detail": "ls ." }
@@ -890,7 +890,7 @@ fn e2e_cli_goal_file_uses_bounded_repair_budget() {
   "workspace_root": "/workspace",
   "constraints": [],
   "done_conditions": [
-    { "label": "report", "evidence": "report artifact exists" }
+    { "label": "report", "evidence": "report_artifact_exists" }
   ],
   "verification_checks": [
     { "label": "workspace files", "detail": "ls ." }
@@ -944,7 +944,7 @@ fn e2e_cli_goal_file_zero_repair_budget_does_not_claim_attempt() {
   "workspace_root": "/workspace",
   "constraints": [],
   "done_conditions": [
-    { "label": "report", "evidence": "report artifact exists" }
+    { "label": "report", "evidence": "report_artifact_exists" }
   ],
   "verification_checks": [
     { "label": "release gate", "detail": "cargo test -p axiomrunner_apps --test release_security_gate" }
@@ -998,7 +998,7 @@ fn e2e_cli_workspace_lock_blocks_mutating_commands_but_allows_status_reads() {
   "workspace_root": "/workspace",
   "constraints": [],
   "done_conditions": [
-    { "label": "report", "evidence": "report artifact exists" }
+    { "label": "report", "evidence": "report_artifact_exists" }
   ],
   "verification_checks": [
     { "label": "release gate", "detail": "cargo test -p axiomrunner_apps --test release_security_gate" }
@@ -1050,7 +1050,7 @@ fn e2e_cli_workspace_lock_recovers_stale_pid_and_runs() {
   "workspace_root": "/workspace",
   "constraints": [],
   "done_conditions": [
-    { "label": "report", "evidence": "report artifact exists" }
+    { "label": "report", "evidence": "report_artifact_exists" }
   ],
   "verification_checks": [
     { "label": "workspace files", "detail": "ls ." }
@@ -1108,7 +1108,7 @@ fn e2e_cli_resume_rejects_after_pending_run_was_already_completed() {
   "workspace_root": "/workspace",
   "constraints": [],
   "done_conditions": [
-    { "label": "report", "evidence": "report artifact exists" }
+    { "label": "report", "evidence": "report_artifact_exists" }
   ],
   "verification_checks": [
     { "label": "workspace files", "detail": "ls ." }
@@ -1185,28 +1185,26 @@ fn e2e_cli_goal_file_executes_external_workflow_pack_verifier_sequence() {
         r#"{
   "pack_id": "custom-pack",
   "version": "1",
-  "description": "custom verifier pack",
   "entry_goal": "goal",
-  "planner_hints": ["prefer ordered verifier flow"],
   "recommended_verifier_flow": ["lint", "build"],
   "allowed_tools": [{"operation": "run_command", "scope": "workspace"}],
   "verifier_rules": [
     {
       "label": "build-pass",
       "profile": "build",
-      "command_example": "pwd",
+      "command": { "program": "pwd", "args": [] },
       "artifact_expectation": "build path exists",
       "required": true
     },
     {
       "label": "lint-pass",
       "profile": "lint",
-      "command_example": "pwd",
+      "command": { "program": "pwd", "args": [] },
       "artifact_expectation": "lint path exists",
       "required": true
     }
   ],
-  "risk_policy": {"approval_mode": "never", "max_mutating_steps": 5}
+  "approval_mode": "never"
 }"#,
     )
     .expect("pack file should be written");
@@ -1218,7 +1216,7 @@ fn e2e_cli_goal_file_executes_external_workflow_pack_verifier_sequence() {
   "workspace_root": "/workspace",
   "constraints": [],
   "done_conditions": [
-    {{ "label": "report", "evidence": "report artifact exists" }}
+    {{ "label": "report", "evidence": "report_artifact_exists" }}
   ],
   "verification_checks": [
     {{ "label": "placeholder", "detail": "pwd" }}
@@ -1276,7 +1274,7 @@ fn e2e_cli_default_goal_pack_blocks_when_verification_is_pack_required() {
   "workspace_root": "/workspace",
   "constraints": [],
   "done_conditions": [
-    { "label": "report", "evidence": "report artifact exists" }
+    { "label": "report", "evidence": "report_artifact_exists" }
   ],
   "verification_checks": [
     { "label": "domain verification", "detail": "representative domain path" }
@@ -1340,7 +1338,7 @@ fn e2e_cli_default_goal_pack_blocks_when_verification_is_weak() {
   "workspace_root": "/workspace",
   "constraints": [],
   "done_conditions": [
-    { "label": "report", "evidence": "report artifact exists" }
+    { "label": "report", "evidence": "report_artifact_exists" }
   ],
   "verification_checks": [
     { "label": "workspace consistency", "detail": "workspace consistency review" }
@@ -1391,21 +1389,19 @@ fn e2e_cli_constraints_block_external_verifier_commands() {
         r#"{
   "pack_id": "external-check-pack",
   "version": "1",
-  "description": "uses an external verifier command",
   "entry_goal": "goal",
-  "planner_hints": [],
   "recommended_verifier_flow": ["generic"],
   "allowed_tools": [{"operation": "run_command", "scope": "workspace"}],
   "verifier_rules": [
     {
       "label": "external-check",
       "profile": "generic",
-      "command_example": "curl https://example.com",
+      "command": { "program": "curl", "args": ["https://example.com"] },
       "artifact_expectation": "external command should not run",
       "required": true
     }
   ],
-  "risk_policy": {"approval_mode": "never", "max_mutating_steps": 5}
+  "approval_mode": "never"
 }"#,
     )
     .expect("pack file should be written");
@@ -1419,7 +1415,7 @@ fn e2e_cli_constraints_block_external_verifier_commands() {
     {{ "label": "external_commands", "detail": "deny" }}
   ],
   "done_conditions": [
-    {{ "label": "report", "evidence": "report artifact exists" }}
+    {{ "label": "report", "evidence": "report_artifact_exists" }}
   ],
   "verification_checks": [
     {{ "label": "placeholder", "detail": "ls ." }}
@@ -1466,21 +1462,19 @@ fn e2e_cli_constraints_block_destructive_verifier_commands() {
         r#"{
   "pack_id": "destructive-check-pack",
   "version": "1",
-  "description": "uses a destructive verifier command",
   "entry_goal": "goal",
-  "planner_hints": [],
   "recommended_verifier_flow": ["generic"],
   "allowed_tools": [{"operation": "run_command", "scope": "workspace"}],
   "verifier_rules": [
     {
       "label": "destructive-check",
       "profile": "generic",
-      "command_example": "rm build-cache",
+      "command": { "program": "rm", "args": ["build-cache"] },
       "artifact_expectation": "destructive command should not run",
       "required": true
     }
   ],
-  "risk_policy": {"approval_mode": "never", "max_mutating_steps": 5}
+  "approval_mode": "never"
 }"#,
     )
     .expect("pack file should be written");
@@ -1494,7 +1488,7 @@ fn e2e_cli_constraints_block_destructive_verifier_commands() {
     {{ "label": "destructive_commands", "detail": "deny" }}
   ],
   "done_conditions": [
-    {{ "label": "report", "evidence": "report artifact exists" }}
+    {{ "label": "report", "evidence": "report_artifact_exists" }}
   ],
   "verification_checks": [
     {{ "label": "placeholder", "detail": "ls ." }}
@@ -1534,21 +1528,19 @@ fn e2e_cli_constraints_block_verifier_path_outside_scope() {
         r#"{
   "pack_id": "path-scope-pack",
   "version": "1",
-  "description": "uses a scoped verifier command",
   "entry_goal": "goal",
-  "planner_hints": [],
   "recommended_verifier_flow": ["generic"],
   "allowed_tools": [{"operation": "run_command", "scope": "workspace"}],
   "verifier_rules": [
     {
       "label": "scope-check",
       "profile": "generic",
-      "command_example": "ls src",
+      "command": { "program": "ls", "args": ["src"] },
       "artifact_expectation": "scope command should stay inside tests",
       "required": true
     }
   ],
-  "risk_policy": {"approval_mode": "never", "max_mutating_steps": 5}
+  "approval_mode": "never"
 }"#,
     )
     .expect("pack file should be written");
@@ -1562,7 +1554,7 @@ fn e2e_cli_constraints_block_verifier_path_outside_scope() {
     {{ "label": "path_scope", "detail": "tests" }}
   ],
   "done_conditions": [
-    {{ "label": "report", "evidence": "report artifact exists" }}
+    {{ "label": "report", "evidence": "report_artifact_exists" }}
   ],
   "verification_checks": [
     {{ "label": "placeholder", "detail": "ls ." }}
@@ -1603,21 +1595,19 @@ fn e2e_cli_constraints_escalate_high_risk_verifier_to_pending_approval() {
         r#"{
   "pack_id": "approval-escalation-pack",
   "version": "1",
-  "description": "uses a high-risk verifier command",
   "entry_goal": "goal",
-  "planner_hints": [],
   "recommended_verifier_flow": ["generic"],
   "allowed_tools": [{"operation": "run_command", "scope": "workspace"}],
   "verifier_rules": [
     {
       "label": "git-status",
       "profile": "generic",
-      "command_example": "git status --short",
+      "command": { "program": "git", "args": ["status", "--short"] },
       "artifact_expectation": "git status should run only after approval",
       "required": true
     }
   ],
-  "risk_policy": {"approval_mode": "never", "max_mutating_steps": 5}
+  "approval_mode": "never"
 }"#,
     )
     .expect("pack file should be written");
@@ -1631,7 +1621,7 @@ fn e2e_cli_constraints_escalate_high_risk_verifier_to_pending_approval() {
     {{ "label": "approval_escalation", "detail": "required" }}
   ],
   "done_conditions": [
-    {{ "label": "report", "evidence": "report artifact exists" }}
+    {{ "label": "report", "evidence": "report_artifact_exists" }}
   ],
   "verification_checks": [
     {{ "label": "placeholder", "detail": "ls ." }}

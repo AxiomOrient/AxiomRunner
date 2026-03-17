@@ -208,8 +208,8 @@ fn autonomous_eval_corpus_representative_runs_remain_green() {
     }
 
     {
-        let workspace = unique_path("eval-on-risk-workspace", "dir");
-        let state_path = unique_path("eval-on-risk-state", "snapshot");
+        let workspace = unique_path("eval-always-workspace", "dir");
+        let state_path = unique_path("eval-always-state", "snapshot");
         let run = run_cli_with_env(
             &[
                 "run",
@@ -320,7 +320,7 @@ fn autonomous_eval_corpus_representative_runs_remain_green() {
   "workspace_root": "/workspace",
   "constraints": [],
   "done_conditions": [
-    { "label": "report", "evidence": "report artifact exists" }
+    { "label": "report", "evidence": "report_artifact_exists" }
   ],
   "verification_checks": [
     { "label": "workspace consistency", "detail": "workspace consistency review" }
@@ -364,7 +364,7 @@ fn autonomous_eval_corpus_representative_runs_remain_green() {
   "workspace_root": "/workspace",
   "constraints": [],
   "done_conditions": [
-    { "label": "report", "evidence": "report artifact exists" }
+    { "label": "report", "evidence": "report_artifact_exists" }
   ],
   "verification_checks": [
     { "label": "domain verification", "detail": "representative domain path" }

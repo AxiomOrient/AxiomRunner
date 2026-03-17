@@ -1,12 +1,7 @@
 {
   "pack_id": "rust-service-basic",
   "version": "1",
-  "description": "Rust service verifier pack",
   "entry_goal": "implement one bounded Rust service task",
-  "planner_hints": [
-    "prefer cargo-native verification",
-    "run build then test then lint"
-  ],
   "recommended_verifier_flow": ["build", "test", "lint"],
   "allowed_tools": [
     { "operation": "read_file", "scope": "workspace" },
@@ -16,27 +11,24 @@
     {
       "label": "build",
       "profile": "build",
-      "command_example": "cargo build",
+      "command": { "program": "cargo", "args": ["build"] },
       "artifact_expectation": "cargo build passes",
       "required": true
     },
     {
       "label": "test",
       "profile": "test",
-      "command_example": "cargo test",
+      "command": { "program": "cargo", "args": ["test"] },
       "artifact_expectation": "cargo test passes",
       "required": true
     },
     {
       "label": "lint",
       "profile": "lint",
-      "command_example": "cargo clippy -- -D warnings",
+      "command": { "program": "cargo", "args": ["clippy", "--", "-D", "warnings"] },
       "artifact_expectation": "cargo clippy passes",
       "required": true
     }
   ],
-  "risk_policy": {
-    "approval_mode": "never",
-    "max_mutating_steps": 8
-  }
+  "approval_mode": "never"
 }

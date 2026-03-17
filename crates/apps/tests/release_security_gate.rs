@@ -283,31 +283,13 @@ fn release_security_gate_identity_surface_is_locked() {
 fn release_security_gate_bridge_docs_lock_autonomous_target_contract() {
     let readme = include_str!("../../../README.md");
     let docs_guide = include_str!("../../../docs/README.md");
-    let target = include_str!("../../../docs/AUTONOMOUS_AGENT_TARGET.md");
-    let spec = include_str!("../../../docs/AUTONOMOUS_AGENT_SPEC.md");
+    let bridge = include_str!("../../../docs/AUTONOMOUS_AGENT_BRIDGE.md");
     let workflow_pack = include_str!("../../../docs/WORKFLOW_PACK_CONTRACT.md");
 
     for token in ["run <goal>", "resume", "abort", "goal", "approval", "trace"] {
         assert!(
-            target.contains(token) || spec.contains(token),
+            bridge.contains(token),
             "bridge docs missing token: {token}"
-        );
-    }
-
-    for token in [
-        "goal",
-        "done condition",
-        "budget",
-        "approval",
-        "verification",
-        "artifacts",
-        "success",
-        "failed",
-        "aborted",
-    ] {
-        assert!(
-            spec.contains(token),
-            "autonomous spec missing token: {token}"
         );
     }
 
@@ -323,7 +305,7 @@ fn release_security_gate_bridge_docs_lock_autonomous_target_contract() {
         );
     }
 
-    for doc in [readme, target, docs_guide] {
+    for doc in [readme, bridge, docs_guide] {
         assert!(
             !doc.contains("docs/transition/README.md"),
             "root docs must not point at removed docs/transition/README.md"
@@ -412,7 +394,7 @@ fn release_security_gate_naming_truth_rejects_injected_fixture() {
 
 #[test]
 fn release_security_gate_placeholder_verifier_rejects_injected_fixture_and_examples_stay_clean() {
-    let fixture = r#"{"command_example":"pwd"}"#;
+    let fixture = r#"{"command":{"program":"pwd","args":[]}}"#;
     assert!(contains_placeholder_verifier(fixture));
 
     for contents in [
@@ -486,8 +468,8 @@ fn release_security_gate_relative_doc_and_example_paths_exist() {
         ("docs/README.md", include_str!("../../../docs/README.md")),
         ("docs/RUNBOOK.md", include_str!("../../../docs/RUNBOOK.md")),
         (
-            "docs/AUTONOMOUS_AGENT_TARGET.md",
-            include_str!("../../../docs/AUTONOMOUS_AGENT_TARGET.md"),
+            "docs/AUTONOMOUS_AGENT_BRIDGE.md",
+            include_str!("../../../docs/AUTONOMOUS_AGENT_BRIDGE.md"),
         ),
         (
             "docs/WORKFLOW_PACK_CONTRACT.md",
@@ -527,7 +509,7 @@ fn release_security_gate_pack_required_goals_block_instead_of_claiming_success()
   "workspace_root": "/workspace",
   "constraints": [],
   "done_conditions": [
-    { "label": "report", "evidence": "report artifact exists" }
+    { "label": "report", "evidence": "report_artifact_exists" }
   ],
   "verification_checks": [
     { "label": "domain verification", "detail": "representative domain path" }
@@ -775,9 +757,9 @@ fn naming_truth_issues(contents: &str) -> Vec<String> {
 }
 
 fn contains_placeholder_verifier(contents: &str) -> bool {
-    contents.contains("\"command_example\":\"pwd\"")
-        || contents.contains("\"command_example\": \"pwd\"")
-        || contents.contains("command_example = \"pwd\"")
+    contents.contains("\"program\":\"pwd\"")
+        || contents.contains("\"program\": \"pwd\"")
+        || contents.contains("program = \"pwd\"")
 }
 
 fn nightly_summary_has_untrusted_green(contents: &str) -> bool {

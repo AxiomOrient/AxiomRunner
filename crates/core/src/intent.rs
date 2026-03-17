@@ -3,11 +3,6 @@ use crate::validation::ensure_not_blank;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RunApprovalMode {
     Never,
-    /// Human approval required when the goal is classified as risky.
-    /// **Current behavior**: identical to `Always` — risk classification is not yet
-    /// implemented. A future release will introduce mutation-count and tool-scope
-    /// heuristics to distinguish `OnRisk` from `Always`.
-    OnRisk,
     Always,
 }
 
@@ -65,7 +60,70 @@ pub enum RunConstraintMode {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DoneCondition {
     pub label: String,
-    pub evidence: String,
+    pub evidence: DoneConditionEvidence,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DoneConditionEvidence {
+    ReportArtifactExists,
+    FileExists { path: String },
+    PathChanged { path: String },
+    CommandExitZero { command: String },
+}
+
+impl DoneConditionEvidence {
+    pub fn parse(raw: &str) -> Result<Self, DoneConditionEvidenceParseError> {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            return Err(DoneConditionEvidenceParseError::Empty);
+        }
+        if trimmed == "report_artifact_exists" {
+            return Ok(Self::ReportArtifactExists);
+        }
+
+        let (kind, detail) = trimmed
+            .split_once(':')
+            .ok_or_else(|| DoneConditionEvidenceParseError::Unsupported {
+                raw: trimmed.to_owned(),
+            })?;
+        let value = detail.trim();
+        if value.is_empty() {
+            return Err(DoneConditionEvidenceParseError::MissingValue {
+                kind: kind.to_owned(),
+            });
+        }
+
+        match kind {
+            "file_exists" => Ok(Self::FileExists {
+                path: value.to_owned(),
+            }),
+            "path_changed" => Ok(Self::PathChanged {
+                path: value.to_owned(),
+            }),
+            "command_exit_zero" => Ok(Self::CommandExitZero {
+                command: value.to_owned(),
+            }),
+            _ => Err(DoneConditionEvidenceParseError::Unsupported {
+                raw: trimmed.to_owned(),
+            }),
+        }
+    }
+
+    pub fn as_str(&self) -> String {
+        match self {
+            Self::ReportArtifactExists => String::from("report_artifact_exists"),
+            Self::FileExists { path } => format!("file_exists:{path}"),
+            Self::PathChanged { path } => format!("path_changed:{path}"),
+            Self::CommandExitZero { command } => format!("command_exit_zero:{command}"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DoneConditionEvidenceParseError {
+    Empty,
+    MissingValue { kind: String },
+    Unsupported { raw: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -100,7 +158,10 @@ pub enum RunGoalValidationError {
     ConstraintDetailEmpty { index: usize },
     DoneConditionsEmpty,
     DoneConditionLabelEmpty { index: usize },
-    DoneConditionEvidenceEmpty { index: usize },
+    DoneConditionEvidenceInvalid {
+        index: usize,
+        error: DoneConditionEvidenceParseError,
+    },
     VerificationChecksEmpty,
     VerificationCheckLabelEmpty { index: usize },
     VerificationCheckDetailEmpty { index: usize },
@@ -136,10 +197,9 @@ impl RunGoal {
                 done_condition.label.as_str(),
                 RunGoalValidationError::DoneConditionLabelEmpty { index },
             )?;
-            ensure_not_blank(
-                done_condition.evidence.as_str(),
-                RunGoalValidationError::DoneConditionEvidenceEmpty { index },
-            )?;
+            if let Err(error) = DoneConditionEvidence::parse(&done_condition.evidence.as_str()) {
+                return Err(RunGoalValidationError::DoneConditionEvidenceInvalid { index, error });
+            }
         }
 
         if self.verification_checks.is_empty() {
@@ -183,7 +243,10 @@ impl RunConstraint {
 
 #[cfg(test)]
 mod tests {
-    use super::{RunConstraint, RunConstraintMode, RunConstraintPolicyKey};
+    use super::{
+        DoneConditionEvidence, DoneConditionEvidenceParseError, RunConstraint, RunConstraintMode,
+        RunConstraintPolicyKey,
+    };
 
     #[test]
     fn run_constraint_recognizes_enforced_subset_labels() {
@@ -222,5 +285,51 @@ mod tests {
 
         assert_eq!(constraint.policy_key(), None);
         assert_eq!(constraint.mode(), RunConstraintMode::Advisory);
+    }
+
+    #[test]
+    fn done_condition_evidence_parses_v1_vocabulary() {
+        assert_eq!(
+            DoneConditionEvidence::parse("report_artifact_exists"),
+            Ok(DoneConditionEvidence::ReportArtifactExists)
+        );
+        assert_eq!(
+            DoneConditionEvidence::parse("file_exists:Cargo.toml"),
+            Ok(DoneConditionEvidence::FileExists {
+                path: String::from("Cargo.toml")
+            })
+        );
+        assert_eq!(
+            DoneConditionEvidence::parse("path_changed:src"),
+            Ok(DoneConditionEvidence::PathChanged {
+                path: String::from("src")
+            })
+        );
+        assert_eq!(
+            DoneConditionEvidence::parse("command_exit_zero:cargo test -q"),
+            Ok(DoneConditionEvidence::CommandExitZero {
+                command: String::from("cargo test -q")
+            })
+        );
+    }
+
+    #[test]
+    fn done_condition_evidence_rejects_unsupported_or_blank_values() {
+        assert_eq!(
+            DoneConditionEvidence::parse(""),
+            Err(DoneConditionEvidenceParseError::Empty)
+        );
+        assert_eq!(
+            DoneConditionEvidence::parse("report artifact exists"),
+            Err(DoneConditionEvidenceParseError::Unsupported {
+                raw: String::from("report artifact exists")
+            })
+        );
+        assert_eq!(
+            DoneConditionEvidence::parse("file_exists:"),
+            Err(DoneConditionEvidenceParseError::MissingValue {
+                kind: String::from("file_exists")
+            })
+        );
     }
 }

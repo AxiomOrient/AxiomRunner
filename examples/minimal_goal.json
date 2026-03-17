@@ -3,7 +3,7 @@
   "workspace_root": ".",
   "constraints": [],
   "done_conditions": [
-    { "label": "report", "evidence": "report artifact exists" }
+    { "label": "report", "evidence": "report_artifact_exists" }
   ],
   "verification_checks": [
     { "label": "workspace files", "detail": "ls ." }

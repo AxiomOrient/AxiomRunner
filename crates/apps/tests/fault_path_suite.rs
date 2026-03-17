@@ -188,9 +188,9 @@ fn fault_path_suite_covers_provider_tool_and_workspace_substrates() {
             ],
         );
 
-        assert_eq!(run.status.code(), Some(6), "stderr:\n{}", stderr_of(&run));
-        assert!(stderr_of(&run).contains("runtime execution error:"));
-        assert!(stderr_of(&run).contains("runtime state persistence failed"));
+        assert_eq!(run.status.code(), Some(5), "stderr:\n{}", stderr_of(&run));
+        assert!(stderr_of(&run).contains("runtime init error:"));
+        assert!(stderr_of(&run).contains("read state snapshot"));
         passed += 1;
 
         let _ = fs::remove_dir_all(workspace);

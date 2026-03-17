@@ -1,12 +1,7 @@
 {
   "pack_id": "nextjs-app-basic",
   "version": "1",
-  "description": "Next.js app verifier pack",
   "entry_goal": "implement one bounded Next.js app task",
-  "planner_hints": [
-    "run lint first",
-    "treat typecheck as generic verifier"
-  ],
   "recommended_verifier_flow": ["lint", "generic", "test", "build"],
   "allowed_tools": [
     { "operation": "read_file", "scope": "workspace" },
@@ -16,34 +11,31 @@
     {
       "label": "lint",
       "profile": "lint",
-      "command_example": "npm run lint",
+      "command": { "program": "npm", "args": ["run", "lint"] },
       "artifact_expectation": "lint succeeds",
       "required": true
     },
     {
       "label": "typecheck",
       "profile": "generic",
-      "command_example": "npm run typecheck",
+      "command": { "program": "npm", "args": ["run", "typecheck"] },
       "artifact_expectation": "typecheck succeeds",
       "required": true
     },
     {
       "label": "test",
       "profile": "test",
-      "command_example": "npm test",
+      "command": { "program": "npm", "args": ["test"] },
       "artifact_expectation": "tests succeed",
       "required": true
     },
     {
       "label": "build",
       "profile": "build",
-      "command_example": "npm run build",
+      "command": { "program": "npm", "args": ["run", "build"] },
       "artifact_expectation": "build succeeds",
       "required": true
     }
   ],
-  "risk_policy": {
-    "approval_mode": "never",
-    "max_mutating_steps": 9
-  }
+  "approval_mode": "never"
 }

@@ -74,6 +74,9 @@ dependencies = [
 [[package]]
 name = "axiomrunner_core"
 version = "0.2.0"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "base64"

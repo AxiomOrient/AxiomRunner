@@ -1,10 +1,8 @@
 use crate::display::mode_name;
 use crate::doctor::DoctorReport;
-use crate::runtime_compose::{
-    next_action_for_outcome, run_reason_code, run_reason_detail, verifier_strength_label,
-};
+use crate::runtime_compose::{next_action_for_outcome, verifier_strength_label};
 use crate::status::StatusSnapshot;
-use crate::trace_store::{ReplaySummary, TraceArtifactIndex, TraceIntentEvent};
+use crate::storage::trace::{ReplaySummary, TraceArtifactIndex, TraceIntentEvent};
 
 pub fn render_status_lines(snapshot: &StatusSnapshot) -> Vec<String> {
     let mut lines = vec![
@@ -47,8 +45,8 @@ pub fn render_status_lines(snapshot: &StatusSnapshot) -> Vec<String> {
             run.phase,
             run.outcome,
             run.reason,
-            run_reason_code(&run.reason),
-            run_reason_detail(&run.reason),
+            run.reason_code,
+            run.reason_detail,
             run.approval_state,
             run.execution_workspace,
             run.verifier_state,
@@ -66,8 +64,8 @@ pub fn render_status_lines(snapshot: &StatusSnapshot) -> Vec<String> {
             pending.goal_file_path,
             pending.phase,
             pending.reason,
-            run_reason_code(&pending.reason),
-            run_reason_detail(&pending.reason),
+            pending.reason_code,
+            pending.reason_detail,
             pending.approval_state,
             pending.verifier_state,
             verifier_strength_label(&pending.verifier_state),
@@ -138,8 +136,8 @@ pub fn render_doctor_lines(report: &DoctorReport) -> Vec<String> {
             pending.goal_file_path,
             pending.phase,
             pending.reason,
-            run_reason_code(&pending.reason),
-            run_reason_detail(&pending.reason),
+            pending.reason_code,
+            pending.reason_detail,
             pending.approval_state,
             pending.verifier_state,
             verifier_strength_label(&pending.verifier_state),
@@ -205,8 +203,8 @@ pub fn render_replay_lines(
             run.phase,
             run.outcome,
             run.reason,
-            run_reason_code(&run.reason),
-            run_reason_detail(&run.reason),
+            run.reason_code,
+            run.reason_detail,
             next_action_for_outcome(&run.outcome),
             run.approval_state,
             run.verifier_state,

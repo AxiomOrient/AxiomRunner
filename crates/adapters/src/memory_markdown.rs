@@ -192,6 +192,13 @@ impl crate::contracts::MemoryAdapter for MarkdownMemoryAdapter {
                 RetryClass::NonRetryable,
             )
         })?;
+        if state
+            .records
+            .get(key)
+            .is_some_and(|record| record.value == value)
+        {
+            return Ok(());
+        }
         let record = MemoryRecord {
             key: key.to_string(),
             value: value.to_string(),

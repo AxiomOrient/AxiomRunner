@@ -234,6 +234,35 @@ fn markdown_memory_performance_smoke_small() {
 }
 
 #[test]
+fn markdown_memory_store_same_value_skips_rewrite() {
+    let file_path = temp_path("markdown_same_value", "md");
+    cleanup_file(&file_path);
+
+    let adapter =
+        MarkdownMemoryAdapter::new(&file_path).expect("markdown adapter init must succeed");
+    adapter
+        .store("alpha", "same note")
+        .expect("initial markdown store must succeed");
+    let first_modified = fs::metadata(&file_path)
+        .expect("memory file should exist")
+        .modified()
+        .expect("modified time should exist");
+    std::thread::sleep(Duration::from_millis(20));
+
+    adapter
+        .store("alpha", "same note")
+        .expect("duplicate markdown store must succeed");
+    let second_modified = fs::metadata(&file_path)
+        .expect("memory file should exist")
+        .modified()
+        .expect("modified time should exist");
+
+    assert_eq!(first_modified, second_modified);
+
+    cleanup_file(&file_path);
+}
+
+#[test]
 fn memory_tier_helpers_split_working_and_recall_namespaces() {
     assert_eq!(
         tiered_memory_key(MemoryTier::Recall, "last_run/cli-1"),

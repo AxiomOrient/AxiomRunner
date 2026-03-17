@@ -5,8 +5,8 @@
     { "label": "domain", "detail": "nextjs-app-basic representative path" }
   ],
   "done_conditions": [
-    { "label": "report", "evidence": "report artifact exists" },
-    { "label": "ui", "evidence": "report artifact exists" }
+    { "label": "report", "evidence": "report_artifact_exists" },
+    { "label": "ui", "evidence": "report_artifact_exists" }
   ],
   "verification_checks": [
     { "label": "build", "detail": "npm run build" },

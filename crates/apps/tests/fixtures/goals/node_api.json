@@ -5,8 +5,8 @@
     { "label": "domain", "detail": "node-api-basic representative path" }
   ],
   "done_conditions": [
-    { "label": "report", "evidence": "report artifact exists" },
-    { "label": "bundle", "evidence": "report artifact exists" }
+    { "label": "report", "evidence": "report_artifact_exists" },
+    { "label": "bundle", "evidence": "report_artifact_exists" }
   ],
   "verification_checks": [
     { "label": "build", "detail": "npm run build" },

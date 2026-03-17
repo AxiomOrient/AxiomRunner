@@ -1,13 +1,14 @@
 use crate::contracts::{
     AdapterHealth, FileMutationEvidence, FileWriteOutput, ListFilesOutput, ReadFileOutput,
-    RemovePathOutput, ReplaceInFileOutput, RunCommandOutput, RunCommandProfile, SearchFilesOutput,
-    SearchMatch, SearchMode, ToolAdapter, ToolPolicy, ToolRequest, ToolResult,
+    RemovePathOutput, ReplaceInFileOutput, RunCommandOutput, SearchFilesOutput, SearchMatch,
+    SearchMode, ToolAdapter, ToolPolicy, ToolRequest, ToolResult,
 };
 use crate::error::{AdapterError, AdapterResult, RetryClass};
 use crate::tool_workspace::{
     WorkspacePathError, canonicalize_workspace_root, collect_files_respecting_gitignore,
     resolve_workspace_path,
 };
+use axiomrunner_core::RunCommandProfile;
 use crate::tool_write::{
     CommandArtifact, PatchArtifact, WritePreparationError, atomic_overwrite, bounded_excerpt,
     bounded_unified_diff, digest_path, existing_digest, existing_utf8_contents,
@@ -329,7 +330,8 @@ impl WorkspaceTool {
             .zip(after_contents.as_deref())
             .and_then(|(before, after)| bounded_unified_diff(before, after, 2048));
         let artifact_path = write_patch_artifact(PatchArtifact {
-            workspace_root: &self.artifact_root,
+            artifact_root: &self.artifact_root,
+            workspace_root: &self.workspace_root,
             target_path: &resolved_path,
             operation,
             before_digest: before_digest.as_deref(),
@@ -452,7 +454,8 @@ impl WorkspaceTool {
             .as_deref()
             .and_then(|contents| bounded_excerpt(contents, 240));
         let artifact_path = write_patch_artifact(PatchArtifact {
-            workspace_root: &self.artifact_root,
+            artifact_root: &self.artifact_root,
+            workspace_root: &self.workspace_root,
             target_path: &resolved_path,
             operation: "remove",
             before_digest: before_digest.as_deref(),
@@ -557,7 +560,7 @@ impl WorkspaceTool {
         let rendered_stdout = finalize_command_output(stdout.bytes, stdout.truncated);
         let rendered_stderr = finalize_command_output(stderr.bytes, stderr.truncated);
         let artifact_path = write_command_artifact(CommandArtifact {
-            workspace_root: &self.artifact_root,
+            artifact_root: &self.artifact_root,
             program,
             args,
             profile: profile.as_str(),

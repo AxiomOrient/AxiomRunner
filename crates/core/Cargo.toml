@@ -8,3 +8,4 @@ description = "AxiomRunner core contracts"
 workspace = true
 
 [dependencies]
+serde = { version = "1", features = ["derive"] }

@@ -1,5 +1,5 @@
 use crate::goal_file::parse_goal_file_template;
-use axiomrunner_core::RunGoal;
+use axiomrunner_core::{RunGoal, WorkflowPackContract};
 use std::path::Path;
 
 pub const RETAINED_COMMANDS: &[&str; 8] = &[
@@ -48,7 +48,7 @@ pub enum CliCommand {
 pub struct GoalFileTemplate {
     pub path: String,
     pub goal: RunGoal,
-    pub workflow_pack: Option<axiomrunner_adapters::WorkflowPackContract>,
+    pub workflow_pack: Option<WorkflowPackContract>,
 }
 
 pub type RunTemplate = GoalFileTemplate;

@@ -13,6 +13,7 @@ pub struct OpenAiCompatProvider {
     base_url: String,
     experimental_enabled: bool,
     http: reqwest::Client,
+    http_init_warning: Option<String>,
 }
 
 impl OpenAiCompatProvider {
@@ -34,8 +35,14 @@ impl OpenAiCompatProvider {
         let http = reqwest::Client::builder()
             .connect_timeout(std::time::Duration::from_secs(HTTP_CONNECT_TIMEOUT_SECS))
             .timeout(std::time::Duration::from_secs(HTTP_REQUEST_TIMEOUT_SECS))
-            .build()
-            .unwrap_or_else(|_| reqwest::Client::new());
+            .build();
+        let (http, http_init_warning) = match http {
+            Ok(client) => (client, None),
+            Err(error) => (
+                reqwest::Client::new(),
+                Some(format!("http_client_builder_failed:{error}")),
+            ),
+        };
 
         Self {
             id_str,
@@ -43,6 +50,7 @@ impl OpenAiCompatProvider {
             base_url: base_url.into(),
             experimental_enabled,
             http,
+            http_init_warning,
         }
     }
 }
@@ -65,18 +73,31 @@ impl ProviderAdapter for OpenAiCompatProvider {
             .as_deref()
             .is_some_and(|value| !value.trim().is_empty());
         let detail = if has_api_key {
-            format!(
+            let mut detail = format!(
                 "provider=openai,mode=experimental,base_url={}",
                 self.base_url
-            )
+            );
+            if let Some(warning) = &self.http_init_warning {
+                detail.push_str(",warning=");
+                detail.push_str(warning);
+            }
+            detail
         } else {
-            String::from("reason=missing_openai_api_key,provider=openai,mode=experimental")
+            let mut detail =
+                String::from("reason=missing_openai_api_key,provider=openai,mode=experimental");
+            if let Some(warning) = &self.http_init_warning {
+                detail.push_str(",warning=");
+                detail.push_str(warning);
+            }
+            detail
         };
         Box::pin(async move {
-            Ok(if has_api_key {
-                ProviderHealthReport::ready(detail)
-            } else {
+            Ok(if !has_api_key {
                 ProviderHealthReport::blocked(detail)
+            } else if detail.contains("warning=http_client_builder_failed:") {
+                ProviderHealthReport::degraded(detail)
+            } else {
+                ProviderHealthReport::ready(detail)
             })
         })
     }

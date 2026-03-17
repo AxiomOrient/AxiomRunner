@@ -5,6 +5,13 @@ import re
 from pathlib import Path
 from typing import Optional
 
+SUPPORTED_DONE_EVIDENCE_PREFIXES = (
+    "report_artifact_exists",
+    "file_exists:",
+    "path_changed:",
+    "command_exit_zero:",
+)
+
 
 PRESETS = {
     "rust-service": {
@@ -79,14 +86,26 @@ def unique_ordered_constraints(base_constraints, slice_paths, extra_constraints)
 
 
 def build_done_conditions(slice_data):
+    explicit = slice_data.get("done_conditions")
+    if explicit:
+        for index, condition in enumerate(explicit, start=1):
+            evidence = condition.get("evidence", "").strip()
+            if not any(
+                evidence == prefix or evidence.startswith(prefix)
+                for prefix in SUPPORTED_DONE_EVIDENCE_PREFIXES
+            ):
+                raise ValueError(
+                    f"slice done_conditions[{index}] must use supported typed evidence"
+                )
+        return explicit
+
     done_conditions = []
-    for index, text in enumerate(slice_data["acceptance"], start=1):
-        done_conditions.append(
-            {
-                "label": f"acceptance-{index}",
-                "evidence": text,
-            }
-        )
+    done_conditions.append(
+        {
+            "label": "report",
+            "evidence": "report_artifact_exists",
+        }
+    )
     return done_conditions
 
 

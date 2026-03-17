@@ -1,9 +1,8 @@
 use crate::cli_command::RunTemplate;
-use axiomrunner_adapters::{
-    RunCommandProfile, WorkflowPackAllowedTool, WorkflowPackContract, WorkflowPackRiskPolicy,
-    WorkflowPackVerifierRule, WorkflowPackVerifierStrength,
+use axiomrunner_core::{
+    DecisionOutcome, RunCommandProfile, WorkflowPackAllowedTool, WorkflowPackContract,
+    WorkflowPackVerifierCommand, WorkflowPackVerifierRule, WorkflowPackVerifierStrength,
 };
-use axiomrunner_core::DecisionOutcome;
 
 const MAX_GOAL_PLAN_STEPS: usize = 8;
 
@@ -62,8 +61,7 @@ pub(super) struct RuntimeComposePlan {
 }
 
 struct DerivedVerifierCommand {
-    program: String,
-    args: Vec<String>,
+    command: WorkflowPackVerifierCommand,
     expectation: String,
     strength: WorkflowPackVerifierStrength,
 }
@@ -92,7 +90,8 @@ fn build_goal_runtime_run_plan(
                 format!("advance subgoal `{}`", condition.label),
                 format!(
                     "done condition `{}` is advanced toward evidence `{}`",
-                    condition.label, condition.evidence
+                    condition.label,
+                    condition.evidence.as_str()
                 ),
             )
         })
@@ -174,7 +173,7 @@ fn build_goal_runtime_run_plan(
             .goal
             .done_conditions
             .iter()
-            .map(|condition| format!("{}:{}", condition.label, condition.evidence))
+            .map(|condition| format!("{}:{}", condition.label, condition.evidence.as_str()))
             .collect::<Vec<_>>()
             .join(" | "),
         planned_steps: steps.len(),
@@ -209,12 +208,7 @@ fn default_goal_workflow_pack(
     WorkflowPackContract {
         pack_id: String::from("goal-default-v1"),
         version: String::from("1"),
-        description: String::from("default bounded goal execution pack"),
         entry_goal: goal_file.goal.summary.clone(),
-        planner_hints: vec![
-            String::from("prefer workspace-bounded verification"),
-            String::from("preserve replayable evidence for every goal run"),
-        ],
         recommended_verifier_flow: recommended_goal_verifier_flow(goal_file),
         allowed_tools: vec![
             WorkflowPackAllowedTool {
@@ -248,17 +242,14 @@ fn default_goal_workflow_pack(
                 WorkflowPackVerifierRule {
                     label: check.label.clone(),
                     profile,
-                    command_example: render_command_example(&derived.program, &derived.args),
+                    command: derived.command,
                     artifact_expectation: derived.expectation,
                     strength: derived.strength,
                     required: true,
                 }
             })
             .collect(),
-        risk_policy: WorkflowPackRiskPolicy {
-            approval_mode: approval_mode_name(goal_file.goal.approval_mode).to_owned(),
-            max_mutating_steps: goal_file.goal.budget.max_steps,
-        },
+        approval_mode: approval_mode_name(goal_file.goal.approval_mode).to_owned(),
     }
 }
 
@@ -288,7 +279,6 @@ fn render_verifier_flow(flow: &[RunCommandProfile]) -> String {
 fn approval_mode_name(mode: axiomrunner_core::RunApprovalMode) -> &'static str {
     match mode {
         axiomrunner_core::RunApprovalMode::Never => "never",
-        axiomrunner_core::RunApprovalMode::OnRisk => "on-risk",
         axiomrunner_core::RunApprovalMode::Always => "always",
     }
 }
@@ -351,8 +341,7 @@ fn derive_default_verifier_command(
 ) -> DerivedVerifierCommand {
     if let Some((program, args)) = parse_command_detail(detail) {
         return DerivedVerifierCommand {
-            program,
-            args,
+            command: WorkflowPackVerifierCommand { program, args },
             expectation: format!("detail-derived verifier `{label}` exits 0"),
             strength: WorkflowPackVerifierStrength::Strong,
         };
@@ -361,8 +350,10 @@ fn derive_default_verifier_command(
     let (strength, reason) = unresolved_verifier_strength(label, detail);
     let (program, args) = fallback_verifier_probe(profile);
     DerivedVerifierCommand {
-        program: program.to_owned(),
-        args: args.into_iter().map(str::to_owned).collect(),
+        command: WorkflowPackVerifierCommand {
+            program: program.to_owned(),
+            args: args.into_iter().map(str::to_owned).collect(),
+        },
         expectation: format!("{reason} for verifier `{label}`"),
         strength,
     }
@@ -397,8 +388,6 @@ fn looks_like_command_program(program: &str) -> bool {
             | "git"
             | "ls"
             | "cat"
-            | "sh"
-            | "bash"
             | "pnpm"
             | "yarn"
             | "uv"
@@ -442,28 +431,15 @@ fn fallback_verifier_probe(profile: RunCommandProfile) -> (&'static str, Vec<&'s
     }
 }
 
-fn render_command_example(program: &str, args: &[String]) -> String {
-    if args.is_empty() {
-        return program.to_owned();
-    }
-    std::iter::once(program)
-        .chain(args.iter().map(String::as_str))
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
 fn command_plan_from_rule(rule: &WorkflowPackVerifierRule) -> Option<ToolCommandPlan> {
-    let mut parts = rule
-        .command_example
-        .split_whitespace()
-        .map(str::to_owned)
-        .collect::<Vec<_>>();
-    let program = parts.first()?.clone();
-    let args = parts.split_off(1);
+    let program = rule.command.program.trim();
+    if program.is_empty() {
+        return None;
+    }
     Some(ToolCommandPlan {
         label: rule.label.clone(),
-        program,
-        args,
+        program: program.to_owned(),
+        args: rule.command.args.clone(),
         expectation: rule.artifact_expectation.clone(),
         strength: rule.strength,
     })
@@ -494,8 +470,17 @@ mod tests {
         ToolPlan, build_runtime_compose_plan, build_runtime_run_plan, goal_verifier_tool_plan,
     };
     use crate::cli_command::GoalFileTemplate;
-    use axiomrunner_adapters::{RunCommandProfile, WorkflowPackVerifierStrength};
-    use axiomrunner_core::DecisionOutcome;
+    use axiomrunner_core::{
+        DecisionOutcome, DoneCondition, DoneConditionEvidence, RunCommandProfile,
+        WorkflowPackVerifierCommand, WorkflowPackVerifierStrength,
+    };
+
+    fn report_done_condition() -> DoneCondition {
+        DoneCondition {
+            label: String::from("report"),
+            evidence: DoneConditionEvidence::ReportArtifactExists,
+        }
+    }
 
     #[test]
     fn planner_resolves_default_goal_workflow_pack() {
@@ -503,16 +488,13 @@ mod tests {
             summary: String::from("Ship one bounded goal package"),
             workspace_root: String::from("/workspace"),
             constraints: Vec::new(),
-            done_conditions: vec![axiomrunner_core::DoneCondition {
-                label: String::from("report"),
-                evidence: String::from("report artifact exists"),
-            }],
+            done_conditions: vec![report_done_condition()],
             verification_checks: vec![axiomrunner_core::VerificationCheck {
                 label: String::from("release gate"),
                 detail: String::from("cargo test -p axiomrunner_apps --test release_security_gate"),
             }],
             budget: axiomrunner_core::RunBudget::bounded(5, 10, 8000),
-            approval_mode: axiomrunner_core::RunApprovalMode::OnRisk,
+            approval_mode: axiomrunner_core::RunApprovalMode::Always,
         };
         let template = GoalFileTemplate {
             path: String::from("GOAL.json"),
@@ -524,7 +506,7 @@ mod tests {
 
         let pack = plan.workflow_pack.expect("workflow pack should exist");
         assert_eq!(pack.pack_id, "goal-default-v1");
-        assert_eq!(pack.risk_policy.approval_mode, "on-risk");
+        assert_eq!(pack.approval_mode, "always");
         assert_eq!(
             pack.recommended_verifier_flow,
             vec![RunCommandProfile::Test]
@@ -532,8 +514,17 @@ mod tests {
         assert_eq!(pack.allowed_tools[0].operation, "read_file");
         assert!(pack.verifier_rules[0].required);
         assert_eq!(
-            pack.verifier_rules[0].command_example,
-            "cargo test -p axiomrunner_apps --test release_security_gate"
+            pack.verifier_rules[0].command,
+            WorkflowPackVerifierCommand {
+                program: String::from("cargo"),
+                args: vec![
+                    String::from("test"),
+                    String::from("-p"),
+                    String::from("axiomrunner_apps"),
+                    String::from("--test"),
+                    String::from("release_security_gate"),
+                ],
+            }
         );
         assert_eq!(
             pack.verifier_rules[0].strength,
@@ -547,10 +538,7 @@ mod tests {
             summary: String::from("Ship one bounded goal package"),
             workspace_root: String::from("/workspace"),
             constraints: Vec::new(),
-            done_conditions: vec![axiomrunner_core::DoneCondition {
-                label: String::from("report"),
-                evidence: String::from("report artifact exists"),
-            }],
+            done_conditions: vec![report_done_condition()],
             verification_checks: vec![axiomrunner_core::VerificationCheck {
                 label: String::from("release gate"),
                 detail: String::from("cargo test -p axiomrunner_apps --test release_security_gate"),
@@ -589,10 +577,7 @@ mod tests {
             summary: String::from("Need domain-specific verification"),
             workspace_root: String::from("/workspace"),
             constraints: Vec::new(),
-            done_conditions: vec![axiomrunner_core::DoneCondition {
-                label: String::from("report"),
-                evidence: String::from("report artifact exists"),
-            }],
+            done_conditions: vec![report_done_condition()],
             verification_checks: vec![axiomrunner_core::VerificationCheck {
                 label: String::from("domain verification"),
                 detail: String::from("representative domain path"),
@@ -609,7 +594,13 @@ mod tests {
         let plan = build_runtime_compose_plan(&template, DecisionOutcome::Accepted);
 
         let pack = plan.workflow_pack.expect("workflow pack should exist");
-        assert_eq!(pack.verifier_rules[0].command_example, "ls .");
+        assert_eq!(
+            pack.verifier_rules[0].command,
+            WorkflowPackVerifierCommand {
+                program: String::from("ls"),
+                args: vec![String::from(".")],
+            }
+        );
         assert_eq!(
             pack.verifier_rules[0].strength,
             WorkflowPackVerifierStrength::PackRequired
@@ -619,7 +610,7 @@ mod tests {
                 .artifact_expectation
                 .contains("pack_required fallback probe")
         );
-        assert_ne!(pack.verifier_rules[0].command_example, "pwd");
+        assert_ne!(pack.verifier_rules[0].command.program, "pwd");
     }
 
     #[test]
@@ -628,10 +619,7 @@ mod tests {
             summary: String::from("Need generic weak verification"),
             workspace_root: String::from("/workspace"),
             constraints: Vec::new(),
-            done_conditions: vec![axiomrunner_core::DoneCondition {
-                label: String::from("report"),
-                evidence: String::from("report artifact exists"),
-            }],
+            done_conditions: vec![report_done_condition()],
             verification_checks: vec![axiomrunner_core::VerificationCheck {
                 label: String::from("workspace consistency"),
                 detail: String::from("workspace consistency review"),
@@ -648,7 +636,13 @@ mod tests {
         let plan = build_runtime_compose_plan(&template, DecisionOutcome::Accepted);
 
         let pack = plan.workflow_pack.expect("workflow pack should exist");
-        assert_eq!(pack.verifier_rules[0].command_example, "ls .");
+        assert_eq!(
+            pack.verifier_rules[0].command,
+            WorkflowPackVerifierCommand {
+                program: String::from("ls"),
+                args: vec![String::from(".")],
+            }
+        );
         assert_eq!(
             pack.verifier_rules[0].strength,
             WorkflowPackVerifierStrength::Weak
@@ -658,7 +652,7 @@ mod tests {
                 .artifact_expectation
                 .contains("verification_weak fallback probe")
         );
-        assert_ne!(pack.verifier_rules[0].command_example, "pwd");
+        assert_ne!(pack.verifier_rules[0].command.program, "pwd");
     }
 
     #[test]
@@ -667,10 +661,7 @@ mod tests {
             summary: String::from("Need unresolved verification visibility"),
             workspace_root: String::from("/workspace"),
             constraints: Vec::new(),
-            done_conditions: vec![axiomrunner_core::DoneCondition {
-                label: String::from("report"),
-                evidence: String::from("report artifact exists"),
-            }],
+            done_conditions: vec![report_done_condition()],
             verification_checks: vec![axiomrunner_core::VerificationCheck {
                 label: String::from("workspace verification"),
                 detail: String::new(),
@@ -687,7 +678,13 @@ mod tests {
         let plan = build_runtime_compose_plan(&template, DecisionOutcome::Accepted);
 
         let pack = plan.workflow_pack.expect("workflow pack should exist");
-        assert_eq!(pack.verifier_rules[0].command_example, "ls .");
+        assert_eq!(
+            pack.verifier_rules[0].command,
+            WorkflowPackVerifierCommand {
+                program: String::from("ls"),
+                args: vec![String::from(".")],
+            }
+        );
         assert_eq!(
             pack.verifier_rules[0].strength,
             WorkflowPackVerifierStrength::Unresolved
@@ -697,7 +694,7 @@ mod tests {
                 .artifact_expectation
                 .contains("verification_unresolved fallback probe")
         );
-        assert_ne!(pack.verifier_rules[0].command_example, "pwd");
+        assert_ne!(pack.verifier_rules[0].command.program, "pwd");
     }
 
     #[test]
@@ -706,10 +703,7 @@ mod tests {
             summary: String::from("Infer verifier flow"),
             workspace_root: String::from("/workspace"),
             constraints: Vec::new(),
-            done_conditions: vec![axiomrunner_core::DoneCondition {
-                label: String::from("report"),
-                evidence: String::from("report artifact exists"),
-            }],
+            done_conditions: vec![report_done_condition()],
             verification_checks: vec![
                 axiomrunner_core::VerificationCheck {
                     label: String::from("build"),
@@ -758,13 +752,12 @@ mod tests {
             workspace_root: String::from("/workspace"),
             constraints: Vec::new(),
             done_conditions: vec![
-                axiomrunner_core::DoneCondition {
-                    label: String::from("report"),
-                    evidence: String::from("report artifact exists"),
-                },
+                report_done_condition(),
                 axiomrunner_core::DoneCondition {
                     label: String::from("tests"),
-                    evidence: String::from("test suite passes"),
+                    evidence: DoneConditionEvidence::CommandExitZero {
+                        command: String::from("cargo test"),
+                    },
                 },
             ],
             verification_checks: vec![
@@ -811,7 +804,9 @@ mod tests {
             done_conditions: (0..6)
                 .map(|index| axiomrunner_core::DoneCondition {
                     label: format!("done-{index}"),
-                    evidence: format!("evidence-{index}"),
+                    evidence: DoneConditionEvidence::FileExists {
+                        path: format!("evidence-{index}"),
+                    },
                 })
                 .collect(),
             verification_checks: (0..6)

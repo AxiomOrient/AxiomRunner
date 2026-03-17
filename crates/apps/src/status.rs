@@ -1,5 +1,5 @@
-use crate::state_store::PendingRunSnapshot;
-use crate::trace_store::{TraceArtifactEntry, TraceRunSummary};
+use crate::storage::state::PendingRunSnapshot;
+use crate::storage::trace::{TraceArtifactEntry, TraceRunSummary};
 use axiomrunner_core::ExecutionMode;
 
 #[derive(Debug, Clone, PartialEq, Eq)]

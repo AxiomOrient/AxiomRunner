@@ -1,7 +1,7 @@
 use crate::config_loader::AppConfig;
 use crate::operator_render::render_replay_lines;
 use crate::runtime_compose::RuntimeComposeConfig;
-use crate::trace_store::TraceStore;
+use crate::storage::trace::TraceStore;
 
 pub fn execute_replay(config: &AppConfig, target: &str) -> Result<(), String> {
     let compose_config = RuntimeComposeConfig::from_app_config(config);
@@ -28,7 +28,7 @@ pub fn execute_replay(config: &AppConfig, target: &str) -> Result<(), String> {
         (
             summary,
             latest,
-            crate::trace_store::TraceArtifactIndex {
+            crate::storage::trace::TraceArtifactIndex {
                 entries: vec![latest_entry],
             },
         )
@@ -42,7 +42,7 @@ pub fn execute_replay(config: &AppConfig, target: &str) -> Result<(), String> {
         (
             summary,
             latest,
-            crate::trace_store::TraceArtifactIndex {
+            crate::storage::trace::TraceArtifactIndex {
                 entries: vec![latest_entry],
             },
         )

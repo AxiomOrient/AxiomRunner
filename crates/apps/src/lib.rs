@@ -11,10 +11,10 @@ mod env_util;
 mod goal_file;
 mod operator_render;
 mod replay;
+mod run_commit;
 mod runtime_compose;
-mod state_store;
+mod storage;
 mod status;
-mod trace_store;
 mod workspace_lock;
 
 pub mod async_runtime_host;

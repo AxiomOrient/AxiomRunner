@@ -42,7 +42,7 @@ cat > GOAL.json <<'EOF'
   "workspace_root": ".",
   "constraints": [],
   "done_conditions": [
-    { "label": "report", "evidence": "report artifact exists" }
+    { "label": "report", "evidence": "report_artifact_exists" }
   ],
   "verification_checks": [
     { "label": "release gate", "detail": "cargo test -p axiomrunner_apps --test release_security_gate" }
@@ -113,7 +113,7 @@ representative verifier examples:
 
 - brief 작성: `examples/goal_stacks/axiomrunner_dogfood.brief.json`
 - 작성 가이드: [docs/GOAL_STACK_PLAYBOOK.md](docs/GOAL_STACK_PLAYBOOK.md)
-- goal 생성기: `python3 scripts/generate_goal_stack.py ...`
+- 생성 스크립트: `python3 tools/dev/generate_goal_stack.py ...` (dev helper, 기본 done condition은 `report_artifact_exists`만 생성)
 
 developer automation milestone:
 
@@ -182,6 +182,5 @@ env-only runtime knobs:
 - goal/pack contract: [docs/WORKFLOW_PACK_CONTRACT.md](docs/WORKFLOW_PACK_CONTRACT.md)
 - goal stack playbook: [docs/GOAL_STACK_PLAYBOOK.md](docs/GOAL_STACK_PLAYBOOK.md)
 - 구조 설명: [docs/PROJECT_STRUCTURE.md](docs/PROJECT_STRUCTURE.md)
-- bridge target: [docs/AUTONOMOUS_AGENT_TARGET.md](docs/AUTONOMOUS_AGENT_TARGET.md)
-- bridge spec: [docs/AUTONOMOUS_AGENT_SPEC.md](docs/AUTONOMOUS_AGENT_SPEC.md)
+- bridge note: [docs/AUTONOMOUS_AGENT_BRIDGE.md](docs/AUTONOMOUS_AGENT_BRIDGE.md)
 - versioning: [docs/VERSIONING.md](docs/VERSIONING.md)

@@ -1,6 +1,6 @@
-use axiomrunner_adapters::WorkflowPackContract;
 use axiomrunner_core::{
-    DoneCondition, RunApprovalMode, RunBudget, RunConstraint, RunGoal, VerificationCheck,
+    DoneCondition, DoneConditionEvidence, RunApprovalMode, RunBudget, RunConstraint, RunGoal,
+    VerificationCheck, WorkflowPackContract,
 };
 use serde::Deserialize;
 use std::fs;
@@ -55,7 +55,6 @@ pub fn parse_goal_file_template(
 
     let approval_mode = match input.approval_mode.trim().to_ascii_lowercase().as_str() {
         "never" => RunApprovalMode::Never,
-        "on-risk" => RunApprovalMode::OnRisk,
         "always" => RunApprovalMode::Always,
         other => {
             return Err(format!(
@@ -78,11 +77,18 @@ pub fn parse_goal_file_template(
         done_conditions: input
             .done_conditions
             .into_iter()
-            .map(|condition| DoneCondition {
-                label: condition.label,
-                evidence: condition.evidence,
+            .map(|condition| {
+                Ok(DoneCondition {
+                    label: condition.label,
+                    evidence: DoneConditionEvidence::parse(&condition.evidence).map_err(|error| {
+                        format!(
+                            "invalid goal file '{path}': unsupported done_condition evidence '{}': {error:?}",
+                            condition.evidence
+                        )
+                    })?,
+                })
             })
-            .collect(),
+            .collect::<Result<Vec<_>, String>>()?,
         verification_checks: input
             .verification_checks
             .into_iter()
@@ -180,19 +186,17 @@ mod tests {
             r#"{
   "pack_id": "rust-service-basic",
   "version": "1",
-  "description": "pack",
   "entry_goal": "goal",
-  "planner_hints": ["prefer bounded verification"],
   "recommended_verifier_flow": ["build", "test", "lint"],
   "allowed_tools": [{"operation": "run_command", "scope": "workspace"}],
   "verifier_rules": [{
     "label": "build",
     "profile": "build",
-    "command_example": "cargo build",
+    "command": { "program": "cargo", "args": ["build"] },
     "artifact_expectation": "build passes",
     "required": true
   }],
-  "risk_policy": {"approval_mode": "never", "max_mutating_steps": 8}
+  "approval_mode": "never"
 }"#,
         )
         .expect("pack manifest should be written");
@@ -203,7 +207,7 @@ mod tests {
   "summary": "Goal with pack",
   "workspace_root": "/workspace",
   "constraints": [],
-  "done_conditions": [{{ "label": "report", "evidence": "report exists" }}],
+  "done_conditions": [{{ "label": "report", "evidence": "report_artifact_exists" }}],
   "verification_checks": [{{ "label": "build", "detail": "cargo build" }}],
   "budget": {{ "max_steps": 5, "max_minutes": 10, "max_tokens": 8000 }},
   "approval_mode": "never",
@@ -240,7 +244,7 @@ mod tests {
   "summary": "Goal with invalid pack",
   "workspace_root": "/workspace",
   "constraints": [],
-  "done_conditions": [{{ "label": "report", "evidence": "report exists" }}],
+  "done_conditions": [{{ "label": "report", "evidence": "report_artifact_exists" }}],
   "verification_checks": [{{ "label": "build", "detail": "cargo build" }}],
   "budget": {{ "max_steps": 5, "max_minutes": 10, "max_tokens": 8000 }},
   "approval_mode": "never",

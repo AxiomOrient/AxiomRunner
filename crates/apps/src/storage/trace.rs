@@ -15,6 +15,10 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 pub const TRACE_INTENT_SCHEMA_V1: &str = "axiomrunner.trace.intent.v1";
 const MAX_ARTIFACT_INDEX_PATCH_PATHS: usize = 6;
 
+fn default_trace_reason_detail() -> String {
+    String::from("none")
+}
+
 #[derive(Debug, Clone)]
 pub struct TraceStore {
     storage: JsonlTraceStorage,
@@ -75,6 +79,10 @@ pub struct TraceRunSummary {
     pub phase: String,
     pub outcome: String,
     pub reason: String,
+    #[serde(default)]
+    pub reason_code: String,
+    #[serde(default = "default_trace_reason_detail")]
+    pub reason_detail: String,
     pub approval_state: String,
     pub verifier_state: String,
     pub verifier_summary: String,
@@ -221,6 +229,8 @@ impl TraceStore {
                 "phase": run_phase_name(input.run.phase),
                 "outcome": run_outcome_name(input.run.outcome),
                 "reason": input.run.reason,
+                "reason_code": input.run.reason_code,
+                "reason_detail": input.run.reason_detail,
                 "approval_state": trace_approval_state(input.run),
                 "verifier_state": input.run.verification.status,
                 "verifier_summary": input.run.verification.summary,
@@ -247,6 +257,10 @@ impl TraceStore {
         });
 
         self.storage.append_event(&event)
+    }
+
+    pub fn remove_last_event_for_intent(&self, intent_id: &str) -> Result<bool, String> {
+        self.storage.remove_last_event_for_intent(intent_id)
     }
 
     pub fn load_events(&self) -> Result<Vec<TraceIntentEvent>, String> {
@@ -320,7 +334,7 @@ impl TraceStore {
         Ok(self
             .load_events()?
             .into_iter()
-            .find(|event| event.intent_id == intent_id)
+            .rfind(|event| event.intent_id == intent_id)
             .map(artifact_entry_from_event))
     }
 
@@ -331,7 +345,7 @@ impl TraceStore {
         Ok(self
             .load_events()?
             .into_iter()
-            .find(|event| event_has_run_id(event, run_id))
+            .rfind(|event| event_has_run_id(event, run_id))
             .map(artifact_entry_from_event))
     }
 }
@@ -394,6 +408,38 @@ impl JsonlTraceStorage {
         Ok(events)
     }
 
+    fn remove_last_event_for_intent(&self, intent_id: &str) -> Result<bool, String> {
+        let raw = match fs::read_to_string(&self.events_path) {
+            Ok(raw) => raw,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+            Err(error) => return Err(format!("read trace event log failed: {error}")),
+        };
+        let mut lines = raw
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .map(str::to_owned)
+            .collect::<Vec<_>>();
+        let Some(last_line) = lines.last() else {
+            return Ok(false);
+        };
+        let event: TraceIntentEvent = serde_json::from_str(last_line)
+            .map_err(|error| format!("parse last trace line failed: {error}"))?;
+        if event.intent_id != intent_id {
+            return Ok(false);
+        }
+        lines.pop();
+        let next = if lines.is_empty() {
+            String::new()
+        } else {
+            let mut next = lines.join("\n");
+            next.push('\n');
+            next
+        };
+        fs::write(&self.events_path, next)
+            .map_err(|error| format!("rewrite trace event log failed: {error}"))?;
+        Ok(true)
+    }
+
     fn events_path(&self) -> &PathBuf {
         &self.events_path
     }
@@ -447,7 +493,11 @@ fn summarize_events(events: Vec<TraceIntentEvent>) -> Result<ReplaySummary, Stri
         .count();
 
     Ok(ReplaySummary {
-        intent_count: events.len(),
+        intent_count: events
+            .iter()
+            .map(|event| event.intent_id.as_str())
+            .collect::<std::collections::BTreeSet<_>>()
+            .len(),
         latest_revision: latest.revision,
         latest_mode: latest.mode.clone(),
         failed_intents,
@@ -684,6 +734,16 @@ mod tests {
                 } else {
                     String::from("verification_passed")
                 },
+                reason_code: if failed {
+                    String::from("verification_failed")
+                } else {
+                    String::from("verification_passed")
+                },
+                reason_detail: if failed {
+                    String::from("stage=provider,message=boom")
+                } else {
+                    String::from("none")
+                },
                 approval_state: String::from("not_required"),
                 verifier_state: if failed {
                     String::from("failed")
@@ -895,6 +955,8 @@ mod tests {
                 phase: String::from("failed"),
                 outcome: String::from("failed"),
                 reason: String::from("done_condition_missing_report_artifact:report"),
+                reason_code: String::from("done_condition_missing_report_artifact"),
+                reason_detail: String::from("report"),
                 approval_state: String::from("not_required"),
                 verifier_state: String::from("failed"),
                 verifier_summary: String::from("done_condition_missing_report_artifact:report"),

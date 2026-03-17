@@ -1,8 +1,11 @@
 use axiomrunner_adapters::{
     FileMutationEvidence, FileWriteOutput, ListFilesOutput, ReadFileOutput, RemovePathOutput,
-    ReplaceInFileOutput, RunCommandOutput, RunCommandProfile, SearchFilesOutput, SearchMatch,
-    SearchMode, ToolRequest, ToolResult, WorkflowPackAllowedTool, WorkflowPackContract,
-    WorkflowPackRiskPolicy, WorkflowPackVerifierRule,
+    ReplaceInFileOutput, RunCommandOutput, SearchFilesOutput, SearchMatch, SearchMode,
+    ToolRequest, ToolResult,
+};
+use axiomrunner_core::{
+    RunCommandProfile, WorkflowPackAllowedTool, WorkflowPackContract, WorkflowPackVerifierCommand,
+    WorkflowPackVerifierRule, WorkflowPackVerifierStrength,
 };
 use std::path::PathBuf;
 
@@ -171,11 +174,10 @@ fn workflow_pack_contract_docs_lock_manifest_and_ownership_rules() {
         "pack_id",
         "version",
         "entry_goal",
-        "planner_hints",
         "recommended_verifier_flow",
         "allowed_tools",
         "verifier_rules",
-        "risk_policy",
+        "approval_mode",
         "resume",
         "abort",
         "status",
@@ -193,9 +195,7 @@ fn workflow_pack_contract_shape_stays_explicit() {
     let contract = WorkflowPackContract {
         pack_id: String::from("rust-service-basic"),
         version: String::from("1"),
-        description: String::from("bounded Rust service workflow"),
         entry_goal: String::from("implement one bounded Rust service task"),
-        planner_hints: vec![String::from("prefer cargo-first verification")],
         recommended_verifier_flow: vec![RunCommandProfile::Build, RunCommandProfile::Test],
         allowed_tools: vec![
             WorkflowPackAllowedTool {
@@ -210,15 +210,15 @@ fn workflow_pack_contract_shape_stays_explicit() {
         verifier_rules: vec![WorkflowPackVerifierRule {
             label: String::from("cargo test"),
             profile: RunCommandProfile::Test,
-            command_example: String::from("cargo test"),
+            command: WorkflowPackVerifierCommand {
+                program: String::from("cargo"),
+                args: vec![String::from("test")],
+            },
             artifact_expectation: String::from("test artifact exists"),
-            strength: axiomrunner_adapters::WorkflowPackVerifierStrength::Strong,
+            strength: WorkflowPackVerifierStrength::Strong,
             required: true,
         }],
-        risk_policy: WorkflowPackRiskPolicy {
-            approval_mode: String::from("on-risk"),
-            max_mutating_steps: 8,
-        },
+        approval_mode: String::from("always"),
     };
 
     assert_eq!(contract.validate(), Ok(()));
@@ -228,5 +228,5 @@ fn workflow_pack_contract_shape_stays_explicit() {
     );
     assert_eq!(contract.allowed_tools[0].operation, "read_file");
     assert_eq!(contract.verifier_rules[0].profile, RunCommandProfile::Test);
-    assert_eq!(contract.risk_policy.approval_mode, "on-risk");
+    assert_eq!(contract.approval_mode, "always");
 }

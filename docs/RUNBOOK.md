@@ -29,7 +29,7 @@ cat > GOAL.json <<'EOF'
   "workspace_root": ".",
   "constraints": [],
   "done_conditions": [
-    { "label": "report", "evidence": "report artifact exists" }
+    { "label": "report", "evidence": "report_artifact_exists" }
   ],
   "verification_checks": [
     { "label": "release gate", "detail": "cargo test -p axiomrunner_apps --test release_security_gate" }
@@ -52,8 +52,8 @@ minimal onboarding 순서: `doctor` → `run` → `status` → `replay` → `rep
 직접 goal을 만들 때는 raw `goal.json`부터 시작하지 말고 아래 순서를 권장한다:
 
 1. brief 작성
-2. `python3 scripts/generate_goal_stack.py ...` 로 atomic goal 생성
-3. generated goal을 pack-backed run으로 실행
+2. static example goal을 복사하거나 `python3 tools/dev/generate_goal_stack.py ...` 를 dev helper로 사용
+3. generated goal을 실행 전 검토하고 필요하면 supported done DSL로 수정
 
 참고:
 
@@ -129,7 +129,8 @@ minimal onboarding 순서: `doctor` → `run` → `status` → `replay` → `rep
 
 - mutating command(`run`, `resume`, `abort`)는 `.axiomrunner/runtime.lock`을 먼저 잡는다.
 - lock이 이미 있으면 새 mutating command는 즉시 중단.
-- lock holder pid가 죽어 있으면 stale lock으로 보고 한 번 자동 정리 후 재시도.
+- Unix에서는 lock holder pid가 죽어 있으면 stale lock으로 보고 한 번 자동 정리 후 재시도한다.
+- 비-Unix에서는 stale 여부를 확정하지 않고 active로 본다.
 - `status`, `replay`, `doctor`, `health`, `help`는 lock 없이 읽는다.
 - 자동 복구 불가 lock만 operator가 직접 확인 후 제거.
 

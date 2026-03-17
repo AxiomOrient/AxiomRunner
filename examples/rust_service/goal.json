@@ -5,8 +5,8 @@
     { "label": "domain", "detail": "rust-service-basic representative path" }
   ],
   "done_conditions": [
-    { "label": "report", "evidence": "report artifact exists" },
-    { "label": "tests", "evidence": "report artifact exists" }
+    { "label": "report", "evidence": "report_artifact_exists" },
+    { "label": "tests", "evidence": "report_artifact_exists" }
   ],
   "verification_checks": [
     { "label": "build", "detail": "cargo build" },

@@ -3,7 +3,7 @@
   "workspace_root": "/workspace",
   "constraints": [],
   "done_conditions": [
-    { "label": "report", "evidence": "report artifact exists" }
+    { "label": "report", "evidence": "report_artifact_exists" }
   ],
   "verification_checks": [
     { "label": "release gate", "detail": "cargo test -p axiomrunner_apps --test release_security_gate" }
