@@ -25,6 +25,12 @@ retained CLI surface: `run/status/replay/resume/abort/doctor/health/help`
 - `health`
 - `help`
 
+## 폴더 역할
+
+- `plans/` — 계획 문서와 작업 문서만 두는 폴더. 기본 형식은 `plans/IMPLEMENTATION-PLAN.md`, `plans/TASKS.md`, 설명은 `plans/README.md`
+- `scripts/` — 제품 운영 스크립트만 둔다. 현재 retained ops script는 `nightly_dogfood.sh`
+- `tools/dev/` — 개발 보조 도구만 둔다. `generate_goal_stack.py`는 제품 운영 경로가 아니라 dev helper다
+
 ## 빠른 시작
 
 빌드:
