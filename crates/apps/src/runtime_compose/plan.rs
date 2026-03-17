@@ -71,14 +71,16 @@ pub fn build_runtime_run_plan(
     template: &RunTemplate,
     run_id: &str,
     intent_id: &str,
+    runtime_workspace: Option<&std::path::Path>,
 ) -> RuntimeRunPlan {
-    build_goal_runtime_run_plan(template, run_id, intent_id)
+    build_goal_runtime_run_plan(template, run_id, intent_id, runtime_workspace)
 }
 
 fn build_goal_runtime_run_plan(
     goal_file: &crate::cli_command::GoalFileTemplate,
     run_id: &str,
     intent_id: &str,
+    runtime_workspace: Option<&std::path::Path>,
 ) -> RuntimeRunPlan {
     let workflow_pack = goal_workflow_pack(goal_file);
     let mut queue = goal_file
@@ -160,9 +162,11 @@ fn build_goal_runtime_run_plan(
         run_id: run_id.to_owned(),
         goal: goal_file.goal.summary.clone(),
         summary: format!(
-            "intent_id={intent_id} goal_file={} workspace_root={} workflow_pack={} verifier_flow={} queued_done_conditions={} queued_verifiers={}",
+            "intent_id={intent_id} goal_file={} runtime_workspace={} workflow_pack={} verifier_flow={} queued_done_conditions={} queued_verifiers={}",
             goal_file.path,
-            goal_file.goal.workspace_root,
+            runtime_workspace
+                .map(|path| path.display().to_string())
+                .unwrap_or_else(|| String::from("unconfigured")),
             workflow_pack.pack_id,
             render_verifier_flow(&workflow_pack.recommended_verifier_flow),
             goal_file.goal.done_conditions.len(),
@@ -364,10 +368,10 @@ fn parse_command_detail(detail: &str) -> Option<(String, Vec<String>)> {
     let mut parts = tokenize_command_detail(detail)?;
     let program = parts.first()?.clone();
     let allowlist = product_command_allowlist();
-    if validate_run_command_contract(&program, &allowlist).is_err() {
+    let args = parts.split_off(1);
+    if validate_run_command_contract(&program, &args, &allowlist).is_err() {
         return None;
     }
-    let args = parts.split_off(1);
     Some((program, args))
 }
 
@@ -799,7 +803,7 @@ mod tests {
             workflow_pack: None,
         };
 
-        let plan = build_runtime_run_plan(&template, "run-1", "cli-1");
+        let plan = build_runtime_run_plan(&template, "run-1", "cli-1", None);
 
         assert_eq!(plan.planned_steps, 7);
         assert_eq!(plan.steps[0].label, "load goal file");
@@ -845,7 +849,7 @@ mod tests {
             workflow_pack: None,
         };
 
-        let plan = build_runtime_run_plan(&template, "run-2", "cli-2");
+        let plan = build_runtime_run_plan(&template, "run-2", "cli-2", None);
 
         assert_eq!(plan.planned_steps, super::MAX_GOAL_PLAN_STEPS);
         assert!(

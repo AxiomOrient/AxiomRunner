@@ -4,7 +4,7 @@ use std::fs;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::{Child, Command, Output};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const CLI_USAGE: &str = "\
@@ -107,6 +107,57 @@ fn run_cli_internal(
     let output = cmd.output().expect("axiomrunner_apps binary should run");
     let _ = fs::remove_dir_all(&canonical_home);
     output
+}
+
+fn spawn_cli_internal(
+    args: &[&str],
+    env: &[(&str, &str)],
+    label: &str,
+    inject_runtime_defaults: bool,
+) -> (Child, PathBuf) {
+    let home = unique_path(&format!("home-{label}"), "dir");
+    fs::create_dir_all(&home).expect("isolated home directory should be writable");
+    let canonical_home = fs::canonicalize(&home).unwrap_or(home.clone());
+    let explicit_tool_workspace = env.iter().find_map(|(key, value)| {
+        (*key == "AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE").then(|| PathBuf::from(*value))
+    });
+    let explicit_artifact_workspace = env.iter().find_map(|(key, value)| {
+        (*key == "AXIOMRUNNER_RUNTIME_ARTIFACT_WORKSPACE").then(|| PathBuf::from(*value))
+    });
+    let tool_workspace = explicit_tool_workspace
+        .clone()
+        .unwrap_or_else(|| canonical_home.join(".axiomrunner").join("workspace"));
+    let artifact_workspace = explicit_artifact_workspace
+        .clone()
+        .unwrap_or_else(|| tool_workspace.clone());
+
+    let mut cmd = Command::new(resolve_cli_bin());
+    cmd.env("HOME", &canonical_home)
+        .args(args)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    for key in SANITIZED_ENV_KEYS {
+        cmd.env_remove(key);
+    }
+    if inject_runtime_defaults && explicit_tool_workspace.is_none() {
+        cmd.env("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", &tool_workspace);
+    }
+    if inject_runtime_defaults
+        && !env
+            .iter()
+            .any(|(key, _)| *key == "AXIOMRUNNER_RUNTIME_TOOL_LOG_PATH")
+    {
+        cmd.env(
+            "AXIOMRUNNER_RUNTIME_TOOL_LOG_PATH",
+            artifact_workspace.join("runtime.log"),
+        );
+    }
+    for (key, value) in env {
+        cmd.env(key, value);
+    }
+
+    let child = cmd.spawn().expect("axiomrunner_apps binary should spawn");
+    (child, canonical_home)
 }
 
 fn stdout_of(output: &Output) -> String {
@@ -954,7 +1005,7 @@ fn e2e_cli_goal_file_uses_bounded_repair_budget() {
     { "label": "report", "evidence": "report_artifact_exists" }
   ],
   "verification_checks": [
-    { "label": "workspace files", "detail": "ls ." }
+    { "label": "git status", "detail": "git status" }
   ],
   "budget": { "max_steps": 6, "max_minutes": 10, "max_tokens": 8000 },
   "approval_mode": "never"
@@ -1008,7 +1059,7 @@ fn e2e_cli_goal_file_zero_repair_budget_does_not_claim_attempt() {
     { "label": "report", "evidence": "report_artifact_exists" }
   ],
   "verification_checks": [
-    { "label": "release gate", "detail": "cargo test -p axiomrunner_apps --test release_security_gate" }
+    { "label": "git status", "detail": "git status" }
   ],
   "budget": { "max_steps": 5, "max_minutes": 10, "max_tokens": 8000 },
   "approval_mode": "never"
@@ -1321,6 +1372,238 @@ fn e2e_cli_goal_file_executes_external_workflow_pack_verifier_sequence() {
     let _ = fs::remove_dir_all(workspace);
     let _ = fs::remove_file(goal_file);
     let _ = fs::remove_file(pack_file);
+}
+
+#[test]
+fn e2e_cli_goal_file_done_condition_uses_runtime_workspace_not_goal_workspace_root() {
+    let workspace = unique_path("goal-runtime-workspace", "dir");
+    let fake_goal_root = unique_path("goal-fake-root", "dir");
+    let goal_file = unique_path("goal-runtime-goal", "json");
+    fs::create_dir_all(&workspace).expect("workspace should exist");
+    fs::create_dir_all(&fake_goal_root).expect("fake goal root should exist");
+    fs::write(workspace.join("marker.txt"), "present\n").expect("marker should exist");
+    fs::write(
+        &goal_file,
+        format!(
+            r#"{{
+  "summary": "Use runtime workspace for file done condition",
+  "workspace_root": "{}",
+  "constraints": [],
+  "done_conditions": [
+    {{ "label": "marker", "evidence": "file_exists:marker.txt" }}
+  ],
+  "verification_checks": [
+    {{ "label": "pwd", "detail": "pwd" }}
+  ],
+  "budget": {{ "max_steps": 5, "max_minutes": 10, "max_tokens": 8000 }},
+  "approval_mode": "never"
+}}"#,
+            fake_goal_root.display()
+        ),
+    )
+    .expect("goal file should be written");
+
+    let run = run_cli_with_env(
+        &["run", path_str(&goal_file)],
+        &[("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
+        "goal-runtime-done-condition",
+    );
+
+    assert!(run.status.success(), "stderr:\n{}", stderr_of(&run));
+    assert!(stdout_of(&run).contains("phase=completed outcome=success"));
+
+    let _ = fs::remove_dir_all(workspace);
+    let _ = fs::remove_dir_all(fake_goal_root);
+    let _ = fs::remove_file(goal_file);
+}
+
+#[test]
+fn e2e_cli_rejects_workflow_pack_that_claims_no_run_command_but_uses_it() {
+    let workspace = unique_path("goal-pack-allowed-tools-workspace", "dir");
+    let goal_file = unique_path("goal-pack-allowed-tools-goal", "json");
+    let pack_file = unique_path("goal-pack-allowed-tools-manifest", "json");
+    fs::create_dir_all(&workspace).expect("workspace should exist");
+    fs::write(
+        &pack_file,
+        r#"{
+  "pack_id": "restricted-pack",
+  "version": "1",
+  "entry_goal": "goal",
+  "recommended_verifier_flow": ["generic"],
+  "allowed_tools": [{"operation": "read_file", "scope": "workspace"}],
+  "verifier_rules": [
+    {
+      "label": "pwd-pass",
+      "profile": "generic",
+      "command": { "program": "pwd", "args": [] },
+      "artifact_expectation": "pwd path exists",
+      "required": true
+    }
+  ],
+  "approval_mode": "never"
+}"#,
+    )
+    .expect("pack file should be written");
+    fs::write(
+        &goal_file,
+        format!(
+            r#"{{
+  "summary": "Reject documentary allowed_tools drift",
+  "workspace_root": "/workspace",
+  "constraints": [],
+  "done_conditions": [
+    {{ "label": "report", "evidence": "report_artifact_exists" }}
+  ],
+  "verification_checks": [
+    {{ "label": "placeholder", "detail": "pwd" }}
+  ],
+  "budget": {{ "max_steps": 5, "max_minutes": 10, "max_tokens": 8000 }},
+  "approval_mode": "never",
+  "workflow_pack": "{}"
+}}"#,
+            pack_file.display()
+        ),
+    )
+    .expect("goal file should be written");
+
+    let run = run_cli_with_env(
+        &["run", path_str(&goal_file)],
+        &[("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
+        "goal-pack-allowed-tools-run",
+    );
+
+    assert!(!run.status.success(), "stdout:\n{}", stdout_of(&run));
+    assert!(stderr_of(&run).contains("invalid workflow pack"));
+
+    let _ = fs::remove_dir_all(workspace);
+    let _ = fs::remove_file(goal_file);
+    let _ = fs::remove_file(pack_file);
+}
+
+#[test]
+fn e2e_cli_runtime_command_allowlist_blocks_goal_verifier_before_execution() {
+    let workspace = unique_path("goal-allowlist-workspace", "dir");
+    let goal_file = unique_path("goal-allowlist-goal", "json");
+    fs::create_dir_all(&workspace).expect("workspace should exist");
+    fs::write(
+        &goal_file,
+        r#"{
+  "summary": "Respect operator allowlist in runtime planning",
+  "workspace_root": "/workspace",
+  "constraints": [],
+  "done_conditions": [
+    { "label": "report", "evidence": "report_artifact_exists" }
+  ],
+  "verification_checks": [
+    { "label": "release gate", "detail": "cargo test -p axiomrunner_apps --test release_security_gate" }
+  ],
+  "budget": { "max_steps": 5, "max_minutes": 10, "max_tokens": 8000 },
+  "approval_mode": "never"
+}"#,
+    )
+    .expect("goal file should be written");
+
+    let run = run_cli_with_env(
+        &["run", path_str(&goal_file)],
+        &[
+            ("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace)),
+            ("AXIOMRUNNER_RUNTIME_COMMAND_ALLOWLIST", "pwd"),
+        ],
+        "goal-allowlist-run",
+    );
+
+    assert!(!run.status.success(), "stdout:\n{}", stdout_of(&run));
+    assert!(stderr_of(&run).contains("runtime command contract violation"));
+    assert!(stderr_of(&run).contains("command_not_allowlisted"));
+
+    let _ = fs::remove_dir_all(workspace);
+    let _ = fs::remove_file(goal_file);
+}
+
+#[test]
+fn e2e_cli_memory_failure_is_runtime_execution_error() {
+    let repo_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("workspace root should exist")
+        .to_path_buf();
+    let goal_file = unique_path("memory-failure-goal", "json");
+    let memory_path = unique_path("memory-failure-db", "md");
+    fs::write(
+        &goal_file,
+        r#"{
+  "summary": "Surface memory commit failure honestly",
+  "workspace_root": "/workspace",
+  "constraints": [],
+  "done_conditions": [
+    { "label": "report", "evidence": "report_artifact_exists" }
+  ],
+  "verification_checks": [
+    { "label": "release gate", "detail": "cargo test -p axiomrunner_apps --test release_security_gate" }
+  ],
+  "budget": { "max_steps": 5, "max_minutes": 10, "max_tokens": 8000 },
+  "approval_mode": "never"
+}"#,
+    )
+    .expect("goal file should be written");
+
+    let (child, home) = spawn_cli_internal(
+        &["run", path_str(&goal_file)],
+        &[
+            ("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&repo_root)),
+            ("AXIOMRUNNER_RUNTIME_MEMORY_PATH", path_str(&memory_path)),
+        ],
+        "memory-failure-run",
+        true,
+    );
+    let blocker = memory_path.with_extension("tmp");
+    for _ in 0..100 {
+        if memory_path.exists() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert!(
+        memory_path.exists(),
+        "memory file should exist before blocker injection"
+    );
+    fs::create_dir_all(&blocker).expect("memory temp blocker should exist");
+    let output = child.wait_with_output().expect("cli should finish");
+
+    assert_eq!(
+        output.status.code(),
+        Some(6),
+        "stderr:\n{}",
+        stderr_of(&output)
+    );
+    assert!(
+        stderr_of(&output).contains("runtime memory persistence failed"),
+        "stderr:\n{}",
+        stderr_of(&output)
+    );
+    let replay = run_cli_with_env(
+        &["replay", "latest"],
+        &[("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&repo_root))],
+        "memory-failure-replay",
+    );
+    let status = run_cli_with_env(
+        &["status", "latest"],
+        &[("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&repo_root))],
+        "memory-failure-status",
+    );
+    let report = fs::read_to_string(repo_root.join(".axiomrunner/artifacts/cli-1.report.md"))
+        .expect("failure report should exist");
+
+    assert!(replay.status.success(), "stderr:\n{}", stderr_of(&replay));
+    assert!(status.status.success(), "stderr:\n{}", stderr_of(&status));
+    assert!(stdout_of(&replay).contains("reason_code=runtime_memory_persistence_failed"));
+    assert!(stdout_of(&status).contains("reason_code=runtime_memory_persistence_failed"));
+    assert!(report.contains("run_reason_code=runtime_memory_persistence_failed"));
+
+    let _ = fs::remove_dir_all(home);
+    let _ = fs::remove_file(goal_file);
+    let _ = fs::remove_dir_all(blocker);
+    let _ = fs::remove_file(memory_path);
 }
 
 #[test]

@@ -149,6 +149,14 @@ pub(crate) struct PatchArtifact<'a> {
     pub before_excerpt: Option<&'a str>,
     pub after_excerpt: Option<&'a str>,
     pub unified_diff: Option<&'a str>,
+    pub restore_mode: Option<&'a str>,
+    pub restore_artifact_path: Option<&'a Path>,
+}
+
+fn write_json_artifact(path: &Path, payload: serde_json::Value) -> Result<(), io::Error> {
+    let rendered =
+        serde_json::to_vec_pretty(&payload).map_err(|error| io::Error::other(error.to_string()))?;
+    fs::write(path, rendered)
 }
 
 pub(crate) fn write_patch_artifact(artifact: PatchArtifact<'_>) -> Result<PathBuf, io::Error> {
@@ -172,10 +180,47 @@ pub(crate) fn write_patch_artifact(artifact: PatchArtifact<'_>) -> Result<PathBu
         "before_excerpt": artifact.before_excerpt,
         "after_excerpt": artifact.after_excerpt,
         "unified_diff": artifact.unified_diff,
+        "restore_mode": artifact.restore_mode,
+        "restore_artifact_path": artifact
+            .restore_artifact_path
+            .map(|path| path.display().to_string()),
     });
-    let rendered =
-        serde_json::to_vec_pretty(&payload).map_err(|error| io::Error::other(error.to_string()))?;
-    fs::write(&artifact_path, rendered)?;
+    write_json_artifact(&artifact_path, payload)?;
+    Ok(artifact_path)
+}
+
+pub(crate) fn write_file_restore_artifact(
+    artifact_root: &Path,
+    target_path: &Path,
+    contents: &[u8],
+) -> Result<PathBuf, io::Error> {
+    let restore_dir = artifact_root.join(".axiomrunner").join("restores");
+    fs::create_dir_all(&restore_dir)?;
+    let artifact_path = restore_dir.join(unique_patch_filename(target_path));
+    let payload = json!({
+        "schema": "axiomrunner.restore.file.v1",
+        "target_path": target_path.display().to_string(),
+        "contents_hex": hex_encode_bytes(contents),
+    });
+    write_json_artifact(&artifact_path, payload)?;
+    Ok(artifact_path)
+}
+
+pub(crate) fn write_directory_restore_artifact(
+    artifact_root: &Path,
+    target_path: &Path,
+) -> Result<PathBuf, io::Error> {
+    let restore_dir = artifact_root.join(".axiomrunner").join("restores");
+    fs::create_dir_all(&restore_dir)?;
+    let artifact_path = restore_dir.join(unique_patch_filename(target_path));
+    let mut entries = Vec::new();
+    snapshot_directory_entries(target_path, target_path, &mut entries)?;
+    let payload = json!({
+        "schema": "axiomrunner.restore.dir.v1",
+        "target_path": target_path.display().to_string(),
+        "entries": entries,
+    });
+    write_json_artifact(&artifact_path, payload)?;
     Ok(artifact_path)
 }
 
@@ -212,9 +257,7 @@ pub(crate) fn write_command_artifact(artifact: CommandArtifact<'_>) -> Result<Pa
         "stdout_truncated": artifact.stdout_truncated,
         "stderr_truncated": artifact.stderr_truncated,
     });
-    let rendered =
-        serde_json::to_vec_pretty(&payload).map_err(|error| io::Error::other(error.to_string()))?;
-    fs::write(&artifact_path, rendered)?;
+    write_json_artifact(&artifact_path, payload)?;
     Ok(artifact_path)
 }
 
@@ -251,6 +294,52 @@ fn now_millis() -> u64 {
 fn read_existing_utf8(path: &Path) -> Result<String, WritePreparationError> {
     let bytes = fs::read(path)?;
     String::from_utf8(bytes).map_err(|_| WritePreparationError::UnsupportedEncoding)
+}
+
+fn snapshot_directory_entries(
+    root: &Path,
+    path: &Path,
+    entries: &mut Vec<serde_json::Value>,
+) -> Result<(), io::Error> {
+    let relative = path.strip_prefix(root).unwrap_or(path);
+    let rel = if relative.as_os_str().is_empty() {
+        String::from(".")
+    } else {
+        relative.display().to_string()
+    };
+    entries.push(json!({
+        "path": rel,
+        "kind": "dir",
+    }));
+
+    let mut children = fs::read_dir(path)?.collect::<Result<Vec<_>, io::Error>>()?;
+    children.sort_by_key(|entry| entry.path());
+
+    for child in children {
+        let child_path = child.path();
+        let metadata = child.metadata()?;
+        if metadata.is_dir() {
+            snapshot_directory_entries(root, &child_path, entries)?;
+        } else if metadata.is_file() {
+            let relative = child_path.strip_prefix(root).unwrap_or(&child_path);
+            entries.push(json!({
+                "path": relative.display().to_string(),
+                "kind": "file",
+                "contents_hex": hex_encode_bytes(&fs::read(&child_path)?),
+            }));
+        }
+    }
+
+    Ok(())
+}
+
+fn hex_encode_bytes(bytes: &[u8]) -> String {
+    use std::fmt::Write;
+    let mut s = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        write!(s, "{byte:02x}").expect("writing to String is infallible");
+    }
+    s
 }
 
 pub(crate) fn bounded_excerpt(contents: &str, limit: usize) -> Option<String> {
@@ -298,8 +387,10 @@ pub(crate) fn bounded_unified_diff(before: &str, after: &str, limit: usize) -> O
 mod tests {
     use super::{
         LineEnding, WritePreparationError, bounded_excerpt, bounded_unified_diff,
-        detect_line_ending, normalize_line_endings, prepare_contents_for_existing_file,
+        detect_line_ending, hex_encode_bytes, normalize_line_endings,
+        prepare_contents_for_existing_file, write_file_restore_artifact,
     };
+    use serde_json::Value;
     use std::fs;
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -361,5 +452,30 @@ mod tests {
         assert!(diff.contains("--- before"));
         assert!(diff.contains("-beta"));
         assert!(diff.contains("+gamma"));
+    }
+
+    #[test]
+    fn hex_encode_bytes_renders_dense_lowercase_hex() {
+        assert_eq!(hex_encode_bytes(&[0x00, 0x0f, 0xa5, 0xff]), "000fa5ff");
+    }
+
+    #[test]
+    fn write_file_restore_artifact_persists_hex_payload() {
+        let artifact_root = unique_path("restore-artifact-root");
+        let target_path = unique_path("restore-artifact-target");
+        fs::create_dir_all(&artifact_root).expect("artifact root should exist");
+
+        let artifact_path = write_file_restore_artifact(&artifact_root, &target_path, b"\x00\xff")
+            .expect("restore artifact should be written");
+        let payload: Value = serde_json::from_slice(
+            &fs::read(&artifact_path).expect("restore artifact should be readable"),
+        )
+        .expect("restore artifact should be valid json");
+
+        assert_eq!(payload["schema"], "axiomrunner.restore.file.v1");
+        assert_eq!(payload["target_path"], target_path.display().to_string());
+        assert_eq!(payload["contents_hex"], "00ff");
+
+        let _ = fs::remove_dir_all(artifact_root);
     }
 }

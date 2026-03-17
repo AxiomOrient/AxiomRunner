@@ -137,13 +137,15 @@ impl CliRuntime {
     }
 
     fn next_intent_id(&mut self) -> String {
-        self.next_intent_seq = self.next_intent_seq.saturating_add(1);
-        format!("cli-{}", self.next_intent_seq)
+        let (id, seq) = alloc_seq_id(self.next_intent_seq, "cli");
+        self.next_intent_seq = seq;
+        id
     }
 
     fn next_run_id(&mut self) -> String {
-        self.next_run_seq = self.next_run_seq.saturating_add(1);
-        format!("run-{}", self.next_run_seq)
+        let (id, seq) = alloc_seq_id(self.next_run_seq, "run");
+        self.next_run_seq = seq;
+        id
     }
 
     fn runtime_snapshot(&self) -> RuntimeStateSnapshot {
@@ -178,6 +180,11 @@ impl CliRuntime {
     fn release_workspace_lock(&mut self) {
         self.workspace_lock = None;
     }
+}
+
+fn alloc_seq_id(current: u64, prefix: &str) -> (String, u64) {
+    let next = current.saturating_add(1);
+    (format!("{prefix}-{next}"), next)
 }
 
 pub fn execute_command(
@@ -326,6 +333,15 @@ fn print_doctor(runtime: &CliRuntime, config: &AppConfig, json: bool) -> Result<
 mod tests {
     use super::*;
     use axiomrunner_core::{DoneCondition, RunApprovalMode, RunBudget, RunGoal, VerificationCheck};
+
+    #[test]
+    fn alloc_seq_id_increments_and_saturates() {
+        assert_eq!(alloc_seq_id(41, "cli"), (String::from("cli-42"), 42));
+        assert_eq!(
+            alloc_seq_id(u64::MAX, "run"),
+            (format!("run-{}", u64::MAX), u64::MAX)
+        );
+    }
 
     fn sample_goal_template(minutes: u64) -> RunTemplate {
         crate::cli_command::GoalFileTemplate {

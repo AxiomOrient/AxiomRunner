@@ -19,7 +19,7 @@ Kernel (이 저장소)
   workspace safety / failure propagation
 
 Workflow Pack  (pack manifest)
-  planner hints / allowed tools / verifier rules / risk policy hint
+  planner hints / verifier rules / approval mode
 
 Adapter  (crates/adapters)
   provider substrate / tool execution backend / memory backend / health probe

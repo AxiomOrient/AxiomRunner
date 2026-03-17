@@ -121,10 +121,9 @@ representative verifier examples:
 - 작성 가이드: [docs/GOAL_STACK_PLAYBOOK.md](docs/GOAL_STACK_PLAYBOOK.md)
 - 생성 스크립트: `python3 tools/dev/generate_goal_stack.py ...` (dev helper, 기본 done condition은 `report_artifact_exists`만 생성)
 
-developer automation milestone:
+release target:
 
-- `v0.1`: honest autonomous runtime lock
-- `v0.2`: representative app/server example assets + safer workspace execution
+- `1.0.0`: workspace-bound, verifier-first, failure-honest local runtime
 
 ## 설정 표면
 
@@ -172,13 +171,14 @@ env-only runtime knobs:
 - `run <goal-file>`은 run id, step journal, verify/report artifact를 남긴다.
 - `resume`은 generic restart가 아니라 `waiting_approval` 상태의 goal-file pending run 승인 후 재개 전용이다.
 - `abort`는 rerun이 아니라 pending goal-file control state를 terminal outcome으로 닫는 control이다.
-- git workspace에서는 `AXIOMRUNNER_RUNTIME_GIT_WORKTREE_ISOLATION=1` 로 opt-in isolated worktree 실행을 지원한다.
+- git workspace에서는 기본적으로 isolated worktree 실행을 사용한다. `AXIOMRUNNER_RUNTIME_GIT_WORKTREE_ISOLATION=0` 으로만 끌 수 있다.
+- `workspace_root`는 입력 호환용 필드다. 실제 실행 경계와 done-condition 기준은 runtime `--workspace`가 결정한다.
 - default goal path는 verification detail에서 command를 직접 파생한다.
-- 기본 verifier command surface는 `pwd`, `git`, `cargo`, `npm`, `node`, `python`, `python3`, `pytest`, `rg`, `ls`, `cat`, `pnpm`, `yarn`, `uv`, `make` 이다. `--command-allowlist`는 이 표면을 더 좁히는 operator override다.
+- 기본 verifier command surface는 allowlisted program이 아니라 allowlisted command spec이다. `--command-allowlist`는 이 spec 집합을 더 좁히는 operator override다.
 - detail에서 안전한 strong verifier를 만들 수 없으면 `verification_weak`, `verification_unresolved`, `pack_required` 로 드러나며 `success`로 숨기지 않는다.
 - provider/tool/memory 단계 실패는 성공 종료로 숨기지 않고 process failure로 승격된다.
 - provider health는 `ready`, `degraded`, `blocked`로 노출된다.
-- `openai` provider는 기본 비활성 experimental 경로다. 실제 사용은 `AXIOMRUNNER_EXPERIMENTAL_OPENAI=1` opt-in 이후에만 허용된다.
+- `openai` provider는 기본 비활성 experimental 경로다. 실제 사용은 `AXIOMRUNNER_EXPERIMENTAL_OPENAI=1` 이후에만 허용된다.
 
 ## 문서
 

@@ -40,7 +40,7 @@ cargo run -q -p axiomrunner_apps -- \
 - pack-backed run은 `pack.json`이 verifier 순서, command example, allowed tool 경계를 명시한다.
 - app/server 자동화처럼 build/test/lint/typecheck 의미가 중요하면 pack-backed run이 기준이다.
 
-## v0.2 Developer Automation Milestone
+## 1.0.0 Example Set
 
 아래 4개 예제가 모두 유지 대상이다.
 

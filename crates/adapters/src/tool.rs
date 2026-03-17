@@ -11,8 +11,10 @@ use crate::tool_workspace::{
 use crate::tool_write::{
     CommandArtifact, PatchArtifact, WritePreparationError, atomic_overwrite, bounded_excerpt,
     bounded_unified_diff, digest_path, existing_digest, existing_utf8_contents,
-    prepare_contents_for_existing_file, write_command_artifact, write_patch_artifact,
+    prepare_contents_for_existing_file, write_command_artifact, write_directory_restore_artifact,
+    write_file_restore_artifact, write_patch_artifact,
 };
+use crate::{RESTORE_MODE_DELETE_CREATED, RESTORE_MODE_DIR, RESTORE_MODE_FILE};
 use axiomrunner_core::RunCommandProfile;
 use regex::Regex;
 use std::fs::{self, OpenOptions};
@@ -100,6 +102,32 @@ pub fn validate_run_command_policy(
         return Err("command_not_allowlisted");
     }
     Ok(())
+}
+
+pub fn validate_run_command_spec(
+    program: &str,
+    args: &[String],
+    allowlist: &[String],
+) -> Result<(), &'static str> {
+    validate_run_command_policy(program, allowlist)?;
+    validate_run_command_args(program, args)
+}
+
+fn validate_run_command_args(program: &str, args: &[String]) -> Result<(), &'static str> {
+    match program {
+        "pwd" => ensure_no_args(args),
+        "ls" | "cat" => ensure_safe_path_args(args),
+        "rg" => ensure_rg_args(args),
+        "git" => ensure_git_args(args),
+        "cargo" => ensure_cargo_args(args),
+        "npm" | "pnpm" | "yarn" => ensure_node_package_args(program, args),
+        "python" | "python3" => ensure_python_args(args),
+        "node" => ensure_node_args(args),
+        "pytest" => ensure_pytest_args(args),
+        "uv" => ensure_uv_args(args),
+        "make" => ensure_make_args(args),
+        _ => Err("command_args_forbidden"),
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -304,6 +332,24 @@ impl WorkspaceTool {
         let before_contents =
             existing_utf8_contents(&resolved_path).map_err(map_write_preparation_error)?;
         let before_digest = existing_digest(&resolved_path).map_err(map_write_preparation_error)?;
+        let restore_artifact_path = if resolved_path.exists() {
+            Some(
+                write_file_restore_artifact(
+                    &self.artifact_root,
+                    &resolved_path,
+                    &fs::read(&resolved_path).map_err(|error| ToolError::Io {
+                        operation: "read_file_restore_source",
+                        source: error,
+                    })?,
+                )
+                .map_err(|error| ToolError::Io {
+                    operation: "write_restore_artifact",
+                    source: error,
+                })?,
+            )
+        } else {
+            None
+        };
 
         let bytes_written = if append {
             let contents = prepare_contents_for_existing_file(&resolved_path, contents)
@@ -361,6 +407,12 @@ impl WorkspaceTool {
             before_excerpt: before_excerpt.as_deref(),
             after_excerpt: after_excerpt.as_deref(),
             unified_diff: unified_diff.as_deref(),
+            restore_mode: Some(if restore_artifact_path.is_some() {
+                RESTORE_MODE_FILE
+            } else {
+                RESTORE_MODE_DELETE_CREATED
+            }),
+            restore_artifact_path: restore_artifact_path.as_deref(),
         })
         .map_err(|error| ToolError::Io {
             operation: "write_patch_artifact",
@@ -452,13 +504,41 @@ impl WorkspaceTool {
             }));
         }
 
-        let before_contents =
-            existing_utf8_contents(&resolved_path).map_err(map_write_preparation_error)?;
-        let before_digest = existing_digest(&resolved_path).map_err(map_write_preparation_error)?;
         let metadata = fs::metadata(&resolved_path).map_err(|error| ToolError::Io {
             operation: "stat_remove_path",
             source: error,
         })?;
+        let before_contents = if metadata.is_file() {
+            existing_utf8_contents(&resolved_path).map_err(map_write_preparation_error)?
+        } else {
+            None
+        };
+        let before_digest = existing_digest(&resolved_path).map_err(map_write_preparation_error)?;
+        let restore_artifact_path = if metadata.is_dir() {
+            Some(
+                write_directory_restore_artifact(&self.artifact_root, &resolved_path).map_err(
+                    |error| ToolError::Io {
+                        operation: "write_restore_artifact",
+                        source: error,
+                    },
+                )?,
+            )
+        } else {
+            Some(
+                write_file_restore_artifact(
+                    &self.artifact_root,
+                    &resolved_path,
+                    &fs::read(&resolved_path).map_err(|error| ToolError::Io {
+                        operation: "read_file_restore_source",
+                        source: error,
+                    })?,
+                )
+                .map_err(|error| ToolError::Io {
+                    operation: "write_restore_artifact",
+                    source: error,
+                })?,
+            )
+        };
         if metadata.is_dir() {
             fs::remove_dir_all(&resolved_path).map_err(|error| ToolError::Io {
                 operation: "remove_dir_all",
@@ -485,6 +565,12 @@ impl WorkspaceTool {
             before_excerpt: before_excerpt.as_deref(),
             after_excerpt: None,
             unified_diff: None,
+            restore_mode: Some(if metadata.is_dir() {
+                RESTORE_MODE_DIR
+            } else {
+                RESTORE_MODE_FILE
+            }),
+            restore_artifact_path: restore_artifact_path.as_deref(),
         })
         .map_err(|error| ToolError::Io {
             operation: "write_patch_artifact",
@@ -507,7 +593,7 @@ impl WorkspaceTool {
     }
 
     fn run_command(&self, program: &str, args: &[String]) -> Result<ToolResult, ToolError> {
-        if validate_run_command_policy(program, &self.policy.command_allowlist).is_err() {
+        if validate_run_command_spec(program, args, &self.policy.command_allowlist).is_err() {
             return Err(ToolError::CommandDenied {
                 program: program.to_owned(),
             });
@@ -624,6 +710,157 @@ fn classify_run_command_profile(program: &str, args: &[String]) -> RunCommandPro
         | ("yarn", Some("build"), _) => RunCommandProfile::Build,
         _ => RunCommandProfile::Generic,
     }
+}
+
+fn ensure_no_args(args: &[String]) -> Result<(), &'static str> {
+    if args.is_empty() {
+        Ok(())
+    } else {
+        Err("command_args_forbidden")
+    }
+}
+
+fn ensure_safe_path_args(args: &[String]) -> Result<(), &'static str> {
+    if args.is_empty() {
+        return Ok(());
+    }
+    if args.iter().all(|arg| is_safe_path_like_arg(arg)) {
+        Ok(())
+    } else {
+        Err("command_args_forbidden")
+    }
+}
+
+fn ensure_rg_args(args: &[String]) -> Result<(), &'static str> {
+    if args.is_empty() {
+        return Ok(());
+    }
+    if args
+        .iter()
+        .all(|arg| is_safe_path_like_arg(arg) || matches!(arg.as_str(), "--files" | "-n"))
+    {
+        Ok(())
+    } else {
+        Err("command_args_forbidden")
+    }
+}
+
+fn ensure_git_args(args: &[String]) -> Result<(), &'static str> {
+    match args {
+        [subcommand] if subcommand == "status" => Ok(()),
+        [subcommand, short] if subcommand == "status" && short == "--short" => Ok(()),
+        [subcommand, flag] if subcommand == "diff" && flag == "--name-only" => Ok(()),
+        [subcommand, flag] if subcommand == "rev-parse" && flag == "--show-toplevel" => Ok(()),
+        _ => Err("command_args_forbidden"),
+    }
+}
+
+fn ensure_cargo_args(args: &[String]) -> Result<(), &'static str> {
+    match args {
+        [subcommand, rest @ ..]
+            if matches!(subcommand.as_str(), "build" | "test" | "clippy" | "fmt")
+                && rest.iter().all(|arg| is_safe_cli_arg(arg)) =>
+        {
+            Ok(())
+        }
+        _ => Err("command_args_forbidden"),
+    }
+}
+
+fn ensure_node_package_args(program: &str, args: &[String]) -> Result<(), &'static str> {
+    match (program, args) {
+        ("npm", [subcommand, flag]) if subcommand == "install" && flag == "--ignore-scripts" => {
+            Ok(())
+        }
+        (_, [subcommand]) if subcommand == "test" => Ok(()),
+        (_, [subcommand, target]) if subcommand == "run" && is_allowed_package_target(target) => {
+            Ok(())
+        }
+        ("yarn", [target]) if is_allowed_package_target(target) => Ok(()),
+        _ => Err("command_args_forbidden"),
+    }
+}
+
+fn ensure_python_args(args: &[String]) -> Result<(), &'static str> {
+    match args {
+        [module_flag, module, rest @ ..]
+            if module_flag == "-m"
+                && matches!(module.as_str(), "compileall" | "unittest" | "py_compile")
+                && rest
+                    .iter()
+                    .all(|arg| is_safe_path_like_arg(arg) || is_safe_cli_arg(arg)) =>
+        {
+            Ok(())
+        }
+        [script] if is_safe_script_path(script) => Ok(()),
+        _ => Err("command_args_forbidden"),
+    }
+}
+
+fn ensure_node_args(args: &[String]) -> Result<(), &'static str> {
+    match args {
+        [script] if is_safe_script_path(script) => Ok(()),
+        _ => Err("command_args_forbidden"),
+    }
+}
+
+fn ensure_pytest_args(args: &[String]) -> Result<(), &'static str> {
+    if args
+        .iter()
+        .all(|arg| is_safe_path_like_arg(arg) || is_safe_cli_arg(arg))
+    {
+        Ok(())
+    } else {
+        Err("command_args_forbidden")
+    }
+}
+
+fn ensure_uv_args(args: &[String]) -> Result<(), &'static str> {
+    if args.len() >= 2
+        && args.first().is_some_and(|arg| arg == "run")
+        && args
+            .iter()
+            .skip(1)
+            .all(|arg| is_safe_path_like_arg(arg) || is_safe_cli_arg(arg))
+    {
+        Ok(())
+    } else {
+        Err("command_args_forbidden")
+    }
+}
+
+fn ensure_make_args(args: &[String]) -> Result<(), &'static str> {
+    if args.len() == 1 && is_allowed_package_target(&args[0]) {
+        Ok(())
+    } else {
+        Err("command_args_forbidden")
+    }
+}
+
+fn is_allowed_package_target(target: &str) -> bool {
+    matches!(target, "lint" | "build" | "typecheck")
+}
+
+fn is_safe_script_path(value: &str) -> bool {
+    is_safe_path_like_arg(value) && !value.starts_with('-')
+}
+
+fn is_safe_path_like_arg(value: &str) -> bool {
+    !value.is_empty()
+        && !value.starts_with('-')
+        && !value.contains('\0')
+        && !value.contains("..")
+        && !value.contains(';')
+        && !value.contains('&')
+        && !value.contains('|')
+}
+
+fn is_safe_cli_arg(value: &str) -> bool {
+    !value.is_empty()
+        && !value.contains('\0')
+        && !value.contains(';')
+        && !value.contains('&')
+        && !value.contains('|')
 }
 
 impl ToolAdapter for WorkspaceTool {

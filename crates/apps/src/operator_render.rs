@@ -198,7 +198,7 @@ pub fn render_replay_lines(
 
     if let Some(run) = &latest.run {
         lines.push(format!(
-            "replay run run_id={} phase={} outcome={} reason={} reason_code={} reason_detail={} next_action={} approval_state={} verifier_state={} verifier_strength={} elapsed_ms={} planned_steps={} summary={}",
+            "replay run run_id={} phase={} outcome={} reason={} reason_code={} reason_detail={} next_action={} approval_state={} verifier_state={} verifier_strength={} execution_workspace={} elapsed_ms={} planned_steps={} summary={}",
             run.run_id,
             run.phase,
             run.outcome,
@@ -209,6 +209,7 @@ pub fn render_replay_lines(
             run.approval_state,
             run.verifier_state,
             verifier_strength_label(&run.verifier_state),
+            run.execution_workspace,
             run.elapsed_ms,
             run.planned_steps,
             run.plan_summary

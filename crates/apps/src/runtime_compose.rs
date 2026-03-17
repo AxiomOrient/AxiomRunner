@@ -1,6 +1,6 @@
 use crate::async_runtime_host::global_async_runtime_host;
 use crate::cli_command::RunTemplate;
-use crate::command_contract::effective_command_allowlist;
+use crate::command_contract::{effective_command_allowlist, validate_run_command_contract};
 use crate::config_loader::AppConfig;
 use crate::display::outcome_name;
 use crate::env_util::read_env_trimmed;
@@ -285,7 +285,10 @@ impl RuntimeComposeConfig {
             env_path(ENV_RUNTIME_TOOL_WORKSPACE).or_else(|| config.workspace.clone());
         let artifact_workspace =
             env_path(ENV_RUNTIME_ARTIFACT_WORKSPACE).or_else(|| tool_workspace.clone());
-        let git_worktree_isolation = env_bool(ENV_RUNTIME_GIT_WORKTREE_ISOLATION);
+        let git_worktree_isolation = resolve_git_worktree_isolation(
+            env_bool_explicit(ENV_RUNTIME_GIT_WORKTREE_ISOLATION),
+            tool_workspace.as_ref(),
+        );
 
         let tool_log_path = env_string(ENV_RUNTIME_TOOL_LOG_PATH).unwrap_or_else(|| {
             artifact_workspace
@@ -527,13 +530,38 @@ impl RuntimeComposeState {
         constraint_policy_violation(template)
     }
 
+    pub fn validate_template_commands(&self, template: &RunTemplate) -> Result<(), String> {
+        let allowlist = effective_command_allowlist(self.config.command_allowlist.as_ref());
+        let plan = build_runtime_compose_plan(template, DecisionOutcome::Accepted);
+        let Some(ToolPlan::RunCommands { commands }) = goal_verifier_tool_plan(&plan) else {
+            return Ok(());
+        };
+
+        for command in commands {
+            validate_run_command_contract(&command.program, &command.args, &allowlist).map_err(
+                |error| {
+                    format!(
+                        "runtime command contract violation label='{}' program='{}' error={error}",
+                        command.label, command.program
+                    )
+                },
+            )?;
+        }
+        Ok(())
+    }
+
     pub fn plan_template(
         &self,
         template: &RunTemplate,
         run_id: &str,
         intent_id: &str,
     ) -> RuntimeRunPlan {
-        build_runtime_run_plan(template, run_id, intent_id)
+        build_runtime_run_plan(
+            template,
+            run_id,
+            intent_id,
+            self.workspace_root().map(PathBuf::as_path),
+        )
     }
 
     pub fn prepare_execution_workspace(&mut self, run_id: &str) -> Result<(), String> {
@@ -625,6 +653,18 @@ impl RuntimeComposeState {
         memory
             .store(&key, &value)
             .map_err(|error| format!("store recall summary failed: {error}"))
+    }
+
+    pub fn forget_run_summary(&mut self, intent_id: &str) -> Result<(), String> {
+        let Some(memory) = self.memory.as_mut() else {
+            return Ok(());
+        };
+
+        let key = tiered_memory_key(MemoryTier::Recall, &format!("last_run/{intent_id}"));
+        memory
+            .delete(&key)
+            .map(|_| ())
+            .map_err(|error| format!("delete recall summary failed: {error}"))
     }
 
     fn compact_hot_context(head: &[String], tail: &[String]) -> String {
@@ -1143,7 +1183,10 @@ fn isolated_worktree_root(
         .filter(|path| !path.starts_with(repo_root))
         .map(|path| path.join(".axiomrunner").join("worktrees"))
         .unwrap_or_else(|| std::env::temp_dir().join("axiomrunner-worktrees"));
-    parent.join(sanitize_worktree_segment(run_id))
+    parent.join(sanitize_worktree_segment(&format!(
+        "{run_id}-{}",
+        std::process::id()
+    )))
 }
 
 fn sanitize_worktree_segment(value: &str) -> String {
@@ -1516,11 +1559,23 @@ fn env_path(key: &str) -> Option<PathBuf> {
     env_string(key).map(PathBuf::from)
 }
 
-fn env_bool(key: &str) -> bool {
-    matches!(
-        env_string(key).as_deref(),
-        Some("1" | "true" | "TRUE" | "yes" | "YES" | "on" | "ON")
-    )
+fn env_bool_explicit(key: &str) -> Option<bool> {
+    match env_string(key).as_deref() {
+        Some("1" | "true" | "TRUE" | "yes" | "YES" | "on" | "ON") => Some(true),
+        Some("0" | "false" | "FALSE" | "no" | "NO" | "off" | "OFF") => Some(false),
+        _ => None,
+    }
+}
+
+fn resolve_git_worktree_isolation(
+    explicit: Option<bool>,
+    tool_workspace: Option<&PathBuf>,
+) -> bool {
+    explicit.unwrap_or_else(|| {
+        tool_workspace
+            .and_then(|workspace| discover_git_toplevel(workspace).ok().flatten())
+            .is_some()
+    })
 }
 
 fn env_string(key: &str) -> Option<String> {
@@ -1542,6 +1597,7 @@ mod tests {
         VerificationCheck,
     };
     use std::fs;
+    use std::process::Command;
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
     fn unique_dir(label: &str) -> std::path::PathBuf {
@@ -1593,6 +1649,54 @@ mod tests {
             compose.command_allowlist,
             Some(vec![String::from("git"), String::from("cargo")])
         );
+    }
+
+    #[test]
+    fn runtime_compose_config_defaults_git_worktree_isolation_on_git_workspace() {
+        let workspace = unique_dir("git-default-isolation");
+        fs::create_dir_all(&workspace).expect("workspace should exist");
+        let output = Command::new("git")
+            .arg("init")
+            .current_dir(&workspace)
+            .output()
+            .expect("git init should run");
+        assert!(output.status.success(), "git init should succeed");
+        assert!(super::resolve_git_worktree_isolation(
+            None,
+            Some(&workspace)
+        ));
+
+        let _ = fs::remove_dir_all(workspace);
+    }
+
+    #[test]
+    fn runtime_compose_config_respects_explicit_git_worktree_isolation_disable() {
+        let workspace = unique_dir("git-disable-isolation");
+        fs::create_dir_all(&workspace).expect("workspace should exist");
+        let output = Command::new("git")
+            .arg("init")
+            .current_dir(&workspace)
+            .output()
+            .expect("git init should run");
+        assert!(output.status.success(), "git init should succeed");
+        assert!(!super::resolve_git_worktree_isolation(
+            Some(false),
+            Some(&workspace)
+        ));
+        let _ = fs::remove_dir_all(workspace);
+    }
+
+    #[test]
+    fn runtime_compose_config_keeps_non_git_workspace_unisolated_by_default() {
+        let workspace = unique_dir("non-git-default-isolation");
+        fs::create_dir_all(&workspace).expect("workspace should exist");
+
+        assert!(!super::resolve_git_worktree_isolation(
+            None,
+            Some(&workspace)
+        ));
+
+        let _ = fs::remove_dir_all(workspace);
     }
 
     #[test]

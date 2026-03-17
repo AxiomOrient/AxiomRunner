@@ -137,7 +137,7 @@ def render_stack_markdown(spec, generated):
     lines = [
         f"# Goal Stack: {spec['epic']}",
         "",
-        f"- workspace_root: `{spec['workspace_root']}`",
+        f"- workspace_root (compat): `{spec.get('workspace_root', '.')}`",
         f"- preset: `{spec.get('preset', 'custom')}`",
         f"- generated_goals: `{len(generated)}`",
     ]
@@ -188,7 +188,7 @@ def build_goal(spec, slice_data):
     )
     goal = {
         "summary": slice_data["summary"],
-        "workspace_root": slice_data.get("workspace_root", spec["workspace_root"]),
+        "workspace_root": slice_data.get("workspace_root", spec.get("workspace_root", ".")),
         "constraints": constraints,
         "done_conditions": build_done_conditions(slice_data),
         "verification_checks": verification_checks,
@@ -204,7 +204,7 @@ def build_goal(spec, slice_data):
 
 
 def validate_spec(spec):
-    for field in ("epic", "workspace_root", "slices"):
+    for field in ("epic", "slices"):
         if field not in spec:
             raise ValueError(f"missing required field '{field}'")
     if not isinstance(spec["slices"], list) or not spec["slices"]:

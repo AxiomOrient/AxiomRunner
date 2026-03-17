@@ -139,6 +139,9 @@ python3 tools/dev/generate_goal_stack.py \
 }
 ```
 
+`workspace_root`는 brief/goal 호환용 입력 필드다.
+실제 실행 경계와 done-condition 기준은 CLI `--workspace`가 소유한다.
+
 ## Output Shape
 
 The generator writes:

@@ -17,9 +17,9 @@
 - `6`: runtime execution error
 - `7`: runtime shutdown error
 
-## v0.1 Release Gate
+## v1.0.0 Release Gate
 
-v0.1 출하 전에는 아래가 모두 잠겨 있어야 한다.
+v1.0.0 출하 전에는 아래가 모두 잠겨 있어야 한다.
 
 - retained CLI surface: `run`, `status`, `replay`, `resume`, `abort`, `doctor`, `health`, `help`
 - operator-visible blocker: `approval_required`, `budget_exhausted`, `blocked`, `failed`, `aborted`

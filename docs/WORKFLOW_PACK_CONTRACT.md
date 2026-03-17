@@ -14,7 +14,7 @@ goal-oriented run이 반드시 답해야 하는 항목:
 | 필드 | 의미 |
 |---|---|
 | `RunGoal.summary` | 완료해야 할 목표 (objective) |
-| `RunGoal.workspace_root` | run이 접근할 수 있는 로컬 workspace 경계 |
+| `RunGoal.workspace_root` | deprecated compatibility field. 실제 실행 경계는 runtime workspace가 소유 |
 | `RunGoal.constraints[]` | 비목표, 호환 규칙, 안전 제한 |
 | `RunGoal.done_conditions[]` | 외부에서 확인 가능한 완료 기준 |
 | `RunGoal.verification_checks[]` | 완료를 증명하는 concrete 검증 단계 |
@@ -147,7 +147,7 @@ workflow pack manifest 필수 필드:
 
 ## 11. Allowed Tools
 
-`allowed_tools[]`는 기존 tool contract 안의 operation만 고를 수 있다.
+`allowed_tools[]`는 기존 tool contract 안의 operation만 고를 수 있다. 현재 verifier rule이 `run_command`를 쓰면 pack은 반드시 `run_command`를 허용해야 한다.
 
 - `list_files`, `read_file`, `search_files`, `file_write`, `replace_in_file`, `remove_path`, `run_command`
 
@@ -171,7 +171,7 @@ workflow pack manifest 필수 필드:
 
 추가 규칙:
 - `command.program`은 shell interpreter(`sh`, `bash`, `cmd`, `powershell`)면 안 된다.
-- `command.program`은 workspace-local retained command여야 한다.
+- `command.program`은 workspace-local retained command여야 하고, `command.args[]`까지 포함한 allowlisted command spec을 만족해야 한다.
 - 현재 제품 기본 allowlist는 `pwd`, `git`, `cargo`, `npm`, `node`, `python`, `python3`, `pytest`, `rg`, `ls`, `cat`, `pnpm`, `yarn`, `uv`, `make` 이다.
 - operator가 별도 `command_allowlist`를 주면 runtime은 이 목록보다 더 좁게 거부할 수 있다.
 

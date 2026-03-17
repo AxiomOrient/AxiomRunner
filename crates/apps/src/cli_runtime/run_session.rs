@@ -8,6 +8,7 @@ pub(super) fn execute_intent(runtime: &mut CliRuntime, intent: &RunTemplate) -> 
     let plan = runtime
         .compose_state
         .plan_template(intent, &run_id, &applied.intent_id);
+    runtime.compose_state.validate_template_commands(intent)?;
     let pre_execution_guard =
         lifecycle::goal_pre_execution_guard(intent, &plan, runtime.compose_state.max_tokens()).map(
             |guard| {
@@ -22,7 +23,14 @@ pub(super) fn execute_intent(runtime: &mut CliRuntime, intent: &RunTemplate) -> 
                         summary: guard.summary,
                         checks: vec![
                             format!("goal_file={}", intent.path),
-                            format!("workspace_root={}", intent.goal.workspace_root),
+                            format!(
+                                "runtime_workspace={}",
+                                runtime
+                                    .compose_state
+                                    .workspace_root()
+                                    .map(|path| path.display().to_string())
+                                    .unwrap_or_else(|| String::from("unconfigured"))
+                            ),
                             format!("done_conditions={}", intent.goal.done_conditions.len()),
                             format!(
                                 "verification_checks={}",
@@ -145,6 +153,9 @@ pub(super) fn execute_resume(runtime: &mut CliRuntime, target: &str) -> Result<(
     let plan = runtime
         .compose_state
         .plan_template(&template, &pending.run_id, &pending.intent_id);
+    runtime
+        .compose_state
+        .validate_template_commands(&template)?;
     let execution = runtime
         .compose_state
         .apply_template(&template, DecisionOutcome::Accepted);
@@ -270,6 +281,9 @@ pub(super) fn execute_abort(runtime: &mut CliRuntime, target: &str) -> Result<()
     let plan = runtime
         .compose_state
         .plan_template(&template, &pending.run_id, &pending.intent_id);
+    runtime
+        .compose_state
+        .validate_template_commands(&template)?;
     let execution = runtime.compose_state.idle_execution();
     let verification = RuntimeRunVerification {
         status: "passed",

@@ -123,7 +123,7 @@ pub(super) fn write_report(
         (
             format!("{base}.report.md"),
             format!(
-                "# Report\n\nintent_id={}\nkind={}\noutcome={}\npolicy={}\nsummary={}\nrisk={}\nnext_action={}\nconstraints={}\nrun_phase={}\nrun_outcome={}\nrun_reason={}\nrun_reason_code={}\nrun_reason_detail={}\nrun_elapsed_ms={}\nverifier_strength={}\nverifier_summary={}\nverifier_non_executed_reason={}\ncheckpoint={}\nrollback={}\nprovider_health_state={}\nprovider_health_detail={}\nprovider={}\nprovider_cwd={}\nmemory={}\ntool={}\noutputs={}\nverifier_evidence={}\nchanged_paths={}\npatch_artifacts={}\nevidence={}\n",
+                "# Report\n\nintent_id={}\nkind={}\noutcome={}\npolicy={}\nsummary={}\nrisk={}\nnext_action={}\nconstraints={}\nrun_phase={}\nrun_outcome={}\nrun_reason={}\nrun_reason_code={}\nrun_reason_detail={}\nrun_elapsed_ms={}\nverifier_strength={}\nverifier_summary={}\nverifier_non_executed_reason={}\ncheckpoint={}\nrollback={}\nprovider_health_state={}\nprovider_health_detail={}\nprovider={}\nprovider_cwd={}\nexecution_workspace={}\nmemory={}\ntool={}\noutputs={}\nverifier_evidence={}\nchanged_paths={}\npatch_artifacts={}\nevidence={}\n",
                 input.intent_id,
                 template_kind(template),
                 outcome_name(input.outcome),
@@ -146,6 +146,7 @@ pub(super) fn write_report(
                 health.provider.state,
                 health.provider.detail,
                 step_name(&execution.provider),
+                execution.provider_cwd,
                 execution.provider_cwd,
                 step_name(&execution.memory),
                 step_name(&execution.tool),

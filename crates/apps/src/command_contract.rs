@@ -1,4 +1,4 @@
-use axiomrunner_adapters::validate_run_command_policy;
+use axiomrunner_adapters::validate_run_command_spec;
 const PRODUCT_COMMAND_ALLOWLIST: &[&str] = &[
     "pwd", "git", "cargo", "npm", "node", "python", "python3", "pytest", "rg", "ls", "cat", "pnpm",
     "yarn", "uv", "make",
@@ -21,7 +21,8 @@ pub(crate) fn effective_command_allowlist(
 
 pub(crate) fn validate_run_command_contract(
     program: &str,
+    args: &[String],
     allowlist: &[String],
 ) -> Result<(), &'static str> {
-    validate_run_command_policy(program, allowlist)
+    validate_run_command_spec(program, args, allowlist)
 }

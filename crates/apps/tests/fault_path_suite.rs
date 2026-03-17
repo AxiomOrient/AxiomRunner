@@ -101,16 +101,17 @@ fn fault_path_suite_covers_provider_tool_and_workspace_substrates() {
                 ("AXIOMRUNNER_RUNTIME_COMMAND_ALLOWLIST", "git"),
             ],
         );
-        let replay = run_cli_with_env(
-            &["replay", "run-1"],
-            &[("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
+        assert_eq!(run.status.code(), Some(6), "stderr:\n{}", stderr_of(&run));
+        assert!(
+            stderr_of(&run).contains("runtime command contract violation"),
+            "stderr:\n{}",
+            stderr_of(&run)
         );
-
-        assert!(run.status.success(), "stderr:\n{}", stderr_of(&run));
-        assert!(stdout_of(&run).contains("phase=blocked outcome=budget_exhausted"));
-        assert!(replay.status.success(), "stderr:\n{}", stderr_of(&replay));
-        assert!(stdout_of(&replay).contains("stage=tool,message=runtime_compose.tool.run_command"));
-        assert!(stdout_of(&replay).contains("false_success_intents=1"));
+        assert!(
+            stderr_of(&run).contains("command_not_allowlisted"),
+            "stderr:\n{}",
+            stderr_of(&run)
+        );
         passed += 1;
         let _ = fs::remove_dir_all(workspace);
     }

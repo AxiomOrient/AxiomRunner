@@ -66,7 +66,7 @@ report artifact와 operator 출력이 같은 값을 표시한다.
 
 | 영역 | capability | 이유 |
 |---|---|---|
-| Provider | `openai` compat provider | 기본 제품 경로를 흐리므로 opt-in fallback으로만 유지 |
+| Provider | `openai` compat provider | 기본 제품 경로를 흐리므로 explicit opt-in experimental 경로로만 유지 |
 | Tools | browser/composio/delegate | 범위를 과도하게 넓힘 |
 | Memory | markdown/sqlite 외 장기 memory 확장 | 제품 의미를 흐릴 위험 |
 | Ops | daemon/service/cron/metrics HTTP | retained CLI surface와 무관 |
@@ -109,7 +109,7 @@ axiomrunner_apps help
 추가 규칙:
 
 - 모든 tool operation은 workspace boundary 안에서만 동작해야 한다.
-- `run_command`는 allowlist를 통과한 command만 실행할 수 있다.
+- `run_command`는 allowlisted command spec만 실행할 수 있다.
 - `run_command`에는 timeout과 output truncation이 적용된다.
 
 ### Tool Request/Result Schema
@@ -142,7 +142,7 @@ axiomrunner_apps help
 |---|---|---|
 | `codek` | primary workspace automation substrate | Core |
 | `mock-local` | deterministic contract path | Core |
-| `openai` | opt-in compat fallback | Experimental |
+| `openai` | explicit opt-in experimental compat path | Experimental |
 
 ## 10. Documentation Truth Rules
 

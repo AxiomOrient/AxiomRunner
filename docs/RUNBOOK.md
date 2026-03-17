@@ -150,7 +150,7 @@ isolated worktree run이 `failed` 또는 `blocked`로 끝나면:
 
 `abort`는 pure terminal control이며 rollback 메타데이터를 생성하지 않는다.
 
-현재 opt-in: git workspace에서 `AXIOMRUNNER_RUNTIME_GIT_WORKTREE_ISOLATION=1`일 때만 worktree isolation 사용.
+현재 기본값: git workspace에서는 isolated worktree를 기본 사용한다. `AXIOMRUNNER_RUNTIME_GIT_WORKTREE_ISOLATION=0`일 때만 끈다.
 
 ## 11. Nightly Dogfood
 
@@ -225,12 +225,7 @@ autonomous eval corpus 확인 항목:
 
 ## 14. Product Milestones
 
-**v0.1 Honest Autonomous Runtime**
+**v1.0.0 Release**
 - retained CLI surface `run/status/replay/resume/abort/doctor/health/help` 고정
-- approval, budget, resume, abort semantics가 status/replay/report에서 일관
-- release blocker와 exit code가 operator 문서와 테스트에 함께 잠김
-
-**v0.2 Safe Developer Automation**
-- representative example pack을 공식 operator asset으로 사용
-- app/server verifier 흐름을 example goal/pack에서 재현 가능
-- isolated worktree, rollback evidence, nightly dogfood가 운영 루프에 연결
+- runtime workspace와 done-condition workspace 의미가 일치
+- command contract, rollback evidence, nightly dogfood가 같은 release truth를 공유

@@ -85,7 +85,6 @@ pub(super) fn run_repair_loop(
     }
 
     let mut execution = initial_execution;
-    let mut verification = initial_verification;
 
     for attempt in 1..=repair_budget {
         let repair = runtime.compose_state.repair_template(
@@ -116,18 +115,17 @@ pub(super) fn run_repair_loop(
             );
         }
 
-        execution = next_execution;
-        verification = next_verification;
-
         let exhausted = attempt == repair_budget;
         let summary = if exhausted {
             format!("repair_budget_exhausted:attempts={attempt}/{repair_budget}")
         } else {
             format!(
                 "repair_retry_failed:attempts={attempt}/{repair_budget}:{}",
-                verification.summary
+                next_verification.summary
             )
         };
+
+        execution = next_execution;
 
         if exhausted {
             return (
@@ -135,7 +133,7 @@ pub(super) fn run_repair_loop(
                 RuntimeRunVerification {
                     status: "failed",
                     summary: summary.clone(),
-                    checks: verification.checks.clone(),
+                    checks: next_verification.checks,
                 },
                 RuntimeRunRepair {
                     attempted: true,
@@ -150,11 +148,7 @@ pub(super) fn run_repair_loop(
         }
     }
 
-    (
-        execution,
-        verification,
-        RuntimeRunRepair::skipped("repair_loop_unreachable"),
-    )
+    unreachable!("repair loop: final iteration always returns via the exhausted path")
 }
 
 fn repair_budget(intent: &RunTemplate, plan: &crate::runtime_compose::RuntimeRunPlan) -> usize {
@@ -178,7 +172,7 @@ fn verify_goal_run(
 ) -> RuntimeRunVerification {
     let mut checks: Vec<String> = [
         format!("goal_file={}", goal_file.path),
-        format!("workspace_root={}", goal_file.goal.workspace_root),
+        format!("runtime_workspace={}", execution.provider_cwd),
         format!("done_conditions={}", goal_file.goal.done_conditions.len()),
         format!(
             "verification_checks={}",
@@ -290,15 +284,24 @@ pub(crate) fn apply_goal_done_conditions(
     goal_file: &crate::cli_command::GoalFileTemplate,
     execution: &RuntimeComposeExecution,
     report_patch_artifacts: &[crate::runtime_compose::RuntimeComposePatchArtifact],
+    runtime_workspace: &std::path::Path,
     record: RuntimeRunRecord,
 ) -> (RuntimeRunRecord, bool) {
     if !matches!(record.outcome, RuntimeRunOutcome::Success) {
         return (record, false);
     }
 
-    let mut checks = record.verification.checks.clone();
-    let failure =
-        goal_done_condition_failure(goal_file, execution, report_patch_artifacts, &mut checks);
+    let existing_checks = record.verification.checks.clone();
+    let (condition_checks, failure) = goal_done_condition_failure(
+        goal_file,
+        execution,
+        report_patch_artifacts,
+        runtime_workspace,
+    );
+    let checks: Vec<String> = existing_checks
+        .into_iter()
+        .chain(condition_checks)
+        .collect();
 
     match failure {
         Some((summary, reason_code, reason_detail)) => (
@@ -335,15 +338,19 @@ fn goal_done_condition_failure(
     goal_file: &crate::cli_command::GoalFileTemplate,
     execution: &RuntimeComposeExecution,
     report_patch_artifacts: &[crate::runtime_compose::RuntimeComposePatchArtifact],
-    checks: &mut Vec<String>,
-) -> Option<(String, String, String)> {
+    runtime_workspace: &std::path::Path,
+) -> (Vec<String>, Option<(String, String, String)>) {
     if execution.tool_outputs.is_empty() {
-        return Some(crate::runtime_compose::runtime_run_reason(
-            "goal_execution_missing_verifier_output",
-            "none",
-        ));
+        return (
+            Vec::new(),
+            Some(crate::runtime_compose::runtime_run_reason(
+                "goal_execution_missing_verifier_output",
+                "none",
+            )),
+        );
     }
 
+    let mut checks = Vec::new();
     for condition in &goal_file.goal.done_conditions {
         match &condition.evidence {
             DoneConditionEvidence::ReportArtifactExists => {
@@ -356,15 +363,17 @@ fn goal_done_condition_failure(
                     if ok { "present" } else { "missing" }
                 ));
                 if !ok {
-                    return Some(crate::runtime_compose::runtime_run_reason(
-                        "done_condition_missing_report_artifact",
-                        condition.label.clone(),
-                    ));
+                    return (
+                        checks,
+                        Some(crate::runtime_compose::runtime_run_reason(
+                            "done_condition_missing_report_artifact",
+                            condition.label.clone(),
+                        )),
+                    );
                 }
             }
             DoneConditionEvidence::FileExists { path } => {
-                let full_path =
-                    std::path::Path::new(&goal_file.goal.workspace_root).join(path.as_str());
+                let full_path = runtime_workspace.join(path.as_str());
                 let ok = full_path.is_file();
                 checks.push(format!(
                     "done_condition={} file_exists={} status={}",
@@ -373,10 +382,13 @@ fn goal_done_condition_failure(
                     if ok { "present" } else { "missing" }
                 ));
                 if !ok {
-                    return Some(crate::runtime_compose::runtime_run_reason(
-                        "done_condition_missing_file",
-                        format!("{}:{}", condition.label, path.as_str()),
-                    ));
+                    return (
+                        checks,
+                        Some(crate::runtime_compose::runtime_run_reason(
+                            "done_condition_missing_file",
+                            format!("{}:{}", condition.label, path.as_str()),
+                        )),
+                    );
                 }
             }
             DoneConditionEvidence::PathChanged { path } => {
@@ -394,10 +406,13 @@ fn goal_done_condition_failure(
                     if ok { "present" } else { "missing" }
                 ));
                 if !ok {
-                    return Some(crate::runtime_compose::runtime_run_reason(
-                        "done_condition_path_not_changed",
-                        format!("{}:{}", condition.label, path.as_str()),
-                    ));
+                    return (
+                        checks,
+                        Some(crate::runtime_compose::runtime_run_reason(
+                            "done_condition_path_not_changed",
+                            format!("{}:{}", condition.label, path.as_str()),
+                        )),
+                    );
                 }
             }
             DoneConditionEvidence::CommandExitZero { command } => {
@@ -411,16 +426,19 @@ fn goal_done_condition_failure(
                     if ok { "present" } else { "missing" }
                 ));
                 if !ok {
-                    return Some(crate::runtime_compose::runtime_run_reason(
-                        "done_condition_command_not_verified",
-                        format!("{}:{}", condition.label, command),
-                    ));
+                    return (
+                        checks,
+                        Some(crate::runtime_compose::runtime_run_reason(
+                            "done_condition_command_not_verified",
+                            format!("{}:{}", condition.label, command),
+                        )),
+                    );
                 }
             }
         }
     }
 
-    None
+    (checks, None)
 }
 
 fn path_matches_changed_target(target_path: &str, expected_path: &str) -> bool {
@@ -784,4 +802,176 @@ fn execution_step_checks(execution: &RuntimeComposeExecution) -> [String; 3] {
         format!("memory={}", step_name(&execution.memory)),
         format!("tool={}", step_name(&execution.tool)),
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axiomrunner_core::{
+        DoneCondition, DoneConditionEvidence, RunApprovalMode, RunBudget, RunGoal,
+        VerificationCheck, WorkspaceRelativePath,
+    };
+    use std::fs;
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+    fn unique_path(label: &str) -> std::path::PathBuf {
+        let tick = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or(Duration::from_secs(0))
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "axiomrunner-lifecycle-test-{label}-{}-{tick}",
+            std::process::id()
+        ))
+    }
+
+    fn sample_goal_template(
+        done_conditions: Vec<DoneCondition>,
+    ) -> crate::cli_command::GoalFileTemplate {
+        crate::cli_command::GoalFileTemplate {
+            path: String::from("/tmp/goal.json"),
+            goal: RunGoal {
+                summary: String::from("goal"),
+                workspace_root: String::from("/declared-workspace"),
+                constraints: Vec::new(),
+                done_conditions,
+                verification_checks: vec![VerificationCheck {
+                    label: String::from("pwd"),
+                    detail: String::from("pwd"),
+                }],
+                budget: RunBudget::bounded(5, 10, 8000),
+                approval_mode: RunApprovalMode::Never,
+            },
+            workflow_pack: None,
+        }
+    }
+
+    fn verifier_output(command: &str, exit_code: i64) -> String {
+        serde_json::json!({
+            "label": "pwd",
+            "strength": "strong",
+            "exit_code": exit_code,
+            "command": command,
+            "artifact_path": ".axiomrunner/commands/pwd.json",
+            "expectation": "exit 0",
+        })
+        .to_string()
+    }
+
+    fn sample_execution(runtime_workspace: &std::path::Path) -> RuntimeComposeExecution {
+        RuntimeComposeExecution {
+            provider_output: None,
+            provider_cwd: runtime_workspace.display().to_string(),
+            provider: crate::runtime_compose::RuntimeComposeStep::Applied,
+            memory: crate::runtime_compose::RuntimeComposeStep::Applied,
+            tool: crate::runtime_compose::RuntimeComposeStep::Applied,
+            tool_outputs: vec![verifier_output("pwd", 0)],
+            patch_artifacts: Vec::new(),
+        }
+    }
+
+    fn sample_record(checks: Vec<String>) -> RuntimeRunRecord {
+        RuntimeRunRecord {
+            plan: crate::runtime_compose::RuntimeRunPlan {
+                run_id: String::from("run-1"),
+                goal: String::from("goal"),
+                summary: String::from("summary"),
+                workflow_pack: String::from("goal-default-v1"),
+                verifier_flow: String::from("generic"),
+                done_when: String::from("done"),
+                planned_steps: 4,
+                steps: Vec::new(),
+            },
+            step_journal: Vec::new(),
+            verification: RuntimeRunVerification {
+                status: "passed",
+                summary: String::from("goal_execution_verified"),
+                checks,
+            },
+            repair: RuntimeRunRepair::skipped("verification_passed"),
+            checkpoint: None,
+            rollback: None,
+            elapsed_ms: 1,
+            phase: RuntimeRunPhase::Completed,
+            outcome: RuntimeRunOutcome::Success,
+            reason: String::from("verification_passed"),
+            reason_code: String::from("verification_passed"),
+            reason_detail: String::from("none"),
+        }
+    }
+
+    #[test]
+    fn goal_done_condition_failure_uses_runtime_workspace_boundary() {
+        let runtime_workspace = unique_path("runtime-workspace");
+        let declared_workspace = unique_path("declared-workspace");
+        fs::create_dir_all(&runtime_workspace).expect("runtime workspace should exist");
+        fs::create_dir_all(&declared_workspace).expect("declared workspace should exist");
+        fs::write(declared_workspace.join("marker.txt"), "declared\n")
+            .expect("declared marker should exist");
+
+        let goal_file = sample_goal_template(vec![DoneCondition {
+            label: String::from("marker"),
+            evidence: DoneConditionEvidence::FileExists {
+                path: WorkspaceRelativePath::parse("marker.txt")
+                    .expect("workspace path should parse"),
+            },
+        }]);
+        let execution = sample_execution(&runtime_workspace);
+
+        let (checks, failure) =
+            goal_done_condition_failure(&goal_file, &execution, &[], &runtime_workspace);
+
+        assert_eq!(
+            checks,
+            vec![String::from(
+                "done_condition=marker file_exists=marker.txt status=missing"
+            )]
+        );
+        assert_eq!(
+            failure,
+            Some(crate::runtime_compose::runtime_run_reason(
+                "done_condition_missing_file",
+                "marker:marker.txt"
+            ))
+        );
+
+        let _ = fs::remove_dir_all(runtime_workspace);
+        let _ = fs::remove_dir_all(declared_workspace);
+    }
+
+    #[test]
+    fn apply_goal_done_conditions_explicitly_composes_existing_and_new_checks() {
+        let runtime_workspace = unique_path("apply-done-conditions");
+        fs::create_dir_all(&runtime_workspace).expect("runtime workspace should exist");
+        fs::write(runtime_workspace.join("marker.txt"), "present\n").expect("marker should exist");
+
+        let goal_file = sample_goal_template(vec![DoneCondition {
+            label: String::from("marker"),
+            evidence: DoneConditionEvidence::FileExists {
+                path: WorkspaceRelativePath::parse("marker.txt")
+                    .expect("workspace path should parse"),
+            },
+        }]);
+        let execution = sample_execution(&runtime_workspace);
+        let record = sample_record(vec![String::from("initial_check=present")]);
+
+        let (updated, applied) =
+            apply_goal_done_conditions(&goal_file, &execution, &[], &runtime_workspace, record);
+
+        assert!(applied);
+        assert_eq!(updated.verification.status, "passed");
+        assert_eq!(
+            updated.verification.summary,
+            String::from("goal_done_conditions_verified")
+        );
+        assert_eq!(
+            updated.verification.checks,
+            vec![
+                String::from("initial_check=present"),
+                String::from("done_condition=marker file_exists=marker.txt status=present"),
+            ]
+        );
+
+        let _ = fs::remove_dir_all(runtime_workspace);
+    }
 }

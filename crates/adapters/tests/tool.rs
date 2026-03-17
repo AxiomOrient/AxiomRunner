@@ -1,6 +1,6 @@
 use axiomrunner_adapters::{
     AdapterHealth, SearchMode, ToolAdapter, ToolPolicy, ToolRequest, ToolResult, ToolRiskTier,
-    WorkspaceTool, classify_tool_request_risk,
+    WorkspaceTool, classify_tool_request_risk, validate_run_command_spec,
 };
 use std::fs;
 use std::path::PathBuf;
@@ -18,6 +18,10 @@ fn unique_path(label: &str) -> PathBuf {
 }
 
 fn tool(root: &PathBuf) -> WorkspaceTool {
+    tool_with_allowlist(root, vec![String::from("pwd"), String::from("cat")])
+}
+
+fn tool_with_allowlist(root: &PathBuf, command_allowlist: Vec<String>) -> WorkspaceTool {
     WorkspaceTool::new(
         root,
         root,
@@ -27,7 +31,7 @@ fn tool(root: &PathBuf) -> WorkspaceTool {
             max_search_results: 32,
             max_command_output_bytes: 256,
             command_timeout_ms: 50,
-            command_allowlist: vec![String::from("pwd"), String::from("cat")],
+            command_allowlist,
         },
     )
     .expect("workspace tool should initialize")
@@ -287,6 +291,35 @@ fn workspace_tool_blocks_workspace_escape_and_denied_command() {
     assert!(denied.is_err());
 
     let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn workspace_tool_rejects_interpreter_inline_command_even_when_program_is_allowlisted() {
+    let root = unique_path("deny-interpreter-inline");
+    fs::create_dir_all(&root).expect("workspace should be created");
+    let tool = tool_with_allowlist(&root, vec![String::from("python3")]);
+
+    let denied = tool.execute(ToolRequest::RunCommand {
+        program: String::from("python3"),
+        args: vec![String::from("-c"), String::from("print(1)")],
+    });
+    assert!(denied.is_err());
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn command_contract_allows_safe_python_module_command() {
+    let allowed = validate_run_command_spec(
+        "python3",
+        &[
+            String::from("-m"),
+            String::from("py_compile"),
+            String::from("script.py"),
+        ],
+        &[String::from("python3")],
+    );
+    assert!(allowed.is_ok());
 }
 
 #[test]
