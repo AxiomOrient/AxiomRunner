@@ -169,6 +169,12 @@ workflow pack manifest 필수 필드:
 | `strength` | `strong` / `weak` / `unresolved` / `pack_required` |
 | `required` | 필수 여부 |
 
+추가 규칙:
+- `command.program`은 shell interpreter(`sh`, `bash`, `cmd`, `powershell`)면 안 된다.
+- `command.program`은 workspace-local retained command여야 한다.
+- 현재 제품 기본 allowlist는 `pwd`, `git`, `cargo`, `npm`, `node`, `python`, `python3`, `pytest`, `rg`, `ls`, `cat`, `pnpm`, `yarn`, `uv`, `make` 이다.
+- operator가 별도 `command_allowlist`를 주면 runtime은 이 목록보다 더 좁게 거부할 수 있다.
+
 **strength 의미**:
 - `strong` — 직접적인 검증 경로
 - `weak` — 약한 fallback probe. success로 숨기면 안 됨

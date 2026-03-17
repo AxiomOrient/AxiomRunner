@@ -208,7 +208,7 @@ fn e2e_cli_goal_run_can_use_isolated_git_worktree() {
   "verification_checks": [
     { "label": "pwd", "detail": "pwd" }
   ],
-  "budget": { "max_steps": 5, "max_minutes": 10, "max_tokens": 8000 },
+  "budget": { "max_steps": 20, "max_minutes": 10, "max_tokens": 8000 },
   "approval_mode": "never"
 }"#,
     )
@@ -292,7 +292,7 @@ fn e2e_cli_failed_isolated_run_writes_rollback_metadata() {
   "verification_checks": [
     { "label": "domain verification", "detail": "representative domain path" }
   ],
-  "budget": { "max_steps": 5, "max_minutes": 10, "max_tokens": 8000 },
+  "budget": { "max_steps": 20, "max_minutes": 10, "max_tokens": 8000 },
   "approval_mode": "never"
 }"#,
     )
@@ -644,6 +644,67 @@ fn e2e_cli_goal_file_approval_can_resume_from_pending_run() {
     assert!(stdout_of(&status).contains("status run run_id=run-1 phase=completed outcome=success"));
     assert!(replay.status.success());
     assert!(stdout_of(&replay).contains("replay run run_id=run-1 phase=completed outcome=success"));
+
+    let _ = fs::remove_dir_all(workspace);
+    let _ = fs::remove_file(state_path);
+    let _ = fs::remove_file(goal_file);
+}
+
+#[test]
+fn e2e_cli_resume_failure_propagates_and_keeps_pending_state() {
+    let workspace = unique_path("resume-failure-workspace", "dir");
+    let state_path = unique_path("resume-failure-state", "snapshot");
+    let goal_file = unique_path("resume-failure-goal", "json");
+    fs::write(
+        &goal_file,
+        r#"{
+  "summary": "Resume should fail closed when verifier command fails",
+  "workspace_root": "/workspace",
+  "constraints": [],
+  "done_conditions": [
+    { "label": "missing-file", "evidence": "file_exists:missing.txt" }
+  ],
+  "verification_checks": [
+    { "label": "workspace files", "detail": "ls ." }
+  ],
+  "budget": { "max_steps": 20, "max_minutes": 10, "max_tokens": 8000 },
+  "approval_mode": "always"
+}"#,
+    )
+    .expect("goal file should be written");
+
+    let run = run_cli_with_env(
+        &["run", path_str(&goal_file)],
+        &[
+            ("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace)),
+            ("AXIOMRUNNER_RUNTIME_STATE_PATH", path_str(&state_path)),
+        ],
+        "resume-failure-run",
+    );
+    assert!(run.status.success(), "stderr:\n{}", stderr_of(&run));
+    assert!(stdout_of(&run).contains("outcome=approval_required"));
+
+    let resume = run_cli_with_env(
+        &["resume", "run-1"],
+        &[
+            ("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace)),
+            ("AXIOMRUNNER_RUNTIME_STATE_PATH", path_str(&state_path)),
+        ],
+        "resume-failure-resume",
+    );
+    let status = run_cli_with_env(
+        &["status", "latest"],
+        &[
+            ("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace)),
+            ("AXIOMRUNNER_RUNTIME_STATE_PATH", path_str(&state_path)),
+        ],
+        "resume-failure-status",
+    );
+
+    assert!(!resume.status.success(), "stdout:\n{}", stdout_of(&resume));
+    assert!(stderr_of(&resume).contains("runtime execution failed intent_id=cli-1 stage=run"));
+    assert!(status.status.success(), "stderr:\n{}", stderr_of(&status));
+    assert!(stdout_of(&status).contains("status pending_run run_id=run-1"));
 
     let _ = fs::remove_dir_all(workspace);
     let _ = fs::remove_file(state_path);
@@ -1379,7 +1440,7 @@ fn e2e_cli_default_goal_pack_blocks_when_verification_is_weak() {
 }
 
 #[test]
-fn e2e_cli_constraints_block_external_verifier_commands() {
+fn e2e_cli_rejects_workflow_pack_with_external_verifier_command() {
     let workspace = unique_path("constraint-external-workspace", "dir");
     let goal_file = unique_path("constraint-external-goal", "json");
     let pack_file = unique_path("constraint-external-pack", "json");
@@ -1434,17 +1495,9 @@ fn e2e_cli_constraints_block_external_verifier_commands() {
         &[("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
         "constraint-external-run",
     );
-    let replay = run_cli_with_env(
-        &["replay", "run-1"],
-        &[("AXIOMRUNNER_RUNTIME_TOOL_WORKSPACE", path_str(&workspace))],
-        "constraint-external-replay",
-    );
-
-    assert!(run.status.success(), "stderr:\n{}", stderr_of(&run));
-    assert!(replay.status.success(), "stderr:\n{}", stderr_of(&replay));
-    assert!(stdout_of(&run).contains("phase=blocked outcome=blocked"));
-    assert!(stdout_of(&run).contains("reason=policy=constraint_external_commands"));
-    assert!(stdout_of(&replay).contains("policy=constraint_external_commands"));
+    assert!(!run.status.success(), "stdout:\n{}", stdout_of(&run));
+    assert!(stderr_of(&run).contains("invalid workflow pack"));
+    assert!(stderr_of(&run).contains("external_command_class"));
 
     let _ = fs::remove_dir_all(workspace);
     let _ = fs::remove_file(goal_file);
@@ -1452,7 +1505,7 @@ fn e2e_cli_constraints_block_external_verifier_commands() {
 }
 
 #[test]
-fn e2e_cli_constraints_block_destructive_verifier_commands() {
+fn e2e_cli_rejects_workflow_pack_with_destructive_verifier_command() {
     let workspace = unique_path("constraint-destructive-workspace", "dir");
     let goal_file = unique_path("constraint-destructive-goal", "json");
     let pack_file = unique_path("constraint-destructive-pack", "json");
@@ -1508,9 +1561,9 @@ fn e2e_cli_constraints_block_destructive_verifier_commands() {
         "constraint-destructive-run",
     );
 
-    assert!(run.status.success(), "stderr:\n{}", stderr_of(&run));
-    assert!(stdout_of(&run).contains("phase=blocked outcome=blocked"));
-    assert!(stdout_of(&run).contains("reason=policy=constraint_destructive_commands"));
+    assert!(!run.status.success(), "stdout:\n{}", stdout_of(&run));
+    assert!(stderr_of(&run).contains("invalid workflow pack"));
+    assert!(stderr_of(&run).contains("destructive_command_class"));
 
     let _ = fs::remove_dir_all(workspace);
     let _ = fs::remove_file(goal_file);

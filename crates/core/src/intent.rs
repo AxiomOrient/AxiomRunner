@@ -1,4 +1,5 @@
 use crate::validation::ensure_not_blank;
+use std::path::Path;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RunApprovalMode {
@@ -64,10 +65,15 @@ pub struct DoneCondition {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkspaceRelativePath {
+    value: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DoneConditionEvidence {
     ReportArtifactExists,
-    FileExists { path: String },
-    PathChanged { path: String },
+    FileExists { path: WorkspaceRelativePath },
+    PathChanged { path: WorkspaceRelativePath },
     CommandExitZero { command: String },
 }
 
@@ -81,11 +87,11 @@ impl DoneConditionEvidence {
             return Ok(Self::ReportArtifactExists);
         }
 
-        let (kind, detail) = trimmed
-            .split_once(':')
-            .ok_or_else(|| DoneConditionEvidenceParseError::Unsupported {
+        let (kind, detail) = trimmed.split_once(':').ok_or_else(|| {
+            DoneConditionEvidenceParseError::Unsupported {
                 raw: trimmed.to_owned(),
-            })?;
+            }
+        })?;
         let value = detail.trim();
         if value.is_empty() {
             return Err(DoneConditionEvidenceParseError::MissingValue {
@@ -95,10 +101,12 @@ impl DoneConditionEvidence {
 
         match kind {
             "file_exists" => Ok(Self::FileExists {
-                path: value.to_owned(),
+                path: WorkspaceRelativePath::parse(value)
+                    .map_err(DoneConditionEvidenceParseError::InvalidWorkspacePath)?,
             }),
             "path_changed" => Ok(Self::PathChanged {
-                path: value.to_owned(),
+                path: WorkspaceRelativePath::parse(value)
+                    .map_err(DoneConditionEvidenceParseError::InvalidWorkspacePath)?,
             }),
             "command_exit_zero" => Ok(Self::CommandExitZero {
                 command: value.to_owned(),
@@ -124,6 +132,15 @@ pub enum DoneConditionEvidenceParseError {
     Empty,
     MissingValue { kind: String },
     Unsupported { raw: String },
+    InvalidWorkspacePath(WorkspaceRelativePathError),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WorkspaceRelativePathError {
+    Empty,
+    Absolute,
+    ParentTraversal,
+    InvalidSegment,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -154,17 +171,27 @@ pub struct RunGoal {
 pub enum RunGoalValidationError {
     SummaryEmpty,
     WorkspaceRootEmpty,
-    ConstraintLabelEmpty { index: usize },
-    ConstraintDetailEmpty { index: usize },
+    ConstraintLabelEmpty {
+        index: usize,
+    },
+    ConstraintDetailEmpty {
+        index: usize,
+    },
     DoneConditionsEmpty,
-    DoneConditionLabelEmpty { index: usize },
+    DoneConditionLabelEmpty {
+        index: usize,
+    },
     DoneConditionEvidenceInvalid {
         index: usize,
         error: DoneConditionEvidenceParseError,
     },
     VerificationChecksEmpty,
-    VerificationCheckLabelEmpty { index: usize },
-    VerificationCheckDetailEmpty { index: usize },
+    VerificationCheckLabelEmpty {
+        index: usize,
+    },
+    VerificationCheckDetailEmpty {
+        index: usize,
+    },
     BudgetStepsZero,
     BudgetMinutesZero,
     BudgetTokensZero,
@@ -222,6 +249,59 @@ impl RunGoal {
     }
 }
 
+impl WorkspaceRelativePath {
+    pub fn parse(raw: &str) -> Result<Self, WorkspaceRelativePathError> {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            return Err(WorkspaceRelativePathError::Empty);
+        }
+        if Path::new(trimmed).is_absolute() || looks_like_windows_absolute(trimmed) {
+            return Err(WorkspaceRelativePathError::Absolute);
+        }
+
+        let normalized_input = trimmed.replace('\\', "/");
+        let mut normalized = Vec::new();
+        for segment in normalized_input.split('/') {
+            if segment.is_empty() || segment == "." {
+                continue;
+            }
+            if segment == ".." {
+                return Err(WorkspaceRelativePathError::ParentTraversal);
+            }
+            if segment.contains('\0') {
+                return Err(WorkspaceRelativePathError::InvalidSegment);
+            }
+            normalized.push(segment);
+        }
+
+        if normalized.is_empty() {
+            return Err(WorkspaceRelativePathError::InvalidSegment);
+        }
+
+        Ok(Self {
+            value: normalized.join("/"),
+        })
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.value
+    }
+}
+
+impl std::fmt::Display for WorkspaceRelativePath {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.value)
+    }
+}
+
+fn looks_like_windows_absolute(path: &str) -> bool {
+    let bytes = path.as_bytes();
+    bytes.len() >= 3
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && matches!(bytes[2], b'/' | b'\\')
+}
+
 impl RunConstraint {
     pub fn policy_key(&self) -> Option<RunConstraintPolicyKey> {
         match self.label.trim().to_ascii_lowercase().as_str() {
@@ -245,7 +325,7 @@ impl RunConstraint {
 mod tests {
     use super::{
         DoneConditionEvidence, DoneConditionEvidenceParseError, RunConstraint, RunConstraintMode,
-        RunConstraintPolicyKey,
+        RunConstraintPolicyKey, WorkspaceRelativePath, WorkspaceRelativePathError,
     };
 
     #[test]
@@ -296,13 +376,14 @@ mod tests {
         assert_eq!(
             DoneConditionEvidence::parse("file_exists:Cargo.toml"),
             Ok(DoneConditionEvidence::FileExists {
-                path: String::from("Cargo.toml")
+                path: WorkspaceRelativePath::parse("Cargo.toml")
+                    .expect("relative path should parse")
             })
         );
         assert_eq!(
             DoneConditionEvidence::parse("path_changed:src"),
             Ok(DoneConditionEvidence::PathChanged {
-                path: String::from("src")
+                path: WorkspaceRelativePath::parse("src").expect("relative path should parse")
             })
         );
         assert_eq!(
@@ -330,6 +411,18 @@ mod tests {
             Err(DoneConditionEvidenceParseError::MissingValue {
                 kind: String::from("file_exists")
             })
+        );
+        assert_eq!(
+            DoneConditionEvidence::parse("file_exists:/tmp/outside"),
+            Err(DoneConditionEvidenceParseError::InvalidWorkspacePath(
+                WorkspaceRelativePathError::Absolute
+            ))
+        );
+        assert_eq!(
+            DoneConditionEvidence::parse("path_changed:../outside"),
+            Err(DoneConditionEvidenceParseError::InvalidWorkspacePath(
+                WorkspaceRelativePathError::ParentTraversal
+            ))
         );
     }
 }

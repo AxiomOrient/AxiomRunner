@@ -51,11 +51,21 @@ impl WorkflowPackContract {
         if self.verifier_rules.is_empty() {
             return Err("verifier_rules");
         }
-        if self
-            .allowed_tools
-            .iter()
-            .any(|tool| tool.operation.trim().is_empty() || tool.scope.trim().is_empty())
-        {
+        if self.allowed_tools.iter().any(|tool| {
+            tool.operation.trim().is_empty()
+                || tool.scope.trim().is_empty()
+                || !matches!(
+                    tool.operation.trim(),
+                    "list_files"
+                        | "read_file"
+                        | "search_files"
+                        | "file_write"
+                        | "replace_in_file"
+                        | "remove_path"
+                        | "run_command"
+                )
+                || tool.scope.trim() != "workspace"
+        }) {
             return Err("allowed_tools.entry");
         }
         if self.verifier_rules.iter().any(|rule| {
@@ -114,5 +124,52 @@ impl WorkflowPackVerifierStrength {
             Self::Unresolved => "unresolved",
             Self::PackRequired => "pack_required",
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        RunCommandProfile, WorkflowPackAllowedTool, WorkflowPackContract,
+        WorkflowPackVerifierCommand, WorkflowPackVerifierRule,
+    };
+
+    fn base_contract() -> WorkflowPackContract {
+        WorkflowPackContract {
+            pack_id: String::from("rust-service-basic"),
+            version: String::from("1"),
+            entry_goal: String::from("goal"),
+            recommended_verifier_flow: vec![RunCommandProfile::Test],
+            allowed_tools: vec![WorkflowPackAllowedTool {
+                operation: String::from("run_command"),
+                scope: String::from("workspace"),
+            }],
+            verifier_rules: vec![WorkflowPackVerifierRule {
+                label: String::from("cargo test"),
+                profile: RunCommandProfile::Test,
+                command: WorkflowPackVerifierCommand {
+                    program: String::from("cargo"),
+                    args: vec![String::from("test")],
+                },
+                artifact_expectation: String::from("test exits 0"),
+                strength: Default::default(),
+                required: true,
+            }],
+            approval_mode: String::from("never"),
+        }
+    }
+
+    #[test]
+    fn workflow_pack_validate_rejects_unknown_allowed_tool_operation() {
+        let mut contract = base_contract();
+        contract.allowed_tools[0].operation = String::from("browser");
+        assert_eq!(contract.validate(), Err("allowed_tools.entry"));
+    }
+
+    #[test]
+    fn workflow_pack_validate_rejects_non_workspace_scope() {
+        let mut contract = base_contract();
+        contract.allowed_tools[0].scope = String::from("global");
+        assert_eq!(contract.validate(), Err("allowed_tools.entry"));
     }
 }

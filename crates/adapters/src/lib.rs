@@ -20,7 +20,7 @@ pub use provider_registry::{
 };
 pub use tool::{
     RunCommandClass, ToolRiskTier, WorkspaceTool, classify_run_command_class,
-    classify_tool_request_risk, is_forbidden_shell_program,
+    classify_tool_request_risk, is_forbidden_shell_program, validate_run_command_policy,
 };
 
 #[cfg(test)]

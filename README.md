@@ -174,6 +174,7 @@ env-only runtime knobs:
 - `abort`는 rerun이 아니라 pending goal-file control state를 terminal outcome으로 닫는 control이다.
 - git workspace에서는 `AXIOMRUNNER_RUNTIME_GIT_WORKTREE_ISOLATION=1` 로 opt-in isolated worktree 실행을 지원한다.
 - default goal path는 verification detail에서 command를 직접 파생한다.
+- 기본 verifier command surface는 `pwd`, `git`, `cargo`, `npm`, `node`, `python`, `python3`, `pytest`, `rg`, `ls`, `cat`, `pnpm`, `yarn`, `uv`, `make` 이다. `--command-allowlist`는 이 표면을 더 좁히는 operator override다.
 - detail에서 안전한 strong verifier를 만들 수 없으면 `verification_weak`, `verification_unresolved`, `pack_required` 로 드러나며 `success`로 숨기지 않는다.
 - provider/tool/memory 단계 실패는 성공 종료로 숨기지 않고 process failure로 승격된다.
 - provider health는 `ready`, `degraded`, `blocked`로 노출된다.

@@ -34,7 +34,9 @@ pub(super) fn execute_intent(runtime: &mut CliRuntime, intent: &RunTemplate) -> 
                 )
             },
         );
-    let (execution, verification, repair, write_checkpoint) = if let Some(guard) = pre_execution_guard {
+    let (execution, verification, repair, write_checkpoint) = if let Some(guard) =
+        pre_execution_guard
+    {
         (guard.0, guard.1, guard.2, false)
     } else {
         runtime.compose_state.prepare_execution_workspace(&run_id)?;
@@ -105,11 +107,12 @@ pub(super) fn execute_intent(runtime: &mut CliRuntime, intent: &RunTemplate) -> 
     if let Some(warning) = committed.memory_warning {
         eprintln!("{warning}");
     }
+    let snapshot_written = persist_snapshot.is_some();
     runtime.pending_run = persist_snapshot.and_then(|snapshot| snapshot.pending_run);
     if let Some((stage, message)) = first_failure
         && finalized.record.outcome != RuntimeRunOutcome::BudgetExhausted
     {
-        runtime.restore_snapshot(previous);
+        restore_runtime_after_failed_commit(runtime, previous, snapshot_written)?;
         return Err(format!(
             "runtime execution failed intent_id={} stage={} error={}",
             applied.intent_id, stage, message
@@ -119,7 +122,7 @@ pub(super) fn execute_intent(runtime: &mut CliRuntime, intent: &RunTemplate) -> 
         finalized.record.outcome,
         RuntimeRunOutcome::Failed | RuntimeRunOutcome::Aborted
     ) {
-        runtime.restore_snapshot(previous);
+        restore_runtime_after_failed_commit(runtime, previous, snapshot_written)?;
         return Err(format!(
             "runtime execution failed intent_id={} stage=run error={}",
             applied.intent_id, finalized.record.reason
@@ -132,6 +135,7 @@ pub(super) fn execute_intent(runtime: &mut CliRuntime, intent: &RunTemplate) -> 
 }
 
 pub(super) fn execute_resume(runtime: &mut CliRuntime, target: &str) -> Result<(), String> {
+    let previous = runtime.runtime_snapshot();
     let started_at = Instant::now();
     let pending = pending_resume_for_target(runtime, target)?.clone();
     runtime
@@ -169,6 +173,27 @@ pub(super) fn execute_resume(runtime: &mut CliRuntime, target: &str) -> Result<(
         },
     );
     finalized.record = lifecycle::apply_goal_elapsed_budget(&template, finalized.record);
+    let first_failure = finalized
+        .execution
+        .first_failure()
+        .map(|(stage, message)| (stage.to_owned(), message.to_owned()));
+    let persist_snapshot = if first_failure.is_some()
+        && finalized.record.outcome != RuntimeRunOutcome::BudgetExhausted
+    {
+        None
+    } else if matches!(
+        finalized.record.outcome,
+        RuntimeRunOutcome::Failed | RuntimeRunOutcome::Aborted
+    ) {
+        None
+    } else {
+        Some(RuntimeStateSnapshot {
+            state: runtime.state.clone(),
+            next_intent_seq: runtime.next_intent_seq,
+            next_run_seq: runtime.next_run_seq,
+            pending_run: None,
+        })
+    };
     let report_input = report_write_input(&resume_applied);
     let committed = crate::run_commit::commit_prepared_run(
         &mut runtime.compose_state,
@@ -185,12 +210,7 @@ pub(super) fn execute_resume(runtime: &mut CliRuntime, target: &str) -> Result<(
             execution: finalized.execution,
             record: finalized.record,
             state: &runtime.state,
-            snapshot: Some(RuntimeStateSnapshot {
-                state: runtime.state.clone(),
-                next_intent_seq: runtime.next_intent_seq,
-                next_run_seq: runtime.next_run_seq,
-                pending_run: None,
-            }),
+            snapshot: persist_snapshot.clone(),
             apply_done_conditions: true,
             // resume always executes — no pre-execution guard path, so checkpoint is always written
             write_checkpoint: true,
@@ -200,7 +220,27 @@ pub(super) fn execute_resume(runtime: &mut CliRuntime, target: &str) -> Result<(
     if let Some(warning) = committed.memory_warning {
         eprintln!("{warning}");
     }
-    runtime.pending_run = None;
+    let snapshot_written = persist_snapshot.is_some();
+    runtime.pending_run = persist_snapshot.and_then(|snapshot| snapshot.pending_run);
+    if let Some((stage, message)) = first_failure
+        && finalized.record.outcome != RuntimeRunOutcome::BudgetExhausted
+    {
+        restore_runtime_after_failed_commit(runtime, previous, snapshot_written)?;
+        return Err(format!(
+            "runtime execution failed intent_id={} stage={} error={}",
+            pending.intent_id, stage, message
+        ));
+    }
+    if matches!(
+        finalized.record.outcome,
+        RuntimeRunOutcome::Failed | RuntimeRunOutcome::Aborted
+    ) {
+        restore_runtime_after_failed_commit(runtime, previous, snapshot_written)?;
+        return Err(format!(
+            "runtime execution failed intent_id={} stage=run error={}",
+            pending.intent_id, finalized.record.reason
+        ));
+    }
     println!(
         "resume run_id={} phase={} outcome={} reason={}",
         pending.run_id,
@@ -208,6 +248,18 @@ pub(super) fn execute_resume(runtime: &mut CliRuntime, target: &str) -> Result<(
         run_outcome_name(finalized.record.outcome),
         finalized.record.reason
     );
+    Ok(())
+}
+
+fn restore_runtime_after_failed_commit(
+    runtime: &mut CliRuntime,
+    previous: RuntimeStateSnapshot,
+    snapshot_written: bool,
+) -> Result<(), String> {
+    runtime.restore_snapshot(previous.clone());
+    if snapshot_written {
+        runtime.state_store.save_snapshot(&previous)?;
+    }
     Ok(())
 }
 

@@ -1,80 +1,74 @@
 # IMPLEMENTATION-PLAN
 
-## 목표
+## 범위 계약
 
-- PLANNING_GOAL: 정적 코드 검토에서 아직 유효한 release blocker와 contract mismatch를 정리해, 현재 `main` 기준 제품 의미를 깨지 않고 출하 가능성 판단이 가능한 상태로 만든다.
-- TARGET_SCOPE: repo
+- REQUEST: `7037552` 기준 남은 release blocker와 contract mismatch를 코드와 문서 양쪽에서 닫는다.
+- TARGET_SCOPE:
+  - `crates/apps/src/run_commit.rs`
+  - `crates/apps/src/cli_runtime/run_session.rs`
+  - `crates/apps/src/cli_runtime/lifecycle.rs`
+  - `crates/apps/src/runtime_compose.rs`
+  - `crates/apps/src/runtime_compose/plan.rs`
+  - `crates/core/src/intent.rs`
+  - `crates/core/src/workflow_pack.rs`
+  - `crates/apps/src/goal_file.rs`
+  - `docs/WORKFLOW_PACK_CONTRACT.md`
+  - `docs/RUNBOOK.md`
+  - `docs/CAPABILITY_MATRIX.md`
+  - `README.md`
+- DONE_CONDITION:
+  - commit 경계 실패 시 checkpoint/report/rollback/patch/trace/state가 부분 반영되지 않는다.
+  - `resume` 실패가 `run`과 같은 수준으로 프로세스 실패로 승격된다.
+  - verifier command 계약이 planner, pack validation, executor에서 같은 validator를 쓴다.
+  - `file_exists` / `path_changed` evidence는 workspace-relative 규칙을 parse 단계에서 강제한다.
+  - 문서 truth가 현재 구현과 다시 일치한다.
 
-## 완료 조건
+## 설계 요약
 
-- checkpoint / report / trace / snapshot failure path에서 orphan evidence가 남지 않는다.
-- verifier command 계약이 plan/parser/executor에서 같은 모델을 사용한다.
-- `path_changed` done-condition이 문자열 prefix가 아니라 경로 의미로 판정된다.
-- non-Unix `workspace_lock` 보장이 실제 구현으로 닫힌다.
-- report/display/docs에 남은 작은 contract drift(`changed_files` 중복, stale bridge/pack 표현 등)가 제거된다.
-
-## 제약
-
-- 현재 `main`의 제품 의미가 기준이다.
-- 이미 정리된 surface(`single-agent`, retained CLI, typed done-condition, core-owned workflow pack)는 되돌리지 않는다.
-- 기능 확장보다 contract hardening을 우선한다.
-- plan 단계에서는 구현하지 않는다.
-
-## 핵심 결정
-
-- Critical path: `commit boundary 정리 → verifier command contract 정리 → path semantics 정리 → cross-platform workspace lock 구현 → report/docs cleanup → release verification`
-- Out of scope:
-  - multi-agent, orchestrator, 새 CLI surface
-  - 장기 memory/platform 확장
-  - 미관 위주의 문서 재작성
-- 위험:
-  - commit integrity 수정 시 run/resume/abort 흐름이 함께 흔들릴 수 있음
-  - verifier contract 축소 시 example/fixture/doc 동기화 범위가 넓음
-
-## 결정 게이트
-
-| Gate | Check | Pass Condition | On Fail |
-|---|---|---|---|
-| G1 | checkpoint lifecycle 방식 | checkpoint 생성이 commit pipeline 안으로 들어가거나, 실패 cleanup이 checkpoint까지 완전 복구 | `run_session`/`run_commit` 구조부터 다시 설계 |
-| G2 | verifier contract 방식 | strong verifier path가 structured command 하나의 모델로 고정 | default derivation 범위를 더 좁히고 weak fallback로 강등 |
-| G3 | non-Unix lock 정책 | cross-platform stale detection이 구현되고 Unix/non-Unix 모두 같은 operator contract를 가진다 | process probe 전략을 추상화하고 fail-closed fallback을 유지 |
+- `run_commit`은 필요한 파일이 아니라, `run` / `resume` / `abort`가 공통으로 쓰는 persistence boundary다.
+  이 경계가 있어야 report, checkpoint, rollback, trace, snapshot, memory summary를 한 곳에서 같은 순서와 같은 rollback 규칙으로 처리할 수 있다.
+- 현재 문제는 경계의 존재가 아니라 경계 완결성이다.
+  특히 rollback metadata 작성 실패와 trace/state 저장 실패에서 cleanup 대상이 불완전하다.
+- `resume`은 문서상 core capability이며 `run`과 같은 failure propagation을 가져야 한다.
+  현재는 결과를 출력한 뒤 `Ok(())`로 끝나서 제품 의미와 충돌한다.
+- goal evidence와 verifier command는 모두 "workspace-bound single-agent kernel" 원칙을 따라야 한다.
+  현재는 타입과 validator가 느슨해서 parse 시점보다 실행 시점에 늦게 거부되는 경로가 남아 있다.
 
 ## 구현 순서
 
-1. commit boundary와 cleanup 경로를 정리한다.
-2. verifier command contract를 structured model로 통일한다.
-3. `path_changed` 판정을 path-aware 로직으로 바꾼다.
-4. `workspace_lock`의 non-Unix 보장을 실제 구현으로 닫고 문서/테스트를 맞춘다.
-5. report/display/docs의 잔여 drift를 제거한다.
-6. release gate 기준 검증 묶음으로 마감한다.
+1. commit boundary를 transaction 성격으로 다시 묶는다.
+2. `resume` failure propagation을 `run`과 대칭으로 맞춘다.
+3. verifier command validator를 공용화한다.
+4. workspace-relative evidence type을 도입하고 goal parse를 fail-closed로 바꾼다.
+5. workflow pack validation을 runtime enforcement 수준으로 끌어올린다.
+6. Windows lock recovery와 문서 truth를 하나로 맞춘다.
 
-## 검증 전략
+## 위험과 대응
 
-- 명령:
-  - `cargo test -p axiomrunner_apps --test release_security_gate`
-  - `cargo test -p axiomrunner_apps --test autonomous_eval_corpus`
-  - `cargo test -p axiomrunner_apps --test fault_path_suite`
-  - `cargo test -p axiomrunner_apps --test nightly_dogfood_contract`
-- 파일:
-  - `crates/apps/src/run_commit.rs`
-  - `crates/apps/src/cli_runtime/run_session.rs`
-  - `crates/apps/src/runtime_compose/plan.rs`
-  - `crates/apps/src/cli_runtime/lifecycle.rs`
-  - `crates/apps/src/workspace_lock.rs`
-  - `crates/apps/src/runtime_compose/artifacts.rs`
-- 운영 증거:
-  - report/trace/checkpoint/rollback failure path 일관성
-  - release security gate 통과
+- commit 정리 중 trace/state rollback 순서가 바뀌면 `replay` 가시성이 깨질 수 있다.
+  대응: artifact/trace/state failure path를 각각 단위 테스트로 잠근다.
+- verifier validator 공용화 시 기존 goal fixture 일부가 parse 단계에서 실패할 수 있다.
+  대응: pack fixture와 examples를 같이 점검하고 weak fallback로 숨기지 않는다.
+- workspace-relative type 도입 시 이미 절대경로를 쓰는 테스트/예제가 깨질 수 있다.
+  대응: parse error 메시지를 명확히 하고 docs 예시를 같이 갱신한다.
 
-## 열린 항목
+## 열린 결정
 
-- 없음. non-Unix stale lock은 구현으로 닫는 방향으로 확정됨.
+- [resolved] Windows stale recovery는 유지하고, 문서 truth를 현재 구현과 같은 의미로 맞췄다.
+- [resolved] 공용 verifier validator는 `adapters` 실행 policy를 공용 함수로 노출하고 `apps`가 재사용하는 구조로 고정했다.
+
+## Expanded Atomic Path
+
+- `$scout-boundaries`
+- `$plan-what-it-does`
+- `$plan-how-to-build`
+- `$plan-task-breakdown`
 
 ## 셀프 피드백
 
 - 좋은 점:
-  - critical path가 release blocker 순서와 맞다.
-  - 이미 정리된 제품 의미를 건드리지 않고 kernel hardening에 집중한다.
+  - 현재 blocker를 code path, contract path, docs path로 분리해 우선순위를 명확히 잡았다.
+  - 기능 추가 없이 retained kernel 의미를 강화하는 방향으로 범위를 제한했다.
 - 보완점:
-  - `T-001`과 `T-004`는 실패 정리/프로세스 생존 판정이 플랫폼별로 달라서 설계 메모를 먼저 짧게 남기는 편이 안전하다.
-  - `T-006`은 단순 테스트 통과가 아니라 orphan evidence가 없는지 artifact/trace까지 같이 보는 종료 기준이 필요하다.
+  - verifier command 공용 validator의 소유 크레이트는 구현 전에 한 번 더 결정해야 한다.
+  - Windows lock 항목은 코드 문제라기보다 truth lock 문제라서, 구현 전에 제품 기준을 먼저 고르는 편이 안전하다.

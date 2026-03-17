@@ -146,6 +146,13 @@ fn load_workflow_pack(
             goal_file_path
         )
     })?;
+    validate_loaded_workflow_pack(&pack).map_err(|error| {
+        format!(
+            "invalid workflow pack '{}' for goal file '{}': {error}",
+            resolved.display(),
+            goal_file_path
+        )
+    })?;
     Ok(pack)
 }
 
@@ -158,6 +165,28 @@ fn resolve_pack_path(goal_file_path: &str, pack_path: &str) -> PathBuf {
         .parent()
         .map(|parent| parent.join(&candidate))
         .unwrap_or(candidate)
+}
+
+fn validate_loaded_workflow_pack(pack: &WorkflowPackContract) -> Result<(), String> {
+    let allowlist = [
+        "pwd", "git", "cargo", "npm", "node", "python", "python3", "pytest", "rg", "ls", "cat",
+        "pnpm", "yarn", "uv", "make",
+    ]
+    .into_iter()
+    .map(str::to_owned)
+    .collect::<Vec<_>>();
+
+    for rule in &pack.verifier_rules {
+        axiomrunner_adapters::validate_run_command_policy(&rule.command.program, &allowlist)
+            .map_err(|error| {
+                format!(
+                    "verifier_rules.command label='{}' program='{}' error={error}",
+                    rule.label, rule.command.program
+                )
+            })?;
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -259,6 +288,58 @@ mod tests {
             .expect_err("invalid pack should fail closed");
         assert!(
             error.contains("parse workflow pack") || error.contains("invalid workflow pack"),
+            "error was: {error}"
+        );
+
+        let _ = fs::remove_file(goal_path);
+        let _ = fs::remove_file(pack_path);
+    }
+
+    #[test]
+    fn goal_file_rejects_workflow_pack_with_shell_verifier_command() {
+        let goal_path = unique_path("shell-pack-goal", "json");
+        let pack_path = unique_path("shell-pack-manifest", "json");
+        fs::write(
+            &pack_path,
+            r#"{
+  "pack_id": "bad-shell-pack",
+  "version": "1",
+  "entry_goal": "goal",
+  "recommended_verifier_flow": ["test"],
+  "allowed_tools": [{"operation": "run_command", "scope": "workspace"}],
+  "verifier_rules": [{
+    "label": "shell",
+    "profile": "test",
+    "command": { "program": "sh", "args": ["-lc", "pwd"] },
+    "artifact_expectation": "shell exits 0",
+    "required": true
+  }],
+  "approval_mode": "never"
+}"#,
+        )
+        .expect("pack manifest should be written");
+        fs::write(
+            &goal_path,
+            format!(
+                r#"{{
+  "summary": "Goal with invalid shell pack",
+  "workspace_root": "/workspace",
+  "constraints": [],
+  "done_conditions": [{{ "label": "report", "evidence": "report_artifact_exists" }}],
+  "verification_checks": [{{ "label": "build", "detail": "cargo build" }}],
+  "budget": {{ "max_steps": 5, "max_minutes": 10, "max_tokens": 8000 }},
+  "approval_mode": "never",
+  "workflow_pack": "{}"
+}}"#,
+                pack_path.display()
+            ),
+        )
+        .expect("goal file should be written");
+
+        let error = parse_goal_file_template(goal_path.to_str().expect("utf8 path"))
+            .expect_err("shell verifier pack should fail closed");
+        assert!(
+            error.contains("verifier_rules.command"),
             "error was: {error}"
         );
 

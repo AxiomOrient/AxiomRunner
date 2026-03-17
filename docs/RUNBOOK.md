@@ -115,7 +115,7 @@ minimal onboarding 순서: `doctor` → `run` → `status` → `replay` → `rep
 
 추가 규칙:
 - `remove_path`: 삭제 전 evidence artifact와 trace/report 설명이 남아야 한다.
-- `run_command`: allowlisted program만 실행. command artifact가 남아야 한다.
+- `run_command`: allowlisted program만 실행. 기본 제품 allowlist는 `pwd`, `git`, `cargo`, `npm`, `node`, `python`, `python3`, `pytest`, `rg`, `ls`, `cat`, `pnpm`, `yarn`, `uv`, `make` 이다. operator가 `--command-allowlist`로 더 좁힐 수 있다. command artifact가 남아야 한다.
 - `replace_in_file`: multi-match는 `expected_replacements`가 실제 count와 맞을 때만 허용.
 - `search_files`: unreadable file은 `skipped_files`로 노출.
 - `high` 작업은 approval policy 적용 시 기본 심사 대상.
@@ -129,8 +129,8 @@ minimal onboarding 순서: `doctor` → `run` → `status` → `replay` → `rep
 
 - mutating command(`run`, `resume`, `abort`)는 `.axiomrunner/runtime.lock`을 먼저 잡는다.
 - lock이 이미 있으면 새 mutating command는 즉시 중단.
-- Unix에서는 lock holder pid가 죽어 있으면 stale lock으로 보고 한 번 자동 정리 후 재시도한다.
-- 비-Unix에서는 stale 여부를 확정하지 않고 active로 본다.
+- Unix와 Windows에서는 lock holder pid가 죽어 있으면 stale lock으로 보고 한 번 자동 정리 후 재시도한다.
+- 그 외 플랫폼에서는 stale 여부를 확정하지 않고 active로 본다.
 - `status`, `replay`, `doctor`, `health`, `help`는 lock 없이 읽는다.
 - 자동 복구 불가 lock만 operator가 직접 확인 후 제거.
 

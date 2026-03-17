@@ -8,12 +8,12 @@ use crate::tool_workspace::{
     WorkspacePathError, canonicalize_workspace_root, collect_files_respecting_gitignore,
     resolve_workspace_path,
 };
-use axiomrunner_core::RunCommandProfile;
 use crate::tool_write::{
     CommandArtifact, PatchArtifact, WritePreparationError, atomic_overwrite, bounded_excerpt,
     bounded_unified_diff, digest_path, existing_digest, existing_utf8_contents,
     prepare_contents_for_existing_file, write_command_artifact, write_patch_artifact,
 };
+use axiomrunner_core::RunCommandProfile;
 use regex::Regex;
 use std::fs::{self, OpenOptions};
 use std::io::{self, Read, Write};
@@ -79,6 +79,27 @@ pub fn classify_run_command_class(program: &str) -> RunCommandClass {
     } else {
         RunCommandClass::External
     }
+}
+
+pub fn validate_run_command_policy(
+    program: &str,
+    allowlist: &[String],
+) -> Result<(), &'static str> {
+    if program.trim().is_empty() {
+        return Err("empty_program");
+    }
+    if is_forbidden_shell_program(program) {
+        return Err("shell_forbidden");
+    }
+    match classify_run_command_class(program) {
+        RunCommandClass::WorkspaceLocal => {}
+        RunCommandClass::Destructive => return Err("destructive_command_class"),
+        RunCommandClass::External => return Err("external_command_class"),
+    }
+    if !allowlist.iter().any(|allowed| allowed == program) {
+        return Err("command_not_allowlisted");
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone)]
@@ -486,20 +507,7 @@ impl WorkspaceTool {
     }
 
     fn run_command(&self, program: &str, args: &[String]) -> Result<ToolResult, ToolError> {
-        if program.trim().is_empty() {
-            return Err(ToolError::InvalidInput("run command program"));
-        }
-        if is_forbidden_shell_program(program) {
-            return Err(ToolError::CommandDenied {
-                program: program.to_owned(),
-            });
-        }
-        if !self
-            .policy
-            .command_allowlist
-            .iter()
-            .any(|allowed| allowed == program)
-        {
+        if validate_run_command_policy(program, &self.policy.command_allowlist).is_err() {
             return Err(ToolError::CommandDenied {
                 program: program.to_owned(),
             });

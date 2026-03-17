@@ -1,6 +1,6 @@
 use super::*;
-use axiomrunner_core::DoneConditionEvidence;
 use crate::runtime_compose::step_name;
+use axiomrunner_core::DoneConditionEvidence;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct FinalizedRun {
@@ -363,18 +363,19 @@ fn goal_done_condition_failure(
                 }
             }
             DoneConditionEvidence::FileExists { path } => {
-                let full_path = std::path::Path::new(&goal_file.goal.workspace_root).join(path);
+                let full_path =
+                    std::path::Path::new(&goal_file.goal.workspace_root).join(path.as_str());
                 let ok = full_path.is_file();
                 checks.push(format!(
                     "done_condition={} file_exists={} status={}",
                     condition.label,
-                    path,
+                    path.as_str(),
                     if ok { "present" } else { "missing" }
                 ));
                 if !ok {
                     return Some(crate::runtime_compose::runtime_run_reason(
                         "done_condition_missing_file",
-                        format!("{}:{}", condition.label, path),
+                        format!("{}:{}", condition.label, path.as_str()),
                     ));
                 }
             }
@@ -383,17 +384,19 @@ fn goal_done_condition_failure(
                     .patch_artifacts
                     .iter()
                     .chain(report_patch_artifacts.iter())
-                    .any(|artifact| path_matches_changed_target(&artifact.target_path, path));
+                    .any(|artifact| {
+                        path_matches_changed_target(&artifact.target_path, path.as_str())
+                    });
                 checks.push(format!(
                     "done_condition={} path_changed={} status={}",
                     condition.label,
-                    path,
+                    path.as_str(),
                     if ok { "present" } else { "missing" }
                 ));
                 if !ok {
                     return Some(crate::runtime_compose::runtime_run_reason(
                         "done_condition_path_not_changed",
-                        format!("{}:{}", condition.label, path),
+                        format!("{}:{}", condition.label, path.as_str()),
                     ));
                 }
             }
@@ -425,7 +428,10 @@ fn path_matches_changed_target(target_path: &str, expected_path: &str) -> bool {
     let expected = normalize_path_segments(expected_path);
     !expected.is_empty()
         && target.len() >= expected.len()
-        && target.iter().zip(expected.iter()).all(|(left, right)| left == right)
+        && target
+            .iter()
+            .zip(expected.iter())
+            .all(|(left, right)| left == right)
 }
 
 fn normalize_path_segments(path: &str) -> Vec<String> {
@@ -498,13 +504,7 @@ fn finalize_goal_run(
     compose: &crate::runtime_compose::RuntimeComposeHealth,
     approval_granted: bool,
     requested_max_tokens: usize,
-) -> (
-    RuntimeRunPhase,
-    RuntimeRunOutcome,
-    String,
-    String,
-    String,
-) {
+) -> (RuntimeRunPhase, RuntimeRunOutcome, String, String, String) {
     if let Some(reason) = goal_budget_guard_reason(goal_file, plan_ref, requested_max_tokens) {
         let (rendered, code, detail) = if let Some(detail) =
             reason.strip_prefix("budget_exhausted_before_execution_tokens:")
@@ -521,7 +521,13 @@ fn finalize_goal_run(
                 String::from("none"),
             )
         };
-        (RuntimeRunPhase::Blocked, RuntimeRunOutcome::BudgetExhausted, rendered, code, detail)
+        (
+            RuntimeRunPhase::Blocked,
+            RuntimeRunOutcome::BudgetExhausted,
+            rendered,
+            code,
+            detail,
+        )
     } else if goal_requires_pre_execution_approval(goal_file) && !approval_granted {
         let detail = verification
             .summary
@@ -540,7 +546,13 @@ fn finalize_goal_run(
     } else if verification.status == "passed" {
         let (rendered, code, detail) =
             crate::runtime_compose::runtime_run_reason("verification_passed", "none");
-        (RuntimeRunPhase::Completed, RuntimeRunOutcome::Success, rendered, code, detail)
+        (
+            RuntimeRunPhase::Completed,
+            RuntimeRunOutcome::Success,
+            rendered,
+            code,
+            detail,
+        )
     } else if matches!(
         verification.status,
         "verification_weak" | "verification_unresolved" | "pack_required"
@@ -548,12 +560,24 @@ fn finalize_goal_run(
         let rendered = verification.summary.clone();
         let code = String::from("verification_blocked");
         let detail = verification.summary.clone();
-        (RuntimeRunPhase::Blocked, RuntimeRunOutcome::Blocked, rendered, code, detail)
+        (
+            RuntimeRunPhase::Blocked,
+            RuntimeRunOutcome::Blocked,
+            rendered,
+            code,
+            detail,
+        )
     } else if verification.summary.starts_with("repair_budget_exhausted") {
         let rendered = verification.summary.clone();
         let code = String::from("repair_budget_exhausted");
         let detail = verification.summary.clone();
-        (RuntimeRunPhase::Blocked, RuntimeRunOutcome::BudgetExhausted, rendered, code, detail)
+        (
+            RuntimeRunPhase::Blocked,
+            RuntimeRunOutcome::BudgetExhausted,
+            rendered,
+            code,
+            detail,
+        )
     } else if applied.outcome == DecisionOutcome::Rejected {
         blocked_policy_outcome(applied)
     } else if matches!(execution.first_failure(), Some(("provider", _)))
@@ -561,12 +585,24 @@ fn finalize_goal_run(
     {
         let (rendered, code, detail) =
             crate::runtime_compose::runtime_run_reason("provider_health_blocked", "none");
-        (RuntimeRunPhase::Blocked, RuntimeRunOutcome::Blocked, rendered, code, detail)
+        (
+            RuntimeRunPhase::Blocked,
+            RuntimeRunOutcome::Blocked,
+            rendered,
+            code,
+            detail,
+        )
     } else {
         let rendered = verification.summary.clone();
         let code = String::from("verification_failed");
         let detail = verification.summary.clone();
-        (RuntimeRunPhase::Failed, RuntimeRunOutcome::Failed, rendered, code, detail)
+        (
+            RuntimeRunPhase::Failed,
+            RuntimeRunOutcome::Failed,
+            rendered,
+            code,
+            detail,
+        )
     }
 }
 
@@ -576,7 +612,13 @@ fn blocked_policy_outcome(
     let rendered = format!("policy={}", applied.policy_code.as_str());
     let code = String::from("blocked_by_policy");
     let detail = applied.policy_code.as_str().to_owned();
-    (RuntimeRunPhase::Blocked, RuntimeRunOutcome::Blocked, rendered, code, detail)
+    (
+        RuntimeRunPhase::Blocked,
+        RuntimeRunOutcome::Blocked,
+        rendered,
+        code,
+        detail,
+    )
 }
 
 fn goal_requires_pre_execution_approval(goal_file: &crate::cli_command::GoalFileTemplate) -> bool {

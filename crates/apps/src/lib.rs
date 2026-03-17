@@ -4,6 +4,7 @@ extern crate self as axiomrunner_apps;
 
 mod cli_args;
 mod cli_runtime;
+mod command_contract;
 mod config_loader;
 mod dev_guard;
 mod doctor;
@@ -13,8 +14,8 @@ mod operator_render;
 mod replay;
 mod run_commit;
 mod runtime_compose;
-mod storage;
 mod status;
+mod storage;
 mod workspace_lock;
 
 pub mod async_runtime_host;

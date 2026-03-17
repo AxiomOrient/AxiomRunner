@@ -1,5 +1,5 @@
 use crate::cli_command::RunTemplate;
-use axiomrunner_adapters::{RunCommandClass, classify_run_command_class, is_forbidden_shell_program};
+use crate::command_contract::{product_command_allowlist, validate_run_command_contract};
 use axiomrunner_core::{
     DecisionOutcome, RunCommandProfile, WorkflowPackAllowedTool, WorkflowPackContract,
     WorkflowPackVerifierCommand, WorkflowPackVerifierRule, WorkflowPackVerifierStrength,
@@ -363,9 +363,8 @@ fn derive_default_verifier_command(
 fn parse_command_detail(detail: &str) -> Option<(String, Vec<String>)> {
     let mut parts = tokenize_command_detail(detail)?;
     let program = parts.first()?.clone();
-    if is_forbidden_shell_program(&program)
-        || !matches!(classify_run_command_class(&program), RunCommandClass::WorkspaceLocal)
-    {
+    let allowlist = product_command_allowlist();
+    if validate_run_command_contract(&program, &allowlist).is_err() {
         return None;
     }
     let args = parts.split_off(1);
@@ -824,7 +823,10 @@ mod tests {
                 .map(|index| axiomrunner_core::DoneCondition {
                     label: format!("done-{index}"),
                     evidence: DoneConditionEvidence::FileExists {
-                        path: format!("evidence-{index}"),
+                        path: axiomrunner_core::WorkspaceRelativePath::parse(&format!(
+                            "evidence-{index}"
+                        ))
+                        .expect("relative path should parse"),
                     },
                 })
                 .collect(),

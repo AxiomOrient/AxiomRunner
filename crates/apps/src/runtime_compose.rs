@@ -1,5 +1,6 @@
 use crate::async_runtime_host::global_async_runtime_host;
 use crate::cli_command::RunTemplate;
+use crate::command_contract::effective_command_allowlist;
 use crate::config_loader::AppConfig;
 use crate::display::outcome_name;
 use crate::env_util::read_env_trimmed;
@@ -962,7 +963,7 @@ fn build_tool_adapter(
             max_search_results: TOOL_MAX_SEARCH_RESULTS,
             max_command_output_bytes: TOOL_MAX_COMMAND_OUTPUT_BYTES,
             command_timeout_ms,
-            command_allowlist: command_allowlist.unwrap_or_else(default_command_allowlist),
+            command_allowlist: effective_command_allowlist(command_allowlist.as_ref()),
         },
     )
     .map_err(|error| format!("tool adapter init failed: {error}"))
@@ -1371,20 +1372,6 @@ impl RepoDocStack {
     }
 }
 
-fn default_command_allowlist() -> Vec<String> {
-    vec![
-        String::from("pwd"),
-        String::from("git"),
-        String::from("cargo"),
-        String::from("npm"),
-        String::from("node"),
-        String::from("python3"),
-        String::from("rg"),
-        String::from("ls"),
-        String::from("cat"),
-    ]
-}
-
 fn parse_command_allowlist(raw: &str) -> Option<Vec<String>> {
     let values = raw
         .split(',')
@@ -1551,8 +1538,8 @@ mod tests {
     use crate::config_loader::AppConfig;
     use axiomrunner_adapters::{ToolAdapter, ToolRequest};
     use axiomrunner_core::{
-        DecisionOutcome, DoneCondition, DoneConditionEvidence, RunApprovalMode, RunBudget,
-        RunGoal, VerificationCheck,
+        DecisionOutcome, DoneCondition, DoneConditionEvidence, RunApprovalMode, RunBudget, RunGoal,
+        VerificationCheck,
     };
     use std::fs;
     use std::time::{Duration, SystemTime, UNIX_EPOCH};

@@ -11,7 +11,7 @@ pub use decision::DecisionOutcome;
 pub use intent::{
     DoneCondition, DoneConditionEvidence, DoneConditionEvidenceParseError, RunApprovalMode,
     RunBudget, RunConstraint, RunConstraintMode, RunConstraintPolicyKey, RunGoal,
-    RunGoalValidationError, VerificationCheck,
+    RunGoalValidationError, VerificationCheck, WorkspaceRelativePath, WorkspaceRelativePathError,
 };
 pub use policy_codes::PolicyCode;
 pub use state::{AgentState, ExecutionMode};
