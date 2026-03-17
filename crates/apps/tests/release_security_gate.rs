@@ -287,10 +287,7 @@ fn release_security_gate_bridge_docs_lock_autonomous_target_contract() {
     let workflow_pack = include_str!("../../../docs/WORKFLOW_PACK_CONTRACT.md");
 
     for token in ["run <goal>", "resume", "abort", "goal", "approval", "trace"] {
-        assert!(
-            bridge.contains(token),
-            "bridge docs missing token: {token}"
-        );
+        assert!(bridge.contains(token), "bridge docs missing token: {token}");
     }
 
     for token in [

@@ -1,7 +1,7 @@
 use axiomrunner_adapters::{
     FileMutationEvidence, FileWriteOutput, ListFilesOutput, ReadFileOutput, RemovePathOutput,
-    ReplaceInFileOutput, RunCommandOutput, SearchFilesOutput, SearchMatch, SearchMode,
-    ToolRequest, ToolResult,
+    ReplaceInFileOutput, RunCommandOutput, SearchFilesOutput, SearchMatch, SearchMode, ToolRequest,
+    ToolResult,
 };
 use axiomrunner_core::{
     RunCommandProfile, WorkflowPackAllowedTool, WorkflowPackContract, WorkflowPackVerifierCommand,

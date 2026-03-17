@@ -164,8 +164,14 @@ fn read_snapshot_file(path: &PathBuf) -> Result<RuntimeStateSnapshot, StateSnaps
 
 #[derive(Debug)]
 enum StateSnapshotError {
-    Read { path: PathBuf, source: std::io::Error },
-    Parse { path: PathBuf, detail: String },
+    Read {
+        path: PathBuf,
+        source: std::io::Error,
+    },
+    Parse {
+        path: PathBuf,
+        detail: String,
+    },
 }
 
 impl StateSnapshotError {
@@ -534,7 +540,9 @@ pending_run.verifier_state=736b6970706564
 
         let error =
             parse_snapshot(raw).expect_err("missing required pending run field should fail");
-        assert!(error.contains("pending run snapshot missing required field 'reason_code' on load"));
+        assert!(
+            error.contains("pending run snapshot missing required field 'reason_code' on load")
+        );
     }
 
     #[test]

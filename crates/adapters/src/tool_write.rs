@@ -192,10 +192,7 @@ pub(crate) struct CommandArtifact<'a> {
 }
 
 pub(crate) fn write_command_artifact(artifact: CommandArtifact<'_>) -> Result<PathBuf, io::Error> {
-    let command_dir = artifact
-        .artifact_root
-        .join(".axiomrunner")
-        .join("commands");
+    let command_dir = artifact.artifact_root.join(".axiomrunner").join("commands");
     fs::create_dir_all(&command_dir)?;
     let artifact_path = command_dir.join(format!(
         "{}-{}-{}.json",
